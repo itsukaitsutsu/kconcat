@@ -84,6 +84,7 @@ use host::{Host, Shell};
 use panes::Msg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
+use panes::import_captions::ImportCaptionsMsg;
 use panes::media_bin::MediaMsg;
 use panes::monitor::MonitorMsg;
 use panes::project::ProjectMsg;
@@ -1615,6 +1616,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_captions_begin(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Begin));
     }));
+    app.on_caption_import_project_start(on_window!(|state| {
+        state.handle(Msg::ImportCaptions(ImportCaptionsMsg::ProjectStart));
+    }));
+    app.on_caption_import_selected_clip(on_window!(|state| {
+        state.handle(Msg::ImportCaptions(ImportCaptionsMsg::SelectedClip));
+    }));
+    app.on_caption_import_cancel(on_window!(|state| {
+        state.handle(Msg::ImportCaptions(ImportCaptionsMsg::Cancel));
+    }));
     app.on_sections_closed(on_window!(|state| {
         state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Close));
     }));
@@ -1699,6 +1709,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                             None,
                             |studio, _, _, paths| {
                                 studio.handle(Msg::Media(MediaMsg::Import(paths)))
+                            },
+                        ),
+                        "import-captions" => host::pick_files_then(
+                            i18n::t("lib.importCaptions"),
+                            Some((i18n::t("lib.captionFiles"), &["srt", "vtt"])),
+                            |studio, _, _, paths| {
+                                studio.handle(Msg::ImportCaptions(
+                                    ImportCaptionsMsg::FilesPicked(paths),
+                                ));
                             },
                         ),
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),

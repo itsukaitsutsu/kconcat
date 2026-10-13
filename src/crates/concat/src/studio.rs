@@ -901,6 +901,7 @@ pub struct Studio {
     pub drop: Option<DropPlan>,
     pub project_sheet: crate::panes::project::ProjectPane,
     pub captions: crate::panes::captions::CaptionsPane,
+    pub caption_import: crate::panes::import_captions::ImportCaptionsPane,
     pub sections: crate::panes::sections::SectionsPane,
     pub speech: crate::panes::speech::SpeechPane,
     /// A file from the library lent the monitor and the speakers; see
@@ -2059,6 +2060,7 @@ impl Studio {
             drop: None,
             project_sheet: crate::panes::project::ProjectPane::default(),
             captions: crate::panes::captions::CaptionsPane::default(),
+            caption_import: crate::panes::import_captions::ImportCaptionsPane::default(),
             sections: crate::panes::sections::SectionsPane::default(),
             speech: crate::panes::speech::SpeechPane::default(),
             source: None,
@@ -7348,6 +7350,11 @@ impl Studio {
                 pane.update(msg, self);
                 self.captions = pane;
             }
+            crate::panes::Msg::ImportCaptions(msg) => {
+                let mut pane = std::mem::take(&mut self.caption_import);
+                pane.update(msg, self);
+                self.caption_import = pane;
+            }
             crate::panes::Msg::Sections(msg) => {
                 let mut pane = std::mem::take(&mut self.sections);
                 pane.update(msg, self);
@@ -9496,6 +9503,7 @@ impl Studio {
                 .collect(),
         );
         app.set_captions(self.captions.data(self));
+        app.set_caption_import(self.caption_import.data());
         app.set_sections(self.sections.data(self));
         let voices = installed(&self.settings.voices);
         sync(
@@ -9903,6 +9911,13 @@ impl Studio {
                     Glyph::Import,
                     &platform::keys(&["Control", "I"]),
                     true,
+                ),
+                row(
+                    "import-captions",
+                    t("studio.importCaptions"),
+                    Glyph::Import,
+                    "",
+                    self.session.is_some(),
                 ),
                 row(
                     "save",

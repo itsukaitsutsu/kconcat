@@ -16,6 +16,7 @@
 
 pub mod captions;
 pub mod export;
+pub mod import_captions;
 pub mod media_bin;
 pub mod monitor;
 pub mod project;
@@ -36,6 +37,8 @@ pub enum Msg {
     Settings(settings::SettingsMsg),
     /// To the captions sheet.
     Captions(captions::CaptionsMsg),
+    /// To the subtitle-import sheet.
+    ImportCaptions(import_captions::ImportCaptionsMsg),
     /// To the sections sheet.
     Sections(sections::SectionsMsg),
     /// To the speech sheet.
@@ -66,6 +69,7 @@ pub enum Msg {
 pub fn activity(msg: &Msg) -> Option<Activity> {
     use captions::CaptionsMsg;
     use export::ExportMsg;
+    use import_captions::ImportCaptionsMsg;
     use log::Level::{Debug, Info};
     use media_bin::MediaMsg;
     use monitor::MonitorMsg;
@@ -122,6 +126,36 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         }
         Msg::Captions(CaptionsMsg::Finished(Err(error))) => {
             return Some(Activity::once(Info, format!("captions: failed, {error}")));
+        }
+        Msg::ImportCaptions(ImportCaptionsMsg::FilesPicked(paths)) => {
+            let names: Vec<String> = paths
+                .iter()
+                .map(|path| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                })
+                .collect();
+            return Some(Activity::once(
+                Info,
+                format!(
+                    "caption import: {} file(s): {}",
+                    paths.len(),
+                    cap(&names.join(", "), 200)
+                ),
+            ));
+        }
+        Msg::ImportCaptions(ImportCaptionsMsg::Parsed { result: Ok(cues), .. }) => {
+            return Some(Activity::once(
+                Info,
+                format!("caption import: parsed {} cue(s)", cues.len()),
+            ));
+        }
+        Msg::ImportCaptions(ImportCaptionsMsg::Parsed { result: Err(error), .. }) => {
+            return Some(Activity::once(
+                Info,
+                format!("caption import: failed, {error}"),
+            ));
         }
         Msg::Speech(SpeechMsg::Begin) => {
             return Some(Activity::once(Info, "speech: started".to_owned()));

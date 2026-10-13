@@ -27,6 +27,7 @@ import { ProjectDialog, ProjectSheetData } from "dialogs/project.slint";
 import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
+import { CaptionImportData, CaptionImportDialog } from "dialogs/caption-import.slint";
 import { SectionRowData, SectionsDialog, SectionsSheetData } from "dialogs/sections.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
@@ -63,7 +64,7 @@ export {
     SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData, SectionRowData, SectionsSheetData,
+    CaptionsSheetData, SpeechSheetData, CaptionImportData, SectionRowData, SectionsSheetData,
 }
 
 export component App inherits Window {
@@ -298,6 +299,11 @@ export component App inherits Window {
     callback captions-size-changed(index: int);
     callback captions-begin();
     callback captions-cancel();
+
+    in property <CaptionImportData> caption-import;
+    callback caption-import-project-start();
+    callback caption-import-selected-clip();
+    callback caption-import-cancel();
 
     in property <SectionsSheetData> sections;
     callback sections-closed();
@@ -848,6 +854,18 @@ export component App inherits Window {
         size-changed(index) => { root.captions-size-changed(index); }
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
+    }
+
+    CaptionImportDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        data: root.caption-import;
+
+        project-start => { root.caption-import-project-start(); }
+        selected-clip => { root.caption-import-selected-clip(); }
+        cancel => { root.caption-import-cancel(); }
     }
 
     SectionsDialog {

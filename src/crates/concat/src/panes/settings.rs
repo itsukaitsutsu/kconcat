@@ -116,6 +116,8 @@ pub struct ModelState {
     pub accuracy: i32,
     pub installed: bool,
     pub active: bool,
+    /// Whether Concat manages download/removal for this model.
+    pub managed: bool,
     /// Megabytes fetched so far while a download runs.
     pub fetched: Option<f32>,
     pub unpacking: bool,
@@ -134,6 +136,7 @@ impl ModelState {
             accuracy: self.accuracy,
             installed: self.installed,
             active: self.active && self.installed,
+            managed: self.managed,
             downloading: self.fetched.is_some(),
             progress: if total > 0.0 {
                 (fetched / total).min(1.0)
@@ -756,11 +759,14 @@ impl SettingsPane {
                                 2
                             } else if model.id.starts_with("base") {
                                 3
+                            } else if model.id == "large-v3" {
+                                5
                             } else {
                                 4
                             },
                             installed: model.downloaded,
                             active: chosen_transcriber.as_deref() == Some(model.id.as_str()),
+                            managed: model.managed,
                             fetched,
                             unpacking,
                         }
@@ -788,6 +794,7 @@ impl SettingsPane {
                         accuracy: if model.id.contains("int8") { 4 } else { 5 },
                         installed: model.downloaded,
                         active: chosen_voice.as_deref() == Some(model.id.as_str()),
+                        managed: true,
                         fetched,
                         unpacking,
                     }
@@ -1012,6 +1019,7 @@ mod tests {
             accuracy: 3,
             installed: false,
             active: true,
+            managed: true,
             fetched: Some(50.0),
             unpacking: false,
         };
@@ -1031,6 +1039,7 @@ mod tests {
             accuracy: 1,
             installed,
             active: false,
+            managed: true,
             fetched: None,
             unpacking: false,
         };

@@ -416,7 +416,7 @@ fn source_label(name: &str, start: f64) -> String {
 
 /// One caption as a title clip: its words, when and for how long, its look,
 /// and - for a caption transcribed from a clip's voice - its word timings.
-fn caption_clip(
+pub(crate) fn caption_clip(
     text: String,
     start: f64,
     duration: f64,

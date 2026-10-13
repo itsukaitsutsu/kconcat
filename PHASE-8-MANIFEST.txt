@@ -1,4 +1,14 @@
 kconcat Phase 8 source overlay
 Base commit: 85ee8bf0ca2b036d9bc96b81d125921a66be7b87
 Extract into the repository root (the folder containing src/).
-See README-PHASE-8.md and CHECKPOINT-PHASE-8.md.
+This is a source overlay, not a full checkout, installer, or compiled build.
+See README-PHASE-8.md and CHECKPOINT-PHASE-8.md for scope and verification.
+
+Included changes:
+- Sections card list and clip timeline strip.
+- Configurable shared Whisper model folder with VTS Windows default.
+- Detection and local-only selection of VTS large-v3-turbo / large-v3 files.
+- SRT/WebVTT import to editable caption clips with project-time or selected-clip alignment.
+- Tests and English UI strings.
+
+Latest local-model/caption-import changes have not been compiled or tested on Windows.

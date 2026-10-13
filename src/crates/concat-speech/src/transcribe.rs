@@ -30,8 +30,8 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 use crate::DownloadProgress;
 
-/// One downloadable Whisper model. Sizes are approximate, for progress bars
-/// when the server declines to send a Content-Length.
+/// A downloadable Concat model or a local-only model supplied by another app.
+/// Sizes are approximate, for progress bars when the server declines to send a Content-Length.
 struct KnownModel {
     id: &'static str,
     label: &'static str,
@@ -40,63 +40,87 @@ struct KnownModel {
     approx_bytes: u64,
     /// What the finished file must hash to; a download with nothing to
     /// check against is refused. See [`concat_host::models`].
-    sha256: &'static str,
+    sha256: Option<&'static str>,
     english_only: bool,
+    /// Managed by Concat (download/remove) versus supplied by another app.
+    managed: bool,
 }
 
-/// The models the settings panel offers, fastest first.
-///
-/// All from the official `ggerganov/whisper.cpp` conversions. Nothing bigger
-/// than `small`: `medium` is 1.5 GB and minutes-per-minute on CPU, which is
-/// the opposite of what this feature is for.
+/// Models the settings panel can use, fastest first. Concat manages downloads
+/// through `small`; the two large models are local-only because they can be
+/// slow and memory-hungry, and are offered here to reuse VTS's existing files.
 const KNOWN_MODELS: &[KnownModel] = &[
     KnownModel {
         id: "tiny.en",
         label: "Tiny (English)",
         blurb: "Fastest draft. Rough on names and punctuation.",
         approx_bytes: 77_704_715,
-        sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+        sha256: Some("921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"),
         english_only: true,
+        managed: true,
     },
     KnownModel {
         id: "tiny",
         label: "Tiny (Multilingual)",
         blurb: "Fastest draft, any language.",
         approx_bytes: 77_691_713,
-        sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+        sha256: Some("be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
         english_only: false,
+        managed: true,
     },
     KnownModel {
         id: "base.en",
         label: "Base (English)",
         blurb: "The sweet spot: solid captions at ~10x realtime.",
         approx_bytes: 147_964_211,
-        sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+        sha256: Some("a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"),
         english_only: true,
+        managed: true,
     },
     KnownModel {
         id: "base",
         label: "Base (Multilingual)",
         blurb: "Solid captions, any language.",
         approx_bytes: 147_951_465,
-        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        sha256: Some("60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
         english_only: false,
+        managed: true,
     },
     KnownModel {
         id: "small.en",
         label: "Small (English)",
         blurb: "Noticeably better wording; a few times slower.",
         approx_bytes: 487_614_201,
-        sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+        sha256: Some("c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"),
         english_only: true,
+        managed: true,
     },
     KnownModel {
         id: "small",
         label: "Small (Multilingual)",
         blurb: "Best quality offered, any language.",
         approx_bytes: 487_601_967,
-        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        sha256: Some("1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"),
         english_only: false,
+        managed: true,
+    },
+    KnownModel {
+        id: "large-v3-turbo",
+        label: "Large v3 Turbo (Multilingual)",
+        blurb: "Local VTS model only. Higher memory use; faster than Large v3.",
+        approx_bytes: 1_620_000_000,
+        sha256: None,
+        english_only: false,
+        managed: false,
+    },
+    KnownModel {
+        id: "large-v3",
+        label: "Large v3 (Multilingual)",
+        blurb: "Local VTS model only. Highest quality; very high memory use.",
+        approx_bytes: 3_100_000_000,
+        sha256: None,
+        english_only: false,
+        managed: false,
     },
 ];
 
@@ -157,6 +181,8 @@ pub struct ModelStatus {
     pub size_bytes: u64,
     /// Whether the file is on disk.
     pub downloaded: bool,
+    /// Whether Concat may download and remove the file, or it is externally managed.
+    pub managed: bool,
 }
 
 /// What the settings panel shows.
@@ -265,6 +291,7 @@ impl Transcriber {
                     english_only: model.english_only,
                     size_bytes: model.approx_bytes,
                     downloaded: dir.join(format!("ggml-{}.bin", model.id)).is_file(),
+                    managed: model.managed,
                 })
                 .collect(),
         })
@@ -282,12 +309,22 @@ impl Transcriber {
         id: &str,
         mut progress: impl FnMut(DownloadProgress),
     ) -> Result<(), String> {
+        let model = known(id).ok_or_else(|| format!("unknown model {id:?}"))?;
+        if !model.managed {
+            return Err(format!(
+                "{} is a local-only model; use the existing file in the selected Whisper folder",
+                model.label
+            ));
+        }
+        let sha256 = model
+            .sha256
+            .ok_or_else(|| format!("no download digest is configured for {}", model.id))?;
         let job = self.downloads.begin("model download")?;
         let destination = model_file(dirs, id)?;
         if destination.is_file() {
             return Ok(());
         }
-        let estimate = known(id).map(|model| model.approx_bytes).unwrap_or(0);
+        let estimate = model.approx_bytes;
         let partial = destination.with_extension("bin.part");
         let (received, total) = crate::fetch_model(
             &model_archive(id),
@@ -295,7 +332,7 @@ impl Transcriber {
             &partial,
             id,
             estimate,
-            known(id).map(|model| model.sha256).unwrap_or(""),
+            sha256,
             job.cancel_flag(),
             &mut progress,
         )?;
@@ -318,6 +355,13 @@ impl Transcriber {
 
     /// Removes a downloaded model file, unless a transcription is using it.
     pub fn delete_model(&self, dirs: &AppDirs, id: &str) -> Result<(), String> {
+        let model = known(id).ok_or_else(|| format!("unknown model {id:?}"))?;
+        if !model.managed {
+            return Err(format!(
+                "{} is supplied by the shared Whisper folder and cannot be removed here",
+                model.label
+            ));
+        }
         let file = model_file(dirs, id)?;
         let mut loaded = self.model.try_lock().map_err(|_| {
             "a transcription is running - wait for it or cancel it first".to_owned()
@@ -646,7 +690,7 @@ mod tests {
 
     #[test]
     fn every_known_model_is_asked_of_the_mirror_before_upstream() {
-        for model in KNOWN_MODELS {
+        for model in KNOWN_MODELS.iter().filter(|model| model.managed) {
             let file = model_archive(model.id);
             assert_eq!(file, format!("ggml-{}.bin", model.id));
             assert!(model_upstream(model.id).ends_with(&file));
@@ -671,6 +715,34 @@ mod tests {
     }
 
     #[test]
+    fn local_vts_models_cannot_be_downloaded_or_removed_by_concat() {
+        let scratch = std::env::temp_dir().join(format!(
+            "concat-whisper-local-only-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let selected = scratch.join("shared").join("whisper-models");
+        std::fs::create_dir_all(&selected).expect("shared model folder");
+        let file = selected.join("ggml-large-v3-turbo.bin");
+        std::fs::write(&file, b"model").expect("model file");
+        let dirs = AppDirs {
+            whisper_models: Some(selected),
+            ..AppDirs::under(&scratch)
+        };
+        let transcriber = Transcriber::new();
+        assert!(transcriber
+            .download_model(&dirs, "large-v3-turbo", |_| {})
+            .unwrap_err()
+            .contains("local-only"));
+        assert!(transcriber
+            .delete_model(&dirs, "large-v3-turbo")
+            .unwrap_err()
+            .contains("cannot be removed"));
+        assert!(file.is_file(), "the shared VTS model remains untouched");
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
     fn status_uses_the_selected_shared_models_directory() {
         let scratch = std::env::temp_dir().join(format!(
             "concat-whisper-shared-test-{}",
@@ -680,6 +752,10 @@ mod tests {
         let selected = scratch.join("shared").join("whisper-models");
         std::fs::create_dir_all(&selected).expect("shared model folder");
         std::fs::write(selected.join("ggml-base.bin"), b"model").expect("model file");
+        std::fs::write(selected.join("ggml-large-v3-turbo.bin"), b"model")
+            .expect("turbo model file");
+        std::fs::write(selected.join("ggml-large-v3.bin"), b"model")
+            .expect("large model file");
         let dirs = AppDirs {
             whisper_models: Some(selected.clone()),
             ..AppDirs::under(&scratch)
@@ -687,6 +763,15 @@ mod tests {
         let status = Transcriber::status(&dirs).expect("status");
         assert_eq!(status.models_dir, selected.to_string_lossy().into_owned());
         assert!(status.models.iter().any(|model| model.id == "base" && model.downloaded));
+        for id in ["large-v3-turbo", "large-v3"] {
+            let model = status
+                .models
+                .iter()
+                .find(|model| model.id == id)
+                .expect("VTS model is listed");
+            assert!(model.downloaded, "{id} should be detected in the shared folder");
+            assert!(!model.managed, "{id} is local-only and must not be removable");
+        }
         let _ = std::fs::remove_dir_all(&scratch);
     }
 }

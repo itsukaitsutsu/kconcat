@@ -32,6 +32,8 @@ export struct ModelData {
     installed: bool,
     /// the one this engine will use
     active: bool,
+    /// whether Concat may download or remove this model
+    managed: bool,
     downloading: bool,
     /// 0..1
     progress: float,
@@ -239,14 +241,14 @@ component ModelRow inherits Rectangle {
                     clicked => { root.cancel(); }
                 }
 
-                if !root.model.downloading && root.model.installed: Button {
+                if !root.model.downloading && root.model.installed && root.model.managed: Button {
                     label: I18n.t("common.remove");
                     glyph: Glyph.trash;
                     danger: true;
                     clicked => { root.remove(); }
                 }
 
-                if !root.model.downloading && !root.model.installed: Button {
+                if !root.model.downloading && !root.model.installed && root.model.managed: Button {
                     label: I18n.t("settings.download");
                     glyph: Glyph.import;
                     clicked => { root.download(); }

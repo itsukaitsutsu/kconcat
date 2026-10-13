@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, Modal } from "../primitives/modal.slint";
+
+/// State for importing one or more SRT/WebVTT files.
+export struct CaptionImportData {
+    open: bool,
+    files: string,
+    selected-clip: string,
+    selected-clip-available: bool,
+    loading: bool,
+    message: string,
+}
+
+/// Choose which clock the subtitle timestamps use before creating captions.
+export component CaptionImportDialog inherits Modal {
+    in property <CaptionImportData> data;
+
+    callback project-start();
+    callback selected-clip();
+    callback cancel();
+
+    open: root.data.open;
+    title: I18n.t("captionImport.title");
+    glyph: Glyph.import;
+    surface-width: 520px;
+    surface-height: 300px;
+    dismissable: !root.data.loading;
+
+    closed => { root.cancel(); }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: I18n.t1("captionImport.files", "\{root.data.files}");
+            color: Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: I18n.t("captionImport.chooseTimebase");
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.data.selected-clip-available: Text {
+            text: I18n.t1("captionImport.selectedClipName", "\{root.data.selected-clip}");
+            color: Theme.fg-dim;
+            font-family: Theme.font-technical;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+
+        if !root.data.selected-clip-available: Text {
+            text: I18n.t("captionImport.selectClipFirst");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+
+        if root.data.message != "": Text {
+            text: root.data.message;
+            color: root.data.loading ? Theme.fg-muted : Theme.danger;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: I18n.t("captionImport.projectStart");
+                glyph: Glyph.rows;
+                enabled: !root.data.loading;
+                clicked => { root.project-start(); }
+            }
+
+            Button {
+                label: I18n.t("captionImport.selectedClipAction");
+                glyph: Glyph.film;
+                primary: true;
+                enabled: root.data.selected-clip-available && !root.data.loading;
+                clicked => { root.selected-clip(); }
+            }
+
+            Button {
+                label: I18n.t("common.cancel");
+                ghost: true;
+                enabled: !root.data.loading;
+                clicked => { root.cancel(); }
+            }
+        }
+    }
+}
