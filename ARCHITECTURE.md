@@ -593,6 +593,7 @@ the Slint tree none.
 | the export loop | `concat-export/src/lib.rs` (`render_on`), `resolve.rs` |
 | the monitor | `concat-host/src/preview.rs`, `concat/src/panes/monitor.rs` |
 | a sheet or a pane | `concat/src/panes/<name>.rs` and `concat/ui/` |
+| captions, follow-edits, autotrim, karaoke | `concat-project/src/captionmap.rs`, `commands/`, `sectionlist.rs`; `concat-speech/src/transcribe.rs`; `concat-text` (`render_highlight_frame`); `concat-host/src/titles.rs` (`highlights`, `window_animation`) |
 | the gestures, the clipboard | `concat/src/studio.rs` |
 | threads and dialogs in the window | `concat/src/host.rs` |
 | a platform difference | `concat/src/platform.rs` |
@@ -678,3 +679,67 @@ first, so that a tag can pass its gate; then the server's seats, fds and
 `stop`; then the document version for shapes; then the window's thread
 hygiene and i18n; then signing. After those, phase 4 of the HDR plan, a
 true HDR preview.
+
+## 16. Captions and karaoke
+
+What the caption work added, in the order it landed. Each piece has a
+phase README at the repo root (`README-PHASE-*.txt`) with its own file list
+and verify steps. The state below is the one the phase notes describe; the
+app-crate parts were not compiled in the sandbox, so the first real build
+is the owner's `cargo check -p concat`.
+
+- **Linked captions.** A caption is a text clip with `caption_of` set to the
+  clip whose voice it came from. Moving, trimming, rippling and splitting
+  that clip carries its captions with it (`concat-project`, Phases 1, 2, 4a).
+- **Silence and sections.** `concat-media`'s silence detector finds the
+  quiet stretches; `sectionlist` turns them into rows with keep switches,
+  and the sections panel shows them (Phases 3, 4b-1, 4b-2).
+- **Autotrim.** One undoable command, `AutotrimClip`, rebuilds a clip from
+  the sections it keeps, packing the pieces and their captions together
+  (Phase 5).
+- **Word timings.** Each caption carries its words with times on the
+  timeline clock, in `Clip.words`. First estimated from the caption's length
+  (6a); then replaced by the times whisper heard, from token timestamps,
+  when whisper gives them (6b). Estimates are the fallback, so a caption
+  always has timings.
+- **Karaoke highlight.** A word-timed caption with a highlight colour lights
+  each spoken word in that colour. Each word gets one overlay picture: the
+  whole caption with only that word painted in the accent, shown for that
+  word's window. The overlay copies the caption's place and track. Its
+  keyframed animation is cut to the word's window, so the lit word moves with
+  the caption (6c, 6c-3). The colour is `TextStyle.highlight_color`; voice
+  captions get `concat_project::model::DEFAULT_HIGHLIGHT` (6c).
+- **The inspector.** A "Spoken word" switch and a colour swatch sit in the
+  text panel's colour section, shown only for a caption. Off clears the
+  colour; on restores the default (6c-2, 6c-4).
+
+**Known limits, as the phase notes state them.**
+- Estimated word times (6a) light words too, and are less exact than heard
+  ones.
+- A language without spaces (Japanese, Chinese, Thai) comes back from whisper
+  as one word per run, so the highlight lights the whole run.
+- The live monitor paints one picture per word, at the monitor's size, into
+  a memory budget of about 512 MB. A long caption on a busy timeline may
+  repaint on each change. This is the first thing to measure.
+- The disk cache keeps 400 titles in all, and a long caption adds one per
+  word, so older pictures may be swept sooner and painted again.
+- Fades and transitions on the caption do not carry to the highlight. The
+  keyframe curve is sampled at 16 points across a word's window.
+- A caption made before 6c has no colour set. Its swatch shows the default,
+  but it does not light a word until a colour is picked.
+
+**Smoke test, run by the owner on a real video.** This is the Phase 7 check
+the sandbox cannot do:
+
+1. `cargo test -p concat-project` (237), `cargo test -p concat-text` (30),
+   `cargo test -p concat-core` (53).
+2. `cargo check -p concat-speech`, `cargo check -p concat-host`,
+   `cargo check -p concat`. Paste the first `error` block of any failure.
+3. Open a project with a voice clip. Run Captions on it. Check that each
+   word lights in yellow as it is said, and that gaps show the plain caption.
+4. Move the voice clip. The captions and their highlights should move with it.
+5. Trim it. Captions and highlights past the trim should go.
+6. Switch "Spoken word" off, then on. Change the colour. Give a caption a
+   fade-in, then play across it; the lit word should move with the caption.
+7. Undo each step. The document should return to its earlier state each time.
+8. Export. Check the exported file's captions and highlights by eye.

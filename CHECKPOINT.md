@@ -193,7 +193,12 @@ and continue. User handles all git commands themselves — deliverables are
      >>> USER: cargo test -p concat-core (53), cargo check -p concat-host;
          paste the first `error` verbatim. Then check a moving caption by
          eye. <<<
-6. Phase 7 LAST: full build+smoke with a real video, docs
+6. Phase 7 DELIVERED 2026-10-13 as `phase-7-finish-line.zip`: docs only.
+   ARCHITECTURE.md section 16 (captions and karaoke, limits, smoke test) and
+   one row in "Where to look". No code. The smoke test (section 16 steps 1-8)
+   is the owner's, on a real video.
+   >>> USER: run the smoke test; report the numbers and the first error. <<<
+   Phase 7 (original plan): full build+smoke with a real video, docs
    (README/ARCHITECTURE), optional upstream-tidy commits. After Phase
    7 the original VTS feature list is complete: linked captions,
    follow edits, silence detection, sections list, autotrim,
