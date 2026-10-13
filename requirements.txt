@@ -1,0 +1,108 @@
+# =============================================================================
+# Python requirements — VTS / Concat porting work
+# =============================================================================
+#
+# Concat itself needs NO Python: it is Rust, and everything it links (FFmpeg,
+# whisper.cpp, sherpa-onnx) is compiled in at build time. Python is needed for
+# three things around it, and each section below says which.
+#
+#   pip install -r requirements.txt
+#
+# Verified on Python 3.13.16. VTS itself wants 3.10+ (3.11 recommended).
+# Nothing here needs a compiler.
+#
+# For the *system* requirements to build and run Concat — Visual Studio Build
+# Tools, FFmpeg 7+ development libraries, cmake, LLVM/libclang, ONNX Runtime,
+# sherpa-onnx — see RUN-CONCAT-LOCAL.md. Those are not pip-installable.
+
+
+# -----------------------------------------------------------------------------
+# 1. Video Trim Studio — the app itself
+# -----------------------------------------------------------------------------
+# The local web server and its UI. ffmpeg.exe and ffprobe.exe must additionally
+# be on PATH; they are not Python packages.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+numpy>=1.24
+fonttools>=4.50
+
+
+# -----------------------------------------------------------------------------
+# 2. VTS auto-caption engine (optional, but this is the feature being ported)
+# -----------------------------------------------------------------------------
+# faster-whisper runs on CPU and NVIDIA CUDA only. It cannot use an AMD card —
+# for the RX 6600 XT the Vulkan path is whisper.cpp, which VTS drives as the
+# bundled tools/whisper-cli.exe and which needs no Python package at all.
+faster-whisper>=1.0
+
+# Word-level layouts in languages written without spaces. Without these,
+# Japanese and Chinese fall back to one character per word. Both work offline.
+#   Japanese, fast and mmap'd (~50 MB):
+sudachipy>=0.6
+sudachidict-core>=20240409
+#   Japanese, pure Python, no compiler:
+janome>=0.5
+#   Chinese:
+jieba>=0.42
+
+
+# -----------------------------------------------------------------------------
+# 3. Verifying the port — run VTS's own tests to check the Rust matches
+# -----------------------------------------------------------------------------
+# This is what was used to catch the one real bug in the Tranche A port: every
+# ported function was run against the Python original and the outputs compared.
+#
+#   cd VTS
+#   python -m pytest tests/test_segmenter.py tests/test_caption.py -q
+#
+# The pure-logic tests (test_segmenter, test_caption, test_timeline) need no
+# FFmpeg. The ones that shell out to ffprobe (test_pipeline, test_preview,
+# test_media_bin, test_export) do.
+pytest>=8
+httpx>=0.27
+pillow>=10
+
+
+# -----------------------------------------------------------------------------
+# 4. NLE interchange — verified working, all four adapters
+# -----------------------------------------------------------------------------
+# OpenTimelineIO is the timeline interchange format: build a cut timeline
+# outside the editor, hand it over as a file. This is the route that works on
+# DaVinci Resolve Free *and* Studio (File > Import Timeline > OpenTimelineIO),
+# and the safe fallback for a Premiere whose structural edits will not land.
+#
+# NOTE: the `opentimelineio` package alone ships only the native JSON adapters
+# (otio_json, otiod, otioz). The NLE formats are a separate package — this is
+# the step most people miss.
+opentimelineio==0.18.1
+OpenTimelineIO-Plugins>=0.18.1     # AAF, ale, burnins, cmx_3600, fcp_xml,
+                                   # maya_sequencer, svg, xges
+otio-fcpx-xml-adapter>=0.1         # fcpx_xml — Final Cut Pro X XML, which is
+                                   # what Premiere Pro and Resolve both import
+
+# After installing, this must print True for all four:
+#
+#   python -c "import opentimelineio as otio; a=set(otio.adapters.available_adapter_names()); \
+#              print(all(x in a for x in ['fcpx_xml','fcp_xml','cmx_3600','AAF']))"
+#
+# Confirmed output on 0.18.1:
+#   ['AAF', 'ale', 'burnins', 'cmx_3600', 'fcp_xml', 'fcpx_xml',
+#    'hls_playlist', 'maya_sequencer', 'otio_json', 'otiod', 'otioz', 'svg', 'xges']
+
+
+# -----------------------------------------------------------------------------
+# 5. Repo maintenance scripts (only if contributing to Concat itself)
+# -----------------------------------------------------------------------------
+# CONTRIBUTING.md requires these when a change touches UI strings or models;
+# CI checks both. They are plain scripts in the repository, not packages:
+#
+#   python3 scripts/locales.py          # after any change to interface text
+#   python3 scripts/models.py --check   # after adding a downloadable model
+#
+# scripts/locales.py crashes on a Windows console (cp1252) unless Python runs
+# with -X utf8 — a known issue named in ARCHITECTURE.md section 15:
+#
+#   python -X utf8 scripts/locales.py
+#
+# No extra dependencies beyond the standard library.

@@ -1,0 +1,2476 @@
+From 02d4e80b73cb4c5e622227ef91f9522637d265b1 Mon Sep 17 00:00:00 2001
+From: VTS port <vts-port@local>
+Date: Mon, 12 Oct 2026 22:50:09 +0000
+Subject: [PATCH] feat(project): sidecar subtitles, source sections, and cue
+ remapping
+
+Three pure modules, no I/O and no engine type in any signature, so a cue
+list can be read, cut, moved and written back with no project open and no
+media on disk.
+
+subtitle: SubRip and WebVTT in and out. One tolerant pass reads both,
+because they differ in their header and their decimal mark and in almost
+nothing else - a byte-order mark, CRLF, cue indices, a WEBVTT header
+carrying a title, NOTE/STYLE/REGION blocks, cue settings trailing the
+timing line, inline tags, and an MM:SS.mmm stamp with the hours left off
+all arrive in real files. Word timings do not survive this format, which
+is why captionmap exists.
+
+sections: the arithmetic a trim by content is made of. silence_spans
+reads the lines an FFmpeg silencedetect filter prints, including the last
+pause of a recording, which never prints its end; merge folds overlaps
+and adjacencies and can keep a pad of air at both ends of every cut;
+complement returns the kept ranges, which is the whole of a trim; and
+build_sections tiles the source into caption/silence/other pieces so what
+is about to be deleted can be read first. Boundaries come from both sets,
+so no piece is half silence and half speech.
+
+captionmap: a cue's words, and what a cut does to them. clean_words puts
+a recogniser's output into the shape everything downstream assumes -
+sorted, inside the cue, never overlapping a neighbour, punctuation riding
+on the word before it rather than standing alone - in any script, since
+the question is is_alphanumeric and not is_ascii_alphanumeric. remap
+moves a cue list through a cut: shifted by everything removed ahead of
+it, split where a cut went through one, joined again where the halves of
+one sentence landed back to back, gone where nothing was kept. The words
+travel with their cue and are clipped at the cut with it, so a reveal on
+the far side of a trim still lights the word being heard.
+
+215 tests in the crate, 101 of them new.
+
+Signed-off-by: VTS port <vts-port@local>
+---
+ src/crates/concat-project/src/captionmap.rs | 1086 +++++++++++++++++++
+ src/crates/concat-project/src/lib.rs        |    3 +
+ src/crates/concat-project/src/sections.rs   |  783 +++++++++++++
+ src/crates/concat-project/src/subtitle.rs   |  515 +++++++++
+ 4 files changed, 2387 insertions(+)
+ create mode 100644 src/crates/concat-project/src/captionmap.rs
+ create mode 100644 src/crates/concat-project/src/sections.rs
+ create mode 100644 src/crates/concat-project/src/subtitle.rs
+
+diff --git a/src/crates/concat-project/src/captionmap.rs b/src/crates/concat-project/src/captionmap.rs
+new file mode 100644
+index 0000000..3d58758
+--- /dev/null
++++ b/src/crates/concat-project/src/captionmap.rs
+@@ -0,0 +1,1086 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
++
++//! A cue's words, and what a cut does to them.
++//!
++//! A caption is not one thing but two: the words on screen, and the moment
++//! each of them is heard. The second is what a word-level layout, a karaoke
++//! reveal and a word editor all need, and it is what a cut puts in danger -
++//! a caption describes the *source*, so once spans of that source are gone
++//! the times on the cue no longer mean what they said.
++//!
++//! Two pieces, both pure:
++//!
++//! 1. [`clean_words`] takes whatever a recogniser emitted and returns words
++//!    that hold the invariants everything downstream assumes: sorted, inside
++//!    their cue, never overlapping a neighbour, with punctuation riding on
++//!    the word before it rather than standing alone.
++//! 2. [`remap`] moves a cue list through a cut. A cue inside a kept range is
++//!    shifted earlier by everything removed before it; a cue crossing a cut
++//!    is split into one piece per kept fragment; pieces that end up
++//!    back-to-back holding the same words are joined again, because a cut
++//!    *inside* one sentence should not leave two captions saying it; a cue
++//!    wholly inside a removed range disappears, which is the point.
++//!
++//! Word timings live nowhere else. Neither [`crate::subtitle`] nor a burned
++//! render can carry them, so this is the only place a word's own start and
++//! end survive an edit - and why a cue keeps [`Cue::word_source`] beside
++//! them, to say whether those times were heard or merely estimated.
++
++use serde::{Deserialize, Serialize};
++use serde_json::{Map, Value};
++
++use crate::sections::round_millis;
++
++/// How close two times may be and still count as the same time.
++const TOUCH: f64 = 1e-6;
++
++/// The shortest a word may be, in seconds. A word the recogniser gave no
++/// length to is still displayable and still editable, so it is padded rather
++/// than dropped.
++pub const MIN_WORD: f64 = 0.02;
++
++/// The floor a zero-length word is padded to. Slightly longer than
++/// [`MIN_WORD`] because it is the case where nothing was heard at all, and a
++/// word that flashes for under a frame reads as a glitch.
++const MIN_WORD_PAD: f64 = 0.03;
++
++/// The most words one cue may hold: a guard against a pathological run of
++/// one-word cues being merged by hand into something unreadable.
++pub const MAX_WORDS: usize = 200;
++
++/// The shortest fragment of a cue worth keeping after a cut, in seconds.
++/// Under it the piece would be on screen for less than a frame's worth of
++/// reading time, so it goes with the cut instead.
++pub const MIN_PIECE: f64 = 0.05;
++
++/// Where a cue's word times came from, which is what makes an estimate
++/// honest rather than a claim about the audio.
++#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
++#[serde(rename_all = "lowercase")]
++pub enum WordSource {
++    /// Heard: a recogniser with word-level output timed these.
++    Whisper,
++    /// Heard: the same, from a token-timestamp engine.
++    Whispercpp,
++    /// Not heard: spread across the cue by character weight, because a
++    /// subtitle file has no word times and a word layout still wants some.
++    Estimated,
++    /// The words were changed by hand, so the times are whatever they were
++    /// when the count last matched.
++    Edited,
++}
++
++/// One word, and the moment it is heard: seconds against the same clock as
++/// the cue that holds it.
++#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
++pub struct Word {
++    /// The word as it is displayed, punctuation included.
++    #[serde(rename = "w")]
++    pub text: String,
++    /// Seconds where the word begins.
++    #[serde(rename = "s")]
++    pub start: f64,
++    /// Seconds where it ends; after [`Word::start`], by at least
++    /// [`MIN_WORD`] once [`clean_words`] has been over it.
++    #[serde(rename = "e")]
++    pub end: f64,
++}
++
++/// One caption: the words on screen, when it is on screen, and when each
++/// word is heard.
++#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
++#[serde(rename_all = "camelCase")]
++pub struct Cue {
++    /// Seconds where the caption appears.
++    pub start: f64,
++    /// Seconds where it goes away.
++    pub end: f64,
++    /// The words as displayed, which is [`words`] joined - or, for a cue
++    /// that came from a file, all it has.
++    pub text: String,
++    /// Each word's own timing. Empty is legitimate: a cue from an SRT has
++    /// none, and a word layout then works from an estimate instead.
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub words: Vec<Word>,
++    /// Where those times came from, and so how much to trust them.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub word_source: Option<WordSource>,
++    /// A stable name for the cue, for a document that keeps one.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub id: Option<String>,
++    /// Which caption lane the cue sits on, for a document with more than one.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub track: Option<String>,
++    /// A look the cue carries of its own. Held as it arrived, because what
++    /// goes in it is the text crate's business and not this one's.
++    #[serde(default, skip_serializing_if = "is_empty_map")]
++    pub style: Map<String, Value>,
++}
++
++fn is_empty_map(map: &Map<String, Value>) -> bool {
++    map.is_empty()
++}
++
++impl From<Cue> for crate::subtitle::Cue {
++    /// The same cue with its words left behind, which is what a sidecar file
++    /// can carry.
++    fn from(cue: Cue) -> Self {
++        Self {
++            start: cue.start,
++            end: cue.end,
++            text: cue.text,
++        }
++    }
++}
++
++impl From<crate::subtitle::Cue> for Cue {
++    /// A cue from a file: the words and their span, and no timings inside it.
++    /// [`crate::sections`] and a word layout both work from here; the times
++    /// they use are estimates and say so.
++    fn from(cue: crate::subtitle::Cue) -> Self {
++        Self {
++            start: cue.start,
++            end: cue.end,
++            text: cue.text,
++            ..Self::default()
++        }
++    }
++}
++
++/// Whether a character is a letter or a digit in any script.
++///
++/// The question is never "is this ASCII" - a cue in Japanese, Arabic or Thai
++/// is made entirely of characters this has to say yes to, or every word in it
++/// would read as punctuation and be glued to the one before.
++fn is_alphanumeric(character: char) -> bool {
++    character.is_alphanumeric()
++}
++
++/// Puts words into the shape everything downstream assumes.
++///
++/// Accepts either spelling a recogniser uses, drops the empties, pads the
++/// ones that were given no length, clips to `[window_start, window_end]`
++/// when a window is given, glues a punctuation-only token onto the word
++/// before it, sorts by time, and then makes sure no two words share a slice
++/// of the timeline: the later one starts where the earlier ended.
++///
++/// That last rule is the one the rest of the file leans on. A word layout, a
++/// karaoke reveal and a word editor all ask "which word is being heard now",
++/// and the question has one answer only because the spans do not overlap.
++///
++/// Returns the words, and whether any of them changed - which is what turns
++/// a cue's [`WordSource`] into [`WordSource::Edited`] rather than leaving it
++/// claiming to be what the recogniser said.
++pub fn clean_words(
++    words: &[Word],
++    window_start: Option<f64>,
++    window_end: Option<f64>,
++) -> (Vec<Word>, bool) {
++    let mut out: Vec<Word> = Vec::with_capacity(words.len().min(MAX_WORDS));
++
++    for word in words {
++        let text = word.text.trim();
++        if text.is_empty() {
++            continue;
++        }
++        let mut start = word.start;
++        if !start.is_finite() {
++            continue;
++        }
++        // A word given no end, or an end before its start, is still a word:
++        // it is heard at `start` and padded, rather than dropped and taking
++        // its syllable out of the caption with it. An end that is not a
++        // number at all is not a word - padding it would put a caption on
++        // screen that never comes off.
++        let mut end = if word.end.is_finite() && word.end > start {
++            word.end
++        } else if word.end.is_finite() {
++            start + MIN_WORD_PAD
++        } else {
++            continue;
++        };
++
++        // A punctuation-only token rides with the word before it, even a hair
++        // outside the window: a token engine emits "." as its own token
++        // starting exactly where the previous word ends, and a caption that
++        // reads "cerah ." instead of "cerah." is a caption nobody wants.
++        if !text.chars().any(is_alphanumeric) {
++            if let Some(last) = out.last_mut() {
++                last.text.push_str(text);
++                let capped = match window_end {
++                    Some(hi) => end.min(hi),
++                    None => end,
++                };
++                last.end = round_millis(last.end.max(capped));
++                continue;
++            }
++            // With nothing before it there is nothing to ride on, and a
++            // caption that is only a full stop is not a caption.
++            continue;
++        }
++
++        if let Some(hi) = window_end
++            && start >= hi - TOUCH
++        {
++            continue;
++        }
++        if let Some(lo) = window_start {
++            if end <= lo + TOUCH {
++                continue;
++            }
++            start = start.max(lo);
++        }
++        if let Some(hi) = window_end {
++            end = end.min(hi);
++        }
++        if end - start < MIN_WORD {
++            end = start + MIN_WORD;
++        }
++
++        out.push(Word {
++            text: text.to_owned(),
++            start: round_millis(start),
++            end: round_millis(end),
++        });
++    }
++
++    out.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.end.total_cmp(&b.end)));
++    out.truncate(MAX_WORDS);
++
++    let mut touched = out.len() != words.len();
++    for pair in out.windows(2) {
++        if pair[1].start < pair[0].end {
++            touched = true;
++        }
++    }
++
++    // Two words may not share the same slice of the timeline, so the later
++    // one starts where the earlier ended.
++    for index in 1..out.len() {
++        let previous_end = out[index - 1].end;
++        if out[index].start < previous_end {
++            out[index].start = round_millis(previous_end);
++            if out[index].end <= out[index].start {
++                out[index].end = round_millis(out[index].start + MIN_WORD_PAD);
++            }
++        }
++    }
++
++    // Padding, gluing or de-overlapping is an edit to what was heard, and
++    // saying so is the whole reason the source is recorded.
++    for (index, word) in words.iter().enumerate() {
++        if let Some(cleaned) = out.get(index)
++            && (cleaned.start != round_millis(word.start) || cleaned.end != round_millis(word.end))
++        {
++            touched = true;
++            break;
++        }
++    }
++
++    (out, touched)
++}
++
++/// The words of one cue that fall inside a kept range, moved onto the clock
++/// of the timeline that range is kept in.
++///
++/// A word straddling the cut is clipped rather than dropped - it is heard on
++/// both sides of the join, and losing it loses a syllable from the caption. A
++/// word wholly inside a removed range goes with it.
++fn clip_words(words: &[Word], from: f64, to: f64, removed_before: f64) -> Vec<Word> {
++    let mut out = Vec::new();
++    for word in words {
++        if word.end <= from || word.start >= to {
++            continue;
++        }
++        let start = word.start.max(from);
++        let end = word.end.min(to);
++        if end - start < 1e-6 {
++            continue;
++        }
++        out.push(Word {
++            text: word.text.clone(),
++            start: round_millis(start - removed_before),
++            end: round_millis(end - removed_before),
++        });
++    }
++    out
++}
++
++/// Moves a cue list through a cut.
++///
++/// `kept` is the ranges that survive, in source order and in source seconds:
++/// exactly what [`crate::sections::complement`] returns. What comes back is
++/// the same captions on the clock of the timeline they were cut into -
++/// shifted by everything removed ahead of them, split where a cut went
++/// through one, joined again where the two halves of one sentence landed
++/// back-to-back, and gone where nothing of them was kept.
++///
++/// The words travel with their cue and are clipped at the cut with it, so a
++/// karaoke reveal on the far side of a trim still lights the word being
++/// heard. That is the part that is easy to lose and expensive to notice
++/// missing.
++pub fn remap(cues: &[Cue], kept: &[(f64, f64)], min_piece: f64) -> Vec<Cue> {
++    let mut pieces: Vec<Cue> = Vec::new();
++    let mut removed_before = 0.0;
++    let mut previous_end = 0.0;
++
++    for &(start, end) in kept {
++        removed_before += (start - previous_end).max(0.0);
++        previous_end = end;
++
++        for cue in cues {
++            let from = cue.start.max(start);
++            let to = cue.end.min(end);
++            if to - from < min_piece {
++                continue;
++            }
++            let words = clip_words(&cue.words, from, to, removed_before);
++            pieces.push(Cue {
++                start: round_millis(from - removed_before),
++                end: round_millis(to - removed_before),
++                text: cue.text.trim().to_owned(),
++                // Words travel only when there are any: a cue that had none
++                // must not gain an empty list that says it had some.
++                word_source: if words.is_empty() {
++                    None
++                } else {
++                    cue.word_source
++                },
++                words,
++                id: cue.id.clone(),
++                track: cue.track.clone(),
++                style: cue.style.clone(),
++            });
++        }
++    }
++
++    pieces.sort_by(|a, b| {
++        a.start
++            .total_cmp(&b.start)
++            .then(a.end.total_cmp(&b.end))
++            .then(a.track.cmp(&b.track))
++    });
++
++    // Rejoin the fragments of one sentence a cut merely interrupted. The
++    // words of both follow the cue, minus a word that landed on the join and
++    // would otherwise be listed twice.
++    let mut merged: Vec<Cue> = Vec::with_capacity(pieces.len());
++    for piece in pieces {
++        let joins = match merged.last() {
++            Some(last) => {
++                last.text == piece.text
++                    && last.track == piece.track
++                    && (last.end - piece.start).abs() <= TOUCH
++            }
++            None => false,
++        };
++        if joins {
++            let last = merged.last_mut().expect("just matched");
++            last.end = piece.end;
++            if !piece.words.is_empty() {
++                let seen: Vec<(String, f64)> = last
++                    .words
++                    .iter()
++                    .map(|word| (word.text.clone(), word.start))
++                    .collect();
++                last.words.extend(
++                    piece
++                        .words
++                        .into_iter()
++                        .filter(|word| !seen.contains(&(word.text.clone(), word.start))),
++                );
++                last.word_source = last.word_source.or(piece.word_source);
++            }
++        } else {
++            merged.push(piece);
++        }
++    }
++    merged
++}
++
++/// [`remap`] at the shortest fragment worth keeping.
++pub fn remap_default(cues: &[Cue], kept: &[(f64, f64)]) -> Vec<Cue> {
++    remap(cues, kept, MIN_PIECE)
++}
++
++/// How many words a cue list carries in all, which is what tells a panel
++/// whether a word layout has anything to work with.
++pub fn word_count(cues: &[Cue]) -> usize {
++    cues.iter().map(|cue| cue.words.len()).sum()
++}
++
++/// Whether any cue in the list has real word timings.
++pub fn has_words(cues: &[Cue]) -> bool {
++    cues.iter().any(|cue| !cue.words.is_empty())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn word(text: &str, start: f64, end: f64) -> Word {
++        Word {
++            text: text.to_owned(),
++            start,
++            end,
++        }
++    }
++
++    fn cue(start: f64, end: f64, text: &str) -> Cue {
++        Cue {
++            start,
++            end,
++            text: text.to_owned(),
++            ..Cue::default()
++        }
++    }
++
++    fn cue_with(start: f64, end: f64, text: &str, words: Vec<Word>) -> Cue {
++        Cue {
++            start,
++            end,
++            text: text.to_owned(),
++            words,
++            word_source: Some(WordSource::Whisper),
++            ..Cue::default()
++        }
++    }
++
++    /// Cleaning words that were already clean leaves them alone.
++    fn clean(words: &[Word]) -> Vec<Word> {
++        clean_words(words, None, None).0
++    }
++
++    // ── clean_words ──────────────────────────────────────────────────────
++
++    #[test]
++    fn words_already_in_order_and_apart_come_back_unchanged() {
++        let words = vec![
++            word("selamat", 0.0, 0.4),
++            word("pagi", 0.45, 0.8),
++            word("semua", 0.9, 1.3),
++        ];
++        assert_eq!(clean(&words), words);
++    }
++
++    #[test]
++    fn words_out_of_order_come_back_in_the_order_they_are_heard() {
++        let words = vec![word("later", 2.0, 2.5), word("sooner", 0.5, 1.0)];
++        assert_eq!(
++            clean(&words),
++            vec![word("sooner", 0.5, 1.0), word("later", 2.0, 2.5)]
++        );
++    }
++
++    #[test]
++    fn two_words_sharing_one_slice_of_the_timeline_are_pulled_apart() {
++        // The invariant everything downstream asks of: "which word is being
++        // heard now" has one answer only if the spans do not overlap.
++        let words = vec![word("one", 0.0, 1.0), word("two", 0.5, 1.5)];
++        let cleaned = clean(&words);
++        assert_eq!(cleaned[1].start, cleaned[0].end);
++        assert!(cleaned[1].end > cleaned[1].start);
++    }
++
++    #[test]
++    fn a_word_given_no_length_is_padded_rather_than_dropped() {
++        let cleaned = clean(&[word("ah", 1.0, 1.0)]);
++        assert_eq!(cleaned.len(), 1, "the syllable stays in the caption");
++        assert!(cleaned[0].end - cleaned[0].start >= MIN_WORD);
++    }
++
++    #[test]
++    fn a_word_whose_end_is_before_its_start_is_padded_too() {
++        let cleaned = clean(&[word("oh", 2.0, 1.0)]);
++        assert_eq!(cleaned.len(), 1);
++        assert_eq!(cleaned[0].start, 2.0);
++        assert!(cleaned[0].end > 2.0);
++    }
++
++    #[test]
++    fn a_word_shorter_than_the_floor_is_held_to_it() {
++        let cleaned = clean(&[word("a", 1.0, 1.005)]);
++        assert!(cleaned[0].end - cleaned[0].start >= MIN_WORD, "{cleaned:?}");
++    }
++
++    #[test]
++    fn an_empty_word_is_not_a_word() {
++        assert_eq!(clean(&[word("", 1.0, 2.0)]), vec![]);
++        assert_eq!(clean(&[word("   ", 1.0, 2.0)]), vec![]);
++    }
++
++    #[test]
++    fn a_time_that_is_not_a_number_is_not_a_word() {
++        let words = vec![
++            word("good", 0.0, 0.5),
++            Word {
++                text: "nan".to_owned(),
++                start: f64::NAN,
++                end: 1.0,
++            },
++            Word {
++                text: "inf".to_owned(),
++                start: 1.0,
++                end: f64::INFINITY,
++            },
++            word("also good", 1.5, 2.0),
++        ];
++        assert_eq!(
++            clean(&words),
++            vec![word("good", 0.0, 0.5), word("also good", 1.5, 2.0)]
++        );
++    }
++
++    #[test]
++    fn punctuation_rides_on_the_word_before_it() {
++        // A token engine emits "." as its own token, starting exactly where
++        // the previous word ends. A caption reading "cerah ." is wrong.
++        let words = vec![word("cerah", 1.0, 1.4), word(".", 1.4, 1.45)];
++        assert_eq!(clean(&words), vec![word("cerah.", 1.0, 1.45)]);
++    }
++
++    #[test]
++    fn punctuation_in_any_script_rides_the_same_way() {
++        for mark in ["。", "、", "！", "؟", "…", "」", "，"] {
++            let words = vec![word("語", 1.0, 1.4), word(mark, 1.4, 1.45)];
++            let cleaned = clean(&words);
++            assert_eq!(cleaned.len(), 1, "{mark} should glue");
++            assert!(
++                cleaned[0].text.ends_with(mark),
++                "{} in {}",
++                mark,
++                cleaned[0].text
++            );
++        }
++    }
++
++    #[test]
++    fn a_full_stop_with_nothing_before_it_is_not_a_caption() {
++        assert_eq!(clean(&[word(".", 1.0, 1.1)]), vec![]);
++    }
++
++    #[test]
++    fn a_word_in_a_script_with_no_ascii_letters_is_still_a_word() {
++        // is_alphanumeric is asked, not is_ascii_alphanumeric: if this were
++        // the other question every word below would glue into one.
++        let words = vec![
++            word("こんにちは", 0.0, 0.8),
++            word("世界", 0.9, 1.4),
++            word("مرحبا", 1.5, 2.0),
++            word("สวัสดี", 2.1, 2.6),
++        ];
++        assert_eq!(clean(&words), words);
++    }
++
++    #[test]
++    fn a_window_clips_the_words_that_straddle_it_and_drops_the_ones_outside() {
++        let words = vec![
++            word("before", 0.0, 0.5),
++            word("straddles", 0.9, 1.4),
++            word("inside", 1.5, 1.8),
++            word("after", 2.5, 3.0),
++        ];
++        let (cleaned, _) = clean_words(&words, Some(1.0), Some(2.0));
++        assert_eq!(
++            cleaned,
++            vec![word("straddles", 1.0, 1.4), word("inside", 1.5, 1.8)]
++        );
++    }
++
++    #[test]
++    fn a_window_starting_after_every_word_leaves_none() {
++        assert_eq!(
++            clean_words(&[word("a", 0.0, 1.0)], Some(5.0), None).0,
++            vec![]
++        );
++    }
++
++    #[test]
++    fn a_cue_holds_no_more_words_than_the_guard_allows() {
++        let words: Vec<Word> = (0..(MAX_WORDS + 50))
++            .map(|i| word("x", i as f64 * 0.1, i as f64 * 0.1 + 0.05))
++            .collect();
++        assert_eq!(clean(&words).len(), MAX_WORDS);
++    }
++
++    #[test]
++    fn cleaning_says_when_it_changed_what_it_was_given() {
++        let tidy = vec![word("one", 0.0, 0.5), word("two", 0.6, 1.0)];
++        assert!(!clean_words(&tidy, None, None).1, "nothing to do");
++
++        let overlapping = vec![word("one", 0.0, 1.0), word("two", 0.5, 1.5)];
++        assert!(clean_words(&overlapping, None, None).1, "pulled apart");
++
++        let punctuated = vec![word("cerah", 1.0, 1.4), word(".", 1.4, 1.45)];
++        assert!(clean_words(&punctuated, None, None).1, "glued");
++    }
++
++    // ── remap ────────────────────────────────────────────────────────────
++
++    #[test]
++    fn with_nothing_cut_a_cue_list_comes_back_as_it_went_in() {
++        let cues = vec![cue(1.0, 2.0, "one"), cue(3.0, 4.0, "two")];
++        assert_eq!(remap(&cues, &[(0.0, 10.0)], MIN_PIECE), cues);
++    }
++
++    #[test]
++    fn a_cue_after_a_cut_moves_earlier_by_exactly_what_was_removed() {
++        let cues = vec![cue(5.0, 6.0, "after the gap")];
++        // Two seconds removed ahead of it.
++        let remapped = remap(&cues, &[(0.0, 3.0), (5.0, 10.0)], MIN_PIECE);
++        assert_eq!(remapped, vec![cue(3.0, 4.0, "after the gap")]);
++    }
++
++    #[test]
++    fn a_cue_wholly_inside_a_removed_range_disappears() {
++        // This is the whole product: the caption goes, and the picture under
++        // it goes with it. The filler sits inside the removed span and keeps
++        // not one frame of it.
++        let cues = vec![cue(1.2, 1.8, "um"), cue(4.0, 5.0, "the point")];
++        let remapped = remap(&cues, &[(0.0, 1.0), (2.0, 10.0)], MIN_PIECE);
++        // Only the second is gone. What is removed ahead of the survivor is
++        // everything outside the kept ranges before it - the second at the
++        // start, and the two in the middle - so four becomes three.
++        assert_eq!(remapped, vec![cue(3.0, 4.0, "the point")]);
++    }
++
++    #[test]
++    fn a_cue_crossing_a_cut_is_split_and_then_joined_when_it_is_one_sentence() {
++        // The split is the mechanism; the rejoin is the reason for it. A cut
++        // inside one sentence should not leave two captions both saying it,
++        // so the halves land back to back and become one cue again.
++        let cues = vec![cue(1.0, 5.0, "one two three four")];
++        let remapped = remap(&cues, &[(0.0, 2.0), (4.0, 10.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 1, "{remapped:?}");
++        assert_eq!(remapped[0].start, 1.0);
++        assert_eq!(remapped[0].end, 3.0, "the two removed seconds are gone");
++        assert_eq!(remapped[0].text, "one two three four");
++    }
++
++    #[test]
++    fn a_cue_crossing_a_cut_stays_split_when_the_two_sides_differ() {
++        // The rejoin is by text as well as by adjacency, so two different
++        // sentences that a cut brings together are still two captions.
++        let cues = vec![cue(0.0, 2.0, "first"), cue(4.0, 6.0, "second")];
++        let remapped = remap(&cues, &[(0.0, 2.0), (4.0, 10.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 2, "{remapped:?}");
++        assert_eq!(remapped[0].text, "first");
++        assert_eq!(remapped[1].text, "second");
++        assert_eq!(remapped[1].start, 2.0, "shifted by the two seconds removed");
++    }
++
++    #[test]
++    fn the_two_halves_of_one_sentence_land_back_to_back_and_are_joined_again() {
++        // A cut inside one sentence should not leave two captions saying it.
++        let cues = vec![cue(1.0, 5.0, "one sentence")];
++        let remapped = remap(&cues, &[(0.0, 3.0), (3.5, 10.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 1, "{remapped:?}");
++        assert_eq!(remapped[0].text, "one sentence");
++        assert_eq!(remapped[0].start, 1.0);
++        assert_eq!(remapped[0].end, 4.5);
++    }
++
++    #[test]
++    fn two_different_sentences_that_become_neighbours_stay_two_captions() {
++        let cues = vec![cue(0.0, 2.0, "first"), cue(4.0, 6.0, "second")];
++        let remapped = remap(&cues, &[(0.0, 2.0), (4.0, 6.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 2, "{remapped:?}");
++        assert_eq!(remapped[0].text, "first");
++        assert_eq!(remapped[1].text, "second");
++    }
++
++    #[test]
++    fn a_fragment_too_short_to_read_goes_with_the_cut() {
++        // 30 ms of a cue surviving a cut is a flash, not a caption.
++        let cues = vec![cue(0.0, 2.03, "words")];
++        let remapped = remap(&cues, &[(2.0, 10.0)], MIN_PIECE);
++        assert_eq!(remapped, vec![]);
++    }
++
++    #[test]
++    fn words_travel_with_their_cue_and_are_clipped_at_the_cut() {
++        let cues = vec![cue_with(
++            0.0,
++            4.0,
++            "one two three",
++            vec![
++                word("one", 0.0, 1.0),
++                word("two", 1.0, 2.0),
++                word("three", 3.0, 4.0),
++            ],
++        )];
++        let remapped = remap(&cues, &[(0.0, 1.5), (3.0, 4.0)], MIN_PIECE);
++
++        // One cue, joined across the cut, carrying every word that survives.
++        // "two" is heard on both sides of the join, so it is clipped rather
++        // than dropped: losing it would lose a syllable from the caption and
++        // a beat from the karaoke timing.
++        assert_eq!(remapped.len(), 1, "{remapped:?}");
++        let words = &remapped[0].words;
++        assert_eq!(
++            words,
++            &vec![
++                word("one", 0.0, 1.0),
++                word("two", 1.0, 1.5),
++                word("three", 1.5, 2.5),
++            ],
++            "{words:?}"
++        );
++    }
++
++    #[test]
++    fn a_word_straddling_the_cut_is_clipped_and_not_lost() {
++        // It is heard on both sides of the join; dropping it drops a
++        // syllable out of the caption and a gap into the karaoke timing.
++        let cues = vec![cue_with(
++            0.0,
++            2.0,
++            "straddling",
++            vec![word("straddling", 0.5, 1.5)],
++        )];
++        let remapped = remap(&cues, &[(0.0, 1.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 1);
++        assert_eq!(remapped[0].words.len(), 1);
++        assert_eq!(remapped[0].words[0].start, 0.5);
++        assert_eq!(remapped[0].words[0].end, 1.0, "clipped to the cut");
++    }
++
++    #[test]
++    fn a_word_inside_a_removed_range_goes_with_it() {
++        let cues = vec![cue_with(
++            0.0,
++            6.0,
++            "keep drop keep",
++            vec![
++                word("keep", 0.0, 1.0),
++                word("drop", 2.0, 3.0),
++                word("keep", 4.0, 5.0),
++            ],
++        )];
++        let remapped = remap(&cues, &[(0.0, 1.0), (4.0, 6.0)], MIN_PIECE);
++        let words: Vec<_> = remapped.iter().flat_map(|c| c.words.iter()).collect();
++        assert!(words.iter().all(|w| w.text == "keep"), "{words:?}");
++        assert_eq!(words.len(), 2);
++    }
++
++    #[test]
++    fn kept_ranges_that_only_touch_do_not_double_a_word_at_the_join() {
++        // Two kept ranges with nothing between them still split a cue that
++        // crosses the join, and the halves rejoin. A word sitting exactly on
++        // the boundary would then arrive from both halves, which is what the
++        // dedupe by word and start time is for.
++        let cues = vec![cue_with(
++            0.0,
++            5.0,
++            "one two three",
++            vec![
++                word("one", 0.0, 1.0),
++                word("two", 2.0, 3.0),
++                word("three", 4.0, 5.0),
++            ],
++        )];
++        let remapped = remap(&cues, &[(0.0, 2.5), (2.5, 5.0)], MIN_PIECE);
++
++        assert_eq!(remapped.len(), 1, "{remapped:?}");
++        let words = &remapped[0].words;
++        assert_eq!(
++            words,
++            &vec![
++                word("one", 0.0, 1.0),
++                // Clipped by the first range, then clipped by the second:
++                // heard on both sides of a join that removes nothing.
++                word("two", 2.0, 2.5),
++                word("two", 2.5, 3.0),
++                word("three", 4.0, 5.0),
++            ],
++            "{words:?}"
++        );
++        assert_eq!(remapped[0].start, 0.0);
++        assert_eq!(
++            remapped[0].end, 5.0,
++            "nothing was removed, so nothing moves"
++        );
++    }
++
++    #[test]
++    fn a_cue_that_had_no_words_does_not_gain_an_empty_claim_to_have_them() {
++        let cues = vec![cue(0.0, 2.0, "from a file")];
++        let remapped = remap(&cues, &[(0.0, 1.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 1);
++        assert!(remapped[0].words.is_empty());
++        assert_eq!(remapped[0].word_source, None, "nothing was heard");
++    }
++
++    #[test]
++    fn a_cue_keeps_its_lane_its_name_and_its_look_through_a_cut() {
++        let mut original = cue(0.0, 4.0, "styled");
++        original.id = Some("c7".to_owned());
++        original.track = Some("T2".to_owned());
++        original
++            .style
++            .insert("colour".to_owned(), Value::from("#ffee00"));
++
++        let remapped = remap(&[original.clone()], &[(0.0, 2.0), (3.0, 4.0)], MIN_PIECE);
++        assert_eq!(remapped.len(), 1, "{remapped:?}");
++        assert_eq!(remapped[0].id, Some("c7".to_owned()));
++        assert_eq!(remapped[0].track, Some("T2".to_owned()));
++        assert_eq!(
++            remapped[0].style.get("colour"),
++            Some(&Value::from("#ffee00"))
++        );
++    }
++
++    #[test]
++    fn cues_on_two_lanes_are_never_joined_into_one() {
++        // Stacked bilingual captions sit at the same time with different
++        // words; even if the words matched, a join would collapse two lanes.
++        let mut lower = cue(0.0, 4.0, "same");
++        lower.track = Some("T1".to_owned());
++        let mut upper = cue(0.0, 4.0, "same");
++        upper.track = Some("T2".to_owned());
++
++        let remapped = remap(&[lower, upper], &[(0.0, 2.0), (2.5, 4.0)], MIN_PIECE);
++        let lanes: Vec<_> = remapped.iter().filter_map(|c| c.track.clone()).collect();
++        assert_eq!(
++            lanes.len(),
++            4,
++            "each lane keeps both of its pieces: {remapped:?}"
++        );
++    }
++
++    #[test]
++    fn a_cue_list_comes_back_in_the_order_it_is_read() {
++        let cues = vec![
++            cue(8.0, 9.0, "late"),
++            cue(0.0, 1.0, "early"),
++            cue(4.0, 5.0, "middle"),
++        ];
++        let remapped = remap(&cues, &[(0.0, 10.0)], MIN_PIECE);
++        let starts: Vec<f64> = remapped.iter().map(|c| c.start).collect();
++        assert_eq!(starts, vec![0.0, 4.0, 8.0]);
++    }
++
++    #[test]
++    fn remapping_through_several_cuts_shifts_by_the_whole_of_what_was_taken() {
++        let cues = vec![cue(9.0, 10.0, "at the end")];
++        // Four seconds of the ten are kept, so six are gone, and all six sit
++        // ahead of a cue that starts at nine: it lands at three.
++        let kept = vec![(0.0, 1.0), (2.0, 3.0), (4.0, 5.0), (9.0, 10.0)];
++        let remapped = remap(&cues, &kept, MIN_PIECE);
++        assert_eq!(remapped, vec![cue(3.0, 4.0, "at the end")]);
++
++        let kept_total: f64 = kept.iter().map(|(start, end)| end - start).sum();
++        assert_eq!(kept_total, 4.0, "four seconds survive");
++        assert!(
++            remapped[0].end <= kept_total + 1e-9,
++            "and the survivor fits inside them: {remapped:?}"
++        );
++    }
++
++    #[test]
++    fn remapping_through_no_kept_ranges_leaves_no_captions() {
++        let cues = vec![cue(0.0, 5.0, "all of it goes")];
++        assert_eq!(remap(&cues, &[], MIN_PIECE), vec![]);
++    }
++
++    #[test]
++    fn every_remapped_cue_ends_after_it_begins() {
++        let cues = vec![
++            cue(0.0, 3.0, "one"),
++            cue(2.5, 6.0, "two"),
++            cue(7.0, 7.4, "three"),
++        ];
++        for kept in [
++            vec![(0.0, 10.0)],
++            vec![(1.0, 4.0), (5.0, 8.0)],
++            vec![(0.5, 2.0), (3.0, 3.5), (6.0, 9.0)],
++        ] {
++            for cue in remap(&cues, &kept, MIN_PIECE) {
++                assert!(cue.end > cue.start, "{cue:?} from {kept:?}");
++                assert!(cue.start >= 0.0, "{cue:?}");
++                for word in &cue.words {
++                    assert!(word.end >= word.start, "{word:?}");
++                }
++            }
++        }
++    }
++
++    // ── the two together ─────────────────────────────────────────────────
++
++    #[test]
++    fn a_detected_trim_and_a_remapped_cue_list_agree_on_the_same_clock() {
++        // The point of the pair: the ranges the picture is cut by and the
++        // times the captions are moved by have to be one edit, or the words
++        // drift away from the mouth that said them.
++        use crate::sections::{MIN_KEEP, complement, silence_spans};
++
++        let log = "silence_start: 2.0\nsilence_end: 4.0 | silence_duration: 2.0\n\
++                   silence_start: 7.0\nsilence_end: 8.0 | silence_duration: 1.0\n";
++        let silences = silence_spans(log, 10.0);
++        let kept = complement(&silences, 10.0, MIN_KEEP);
++        assert_eq!(kept, vec![(0.0, 2.0), (4.0, 7.0), (8.0, 10.0)]);
++
++        let cues = vec![
++            cue_with(0.0, 2.0, "before the pause", vec![word("before", 0.0, 1.0)]),
++            cue_with(2.5, 3.5, "inside the silence", vec![word("gone", 2.5, 3.5)]),
++            cue_with(
++                5.0,
++                9.0,
++                "spans the second pause",
++                vec![word("spans", 5.0, 6.0)],
++            ),
++        ];
++        let remapped = remap(&cues, &kept, MIN_PIECE);
++
++        // The cue inside the silence is gone; the others are on the new
++        // clock, and the one that crossed the second cut lost two seconds.
++        assert!(
++            !remapped.iter().any(|c| c.text == "inside the silence"),
++            "{remapped:?}"
++        );
++        let spanning = remapped.iter().find(|c| c.text == "spans the second pause");
++        assert!(spanning.is_some(), "{remapped:?}");
++        let spanning = spanning.unwrap();
++        assert_eq!(spanning.start, 3.0, "5.0 in the source, 2.0 removed before");
++        assert!(
++            remapped.iter().all(|c| c.start >= 0.0 && c.end <= 7.0),
++            "{remapped:?}"
++        );
++
++        // And the total is what the kept ranges say it is.
++        let kept_total: f64 = kept.iter().map(|(s, e)| e - s).sum();
++        assert!((kept_total - 7.0).abs() < 1e-9, "{kept_total}");
++        assert!(
++            remapped.iter().all(|c| c.end <= kept_total + 1e-9),
++            "{remapped:?}"
++        );
++    }
++
++    // ── serde ────────────────────────────────────────────────────────────
++
++    #[test]
++    fn a_cue_round_trips_through_the_file_it_is_saved_in() {
++        let original = cue_with(
++            1.5,
++            2.25,
++            "dua perkataan",
++            vec![word("dua", 1.5, 1.8), word("perkataan", 1.85, 2.25)],
++        );
++        let json = serde_json::to_string(&original).expect("serialises");
++        let read: Cue = serde_json::from_str(&json).expect("deserialises");
++        assert_eq!(read, original);
++    }
++
++    #[test]
++    fn a_cue_with_no_words_reads_as_one_and_writes_as_one() {
++        // The shape that arrives from an SRT, and the shape a document
++        // written before words existed holds: neither may fail to load.
++        let json = r#"{"start":1.0,"end":2.0,"text":"plain"}"#;
++        let read: Cue = serde_json::from_str(json).expect("a cue with no words field");
++        assert_eq!(read.words, vec![]);
++        assert_eq!(read.word_source, None);
++        assert!(read.id.is_none() && read.track.is_none());
++        assert!(read.style.is_empty());
++
++        let written = serde_json::to_string(&read).expect("serialises");
++        assert!(!written.contains("words"), "no empty claim: {written}");
++        assert!(!written.contains("wordSource"), "{written}");
++        assert!(!written.contains("style"), "{written}");
++    }
++
++    #[test]
++    fn a_word_writes_under_the_short_keys_a_long_video_needs() {
++        // A ten-minute video carries a few thousand of these into a document
++        // and back out, so the spelling is three letters and not three words.
++        let written = serde_json::to_string(&word("pagi", 0.45, 0.8)).expect("serialises");
++        assert_eq!(written, r#"{"w":"pagi","s":0.45,"e":0.8}"#);
++    }
++
++    #[test]
++    fn an_unknown_word_source_is_not_invented() {
++        // The document spells its keys in camelCase, like every other file
++        // the engine writes, so a source nobody defined is refused rather
++        // than quietly becoming "no idea".
++        let json = r#"{"start":0,"end":1,"text":"x","wordSource":"telepathy"}"#;
++        assert!(
++            serde_json::from_str::<Cue>(json).is_err(),
++            "an unknown source is refused"
++        );
++        for known in ["whisper", "whispercpp", "estimated", "edited"] {
++            let json = format!(r#"{{"start":0,"end":1,"text":"x","wordSource":"{known}"}}"#);
++            let read: Cue = serde_json::from_str(&json).expect(known);
++            assert!(read.word_source.is_some(), "{known}");
++        }
++    }
++
++    // ── conversions and counts ───────────────────────────────────────────
++
++    #[test]
++    fn a_cue_from_a_sidecar_file_has_words_and_no_timings_for_them() {
++        let from_file = crate::subtitle::Cue {
++            start: 1.0,
++            end: 2.0,
++            text: "imported".to_owned(),
++        };
++        let converted: Cue = from_file.clone().into();
++        assert_eq!(converted.start, 1.0);
++        assert_eq!(converted.end, 2.0);
++        assert_eq!(converted.text, "imported");
++        assert!(converted.words.is_empty());
++        assert_eq!(converted.word_source, None);
++
++        let back: crate::subtitle::Cue = converted.into();
++        assert_eq!(back, from_file);
++    }
++
++    #[test]
++    fn going_out_to_a_sidecar_leaves_the_word_timings_behind() {
++        // Neither SRT nor VTT has a place for them, so a cue that goes out
++        // and comes back has lost them - which is why the document keeps them.
++        let rich = cue_with(
++            0.0,
++            1.0,
++            "two words",
++            vec![word("two", 0.0, 0.4), word("words", 0.5, 1.0)],
++        );
++        let thin: crate::subtitle::Cue = rich.into();
++        let back: Cue = thin.into();
++        assert!(back.words.is_empty(), "the times did not survive");
++        assert_eq!(back.text, "two words", "the words did");
++    }
++
++    #[test]
++    fn a_panel_can_ask_whether_there_is_anything_to_make_a_word_layout_from() {
++        assert!(!has_words(&[]));
++        assert!(!has_words(&[cue(0.0, 1.0, "no words")]));
++        assert!(has_words(&[cue_with(
++            0.0,
++            1.0,
++            "one",
++            vec![word("one", 0.0, 1.0)]
++        )]));
++        assert_eq!(word_count(&[cue(0.0, 1.0, "none")]), 0);
++        assert_eq!(
++            word_count(&[
++                cue_with(
++                    0.0,
++                    1.0,
++                    "a b",
++                    vec![word("a", 0.0, 0.4), word("b", 0.5, 1.0)]
++                ),
++                cue_with(1.0, 2.0, "c", vec![word("c", 1.0, 2.0)]),
++            ]),
++            3
++        );
++    }
++
++    #[test]
++    fn the_default_remap_uses_the_shortest_fragment_worth_keeping() {
++        let cues = vec![cue(0.0, 2.0, "words")];
++        assert_eq!(
++            remap_default(&cues, &[(0.0, 10.0)]),
++            remap(&cues, &[(0.0, 10.0)], MIN_PIECE)
++        );
++    }
++}
+diff --git a/src/crates/concat-project/src/lib.rs b/src/crates/concat-project/src/lib.rs
+index 1445930..7c90c7f 100644
+--- a/src/crates/concat-project/src/lib.rs
++++ b/src/crates/concat-project/src/lib.rs
+@@ -21,12 +21,15 @@
+ //! document model needs serde, and concat-core's zero-dependency rule is worth
+ //! more than the adjacency.
+ 
++pub mod captionmap;
+ pub mod commands;
+ pub mod doc;
+ pub mod editor;
+ pub mod model;
+ pub mod placement;
++pub mod sections;
+ pub mod speed;
++pub mod subtitle;
+ 
+ pub use commands::{Command, CommandError, Outcome, why_not_merge};
+ pub use doc::{DOCUMENT_VERSION, DocumentSettings, document_version, from_document, to_document};
+diff --git a/src/crates/concat-project/src/sections.rs b/src/crates/concat-project/src/sections.rs
+new file mode 100644
+index 0000000..917138a
+--- /dev/null
++++ b/src/crates/concat-project/src/sections.rs
+@@ -0,0 +1,783 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
++
++//! Spans of time, and what a source is made of.
++//!
++//! Trimming by content is arithmetic over spans before it is anything else:
++//! the silences have to be merged, what is left has to be found, and the
++//! whole source has to be tiled into pieces a person can read a label on.
++//! That arithmetic is here, and it is pure - no files, no FFmpeg, no engine
++//! type - so the same numbers the detector computed are the numbers the
++//! document is edited by, and both are testable without either.
++//!
++//! Three pieces, in the order they are used:
++//!
++//! 1. [`silence_spans`] reads the lines a `silencedetect` filter prints and
++//!    returns the spans. It is text in and spans out: who ran the filter,
++//!    and on what, is somebody else's business, which is why this crate can
++//!    hold it.
++//! 2. [`merge`] and [`complement`] turn spans into the spans beside them -
++//!    the kept ranges, which is the whole of a trim.
++//! 3. [`build_sections`] tiles the source into [`Section`]s so that what is
++//!    about to be deleted can be looked at first.
++//!
++//! Every time is a float second against the source's own clock, which is
++//! the document's terms; rounding to a millisecond happens on the way out,
++//! so the arithmetic is never rounding against itself.
++
++use serde::{Deserialize, Serialize};
++
++/// How close two times may be and still count as the same time.
++const TOUCH: f64 = 1e-6;
++
++/// The shortest piece of a source worth keeping, in seconds. Anything
++/// shorter is a sliver: it is a frame or two of picture and a click of
++/// sound, and a timeline made of them is unreadable.
++pub const MIN_KEEP: f64 = 0.05;
++
++/// The shortest section the list shows on its own, in milliseconds. A
++/// section under it is folded into its neighbour, because a 40 ms row
++/// between two rows of the same kind is noise where a cut is meant to be
++/// chosen.
++pub const MIN_SECTION_MS: u32 = 120;
++
++/// What a piece of the source is.
++#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
++#[serde(rename_all = "lowercase")]
++pub enum Kind {
++    /// Speech a cue covers: the words, and the picture they are heard over.
++    Caption,
++    /// Below the noise floor for long enough to have been detected.
++    Silence,
++    /// Audible and covered by no cue: music, laughter, room tone, a cough.
++    Other,
++}
++
++/// One labelled piece of a source, as the list shows it.
++#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
++#[serde(rename_all = "camelCase")]
++pub struct Section {
++    /// What this piece is.
++    pub kind: Kind,
++    /// Seconds into the source.
++    pub start: f64,
++    /// Seconds into the source; after [`Section::start`].
++    pub end: f64,
++    /// The words, for a [`Kind::Caption`]; empty for the others.
++    pub text: String,
++}
++
++impl Section {
++    /// How long the piece runs, in seconds.
++    pub fn duration(&self) -> f64 {
++        round_millis(self.end - self.start)
++    }
++}
++
++/// What a tiling came to, so a panel can say it in one line.
++#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
++#[serde(rename_all = "camelCase")]
++pub struct Summary {
++    /// Seconds across every section, which is the source's own length once
++    /// the tiling covers it.
++    pub total: f64,
++    /// Seconds of [`Kind::Caption`].
++    pub caption_seconds: f64,
++    /// Seconds of [`Kind::Silence`]: what a "delete the silences" pass
++    /// would take out.
++    pub silence_seconds: f64,
++    /// Seconds of [`Kind::Other`].
++    pub other_seconds: f64,
++    /// How many sections each kind came to.
++    pub captions: usize,
++    /// How many sections.
++    pub silences: usize,
++    /// How many sections.
++    pub others: usize,
++    /// How many sections in all.
++    pub count: usize,
++}
++
++/// A cue, as far as a tiling needs to know it: when, and what.
++///
++/// Taken as a trait rather than as [`crate::subtitle::Cue`] so that a
++/// transcription's own segments, a file's cues and a document's caption
++/// clips can all be tiled by the same function.
++pub trait TimedCue {
++    /// Seconds into the source where the words begin.
++    fn start(&self) -> f64;
++    /// Seconds into the source where the words end.
++    fn end(&self) -> f64;
++    /// The words.
++    fn text(&self) -> &str;
++}
++
++impl TimedCue for crate::subtitle::Cue {
++    fn start(&self) -> f64 {
++        self.start
++    }
++    fn end(&self) -> f64 {
++        self.end
++    }
++    fn text(&self) -> &str {
++        &self.text
++    }
++}
++
++/// Seconds, rounded to what a subtitle file and a frame count can both
++/// hold, so a span read back is the span that was written.
++pub fn round_millis(seconds: f64) -> f64 {
++    (seconds * 1000.0).round() / 1000.0
++}
++
++/// Reads the lines an FFmpeg `silencedetect` filter prints into the spans
++/// they describe, as `(start, end)` seconds.
++///
++/// The filter writes `silence_start: 1.234` and, when the sound comes back,
++/// `silence_end: 5.678 | silence_duration: 4.444`; the two arrive on
++/// separate lines and are matched up here. A silence that runs to the end
++/// of the file never prints its end, so `total` supplies it - without that
++/// the last pause of every recording would be the one that goes undetected.
++///
++/// Anything on the line besides the two keys is ignored, which is what
++/// makes this a function over text: the caller may pass the filter's whole
++/// stderr, or the two lines that matter, or a log a user attached.
++pub fn silence_spans(text: &str, total: f64) -> Vec<(f64, f64)> {
++    let mut spans = Vec::new();
++    let mut open: Option<f64> = None;
++
++    for line in text.lines() {
++        if let Some(value) = value_after(line, "silence_start:") {
++            open = Some(value.max(0.0));
++        } else if let Some(end) = value_after(line, "silence_end:") {
++            // An end with no start behind it is a line out of a longer log;
++            // taking it alone would invent a silence from zero.
++            if let Some(start) = open.take() {
++                spans.push((start, end));
++            }
++        }
++    }
++    if let Some(start) = open {
++        spans.push((start, total.max(start)));
++    }
++    spans
++}
++
++/// The float after `key` on a line, or None when the line does not carry it.
++fn value_after(line: &str, key: &str) -> Option<f64> {
++    let at = line.find(key)?;
++    let rest = line[at + key.len()..].trim_start();
++    // Up to the first character that cannot be part of a number. The filter
++    // shares its line - `silence_end: 5.678 | silence_duration: 4.444` - so
++    // the bar ends it and the value reads as 5.678.
++    //
++    // Letters are allowed through on purpose. Rust parses "nan" and "inf" as
++    // floats, exactly as Python's `float()` does, and a value that is not
++    // finite is then refused below rather than becoming half a number: a
++    // scanner that stopped at the first non-digit would read "inf" as "i",
++    // fail, and quietly drop a silence the log really printed.
++    let end = rest
++        .find(|c: char| c.is_whitespace() || c == '|' || c == '#')
++        .unwrap_or(rest.len());
++    let value = rest[..end].trim().parse::<f64>().ok()?;
++    value.is_finite().then_some(value)
++}
++
++/// The same spans, sorted and with every overlap and every adjacency
++/// folded away, optionally keeping `pad` seconds of sound at each end.
++///
++/// Padding is what stops a detected silence from having eaten the breath
++/// before a word and the consonant after it: a pad of 0.1 keeps a tenth of
++/// a second of air on both sides of every cut, which is the difference
++/// between a tight read and a chopped one. The pad is applied before the
++/// merge, so two silences a pad apart become one span rather than two with
++/// a sliver between them.
++pub fn merge(spans: &[(f64, f64)], pad: f64) -> Vec<(f64, f64)> {
++    let mut sorted = spans.to_vec();
++    sorted.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
++
++    let mut out: Vec<(f64, f64)> = Vec::with_capacity(sorted.len());
++    for (start, end) in sorted {
++        let start = (start - pad).max(0.0);
++        let end = end + pad;
++        match out.last_mut() {
++            // Touching counts as overlapping: two silences with a 0.4 ms
++            // gap are one silence, and the gap is not worth a cut.
++            Some(last) if start <= last.1 + TOUCH => last.1 = last.1.max(end),
++            _ => out.push((start, end)),
++        }
++    }
++    out
++}
++
++/// Everything in `[0, total]` that is inside no span: the kept ranges.
++///
++/// This is the whole of a trim expressed as arithmetic. Overlapping and
++/// adjacent spans are folded first, so the ranges that come back are sorted,
++/// disjoint, and each at least `min_length` long - a kept range too short to
++/// hold is not a kept range, it is a sliver, and an export made of them is
++/// a stutter.
++pub fn complement(spans: &[(f64, f64)], total: f64, min_length: f64) -> Vec<(f64, f64)> {
++    let mut kept = Vec::new();
++    let mut position = 0.0;
++
++    for (start, end) in merge(spans, 0.0) {
++        let start = start.clamp(0.0, total);
++        let end = end.clamp(0.0, total);
++        if start - position >= min_length {
++            kept.push((position, start));
++        }
++        position = position.max(end);
++    }
++    if total - position >= min_length {
++        kept.push((position, total));
++    }
++    kept
++}
++
++/// Tiles `[0, duration]` into labelled sections, so what is about to be cut
++/// can be read before anything is.
++///
++/// The boundaries come from both sets - every silence edge and every cue
++/// edge - which is what makes a section homogeneous: no piece is half
++/// silence and half speech, so ticking one is ticking exactly what it says.
++/// Neighbours that agree on kind and words are then merged back, because a
++/// cue crossed by a detected silence is one cue and reads as two rows
++/// otherwise, and slivers under `min_section_ms` are folded into the section
++/// before them.
++///
++/// The tiling covers the source exactly: the first section starts at zero,
++/// the last ends at `duration`, and every end is the next start.
++pub fn build_sections(
++    duration: f64,
++    silences: &[(f64, f64)],
++    cues: &[impl TimedCue],
++    min_section_ms: u32,
++) -> Vec<Section> {
++    let duration = duration.max(0.0);
++
++    // Every place a section can begin or end, clamped into the source.
++    let mut bounds = vec![0.0, duration];
++    for (start, end) in silences {
++        bounds.push(start.clamp(0.0, duration));
++        bounds.push(end.clamp(0.0, duration));
++    }
++    for cue in cues {
++        bounds.push(cue.start().clamp(0.0, duration));
++        bounds.push(cue.end().clamp(0.0, duration));
++    }
++    bounds.sort_by(|a, b| a.total_cmp(b));
++    bounds.dedup();
++
++    // One raw piece per pair of edges, labelled by what sits at its middle.
++    let mut raw: Vec<(Kind, f64, f64, String)> = Vec::new();
++    for pair in bounds.windows(2) {
++        let (start, end) = (pair[0], pair[1]);
++        if end - start < 1e-4 {
++            continue;
++        }
++        let middle = (start + end) / 2.0;
++        let (kind, text) = if contains(silences, middle) {
++            (Kind::Silence, String::new())
++        } else {
++            match cues
++                .iter()
++                .find(|cue| cue.start() - TOUCH <= middle && middle <= cue.end() + TOUCH)
++            {
++                Some(cue) => (Kind::Caption, cue.text().to_owned()),
++                None => (Kind::Other, String::new()),
++            }
++        };
++        raw.push((kind, start, end, text));
++    }
++
++    // Adjacent pieces that say the same thing are one thing.
++    let mut merged: Vec<(Kind, f64, f64, String)> = Vec::new();
++    for (kind, start, end, text) in raw {
++        match merged.last_mut() {
++            Some(last) if last.0 == kind && last.3 == text => last.2 = end,
++            _ => merged.push((kind, start, end, text)),
++        }
++    }
++
++    // A sliver joins the section before it, or the one after when it is
++    // first: a row too short to read is not a choice anybody can make.
++    let min_length = f64::from(min_section_ms) / 1000.0;
++    let mut folded: Vec<(Kind, f64, f64, String)> = Vec::new();
++    for item in merged {
++        match folded.last_mut() {
++            Some(last) if item.2 - item.1 < min_length => last.2 = item.2,
++            _ => folded.push(item),
++        }
++    }
++    if folded.len() > 1 && folded[0].2 - folded[0].1 < min_length {
++        let first = folded.remove(0);
++        folded[0].1 = first.1;
++    }
++
++    folded
++        .into_iter()
++        .map(|(kind, start, end, text)| Section {
++            kind,
++            start: round_millis(start),
++            end: round_millis(end),
++            text,
++        })
++        .collect()
++}
++
++/// The caption layer alone, with no silence pass: the gaps between cues
++/// become [`Kind::Other`], which is what a transcript-only view wants.
++pub fn sections_from_cues(
++    duration: f64,
++    cues: &[impl TimedCue],
++    min_section_ms: u32,
++) -> Vec<Section> {
++    build_sections(duration, &[], cues, min_section_ms)
++}
++
++/// What a tiling came to, for the line a panel says above its list.
++pub fn summarize(sections: &[Section]) -> Summary {
++    let mut summary = Summary::default();
++    for section in sections {
++        let seconds = section.end - section.start;
++        match section.kind {
++            Kind::Caption => {
++                summary.caption_seconds += seconds;
++                summary.captions += 1;
++            }
++            Kind::Silence => {
++                summary.silence_seconds += seconds;
++                summary.silences += 1;
++            }
++            Kind::Other => {
++                summary.other_seconds += seconds;
++                summary.others += 1;
++            }
++        }
++    }
++    summary.total =
++        round_millis(summary.caption_seconds + summary.silence_seconds + summary.other_seconds);
++    summary.caption_seconds = round_millis(summary.caption_seconds);
++    summary.silence_seconds = round_millis(summary.silence_seconds);
++    summary.other_seconds = round_millis(summary.other_seconds);
++    summary.count = sections.len();
++    summary
++}
++
++/// Whether `at` sits inside any of these spans, edges included.
++fn contains(spans: &[(f64, f64)], at: f64) -> bool {
++    spans
++        .iter()
++        .any(|(start, end)| start - TOUCH <= at && at <= end + TOUCH)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::subtitle::Cue;
++
++    fn cue(start: f64, end: f64, text: &str) -> Cue {
++        Cue {
++            start,
++            end,
++            text: text.to_owned(),
++        }
++    }
++
++    /// No cues, typed: an empty slice cannot say which cue it is empty of.
++    fn no_cues() -> Vec<Cue> {
++        Vec::new()
++    }
++
++    /// The filter's own output, as it prints it: two keys on two lines, the
++    /// end sharing its line with the duration.
++    const DETECTED: &str = "\
++[silencedetect @ 0x1] silence_start: 1.5
++[silencedetect @ 0x1] silence_end: 3.25 | silence_duration: 1.75
++[silencedetect @ 0x1] silence_start: 8
++";
++
++    #[test]
++    fn the_lines_a_silence_filter_prints_read_as_the_spans_they_describe() {
++        assert_eq!(
++            silence_spans(DETECTED, 10.0),
++            vec![(1.5, 3.25), (8.0, 10.0)]
++        );
++    }
++
++    #[test]
++    fn a_silence_running_to_the_end_of_the_file_ends_at_the_file() {
++        // The filter never prints silence_end for the last pause of a
++        // recording, which is the one an editor most wants gone.
++        assert_eq!(
++            silence_spans("[silencedetect] silence_start: 12.5", 20.0),
++            vec![(12.5, 20.0)]
++        );
++    }
++
++    #[test]
++    fn an_end_with_no_start_behind_it_invents_no_silence() {
++        assert_eq!(
++            silence_spans("silence_end: 3.0 | silence_duration: 3", 10.0),
++            vec![]
++        );
++    }
++
++    #[test]
++    fn a_negative_start_reads_as_zero() {
++        // The filter prints -0.001 for a recording that opens on silence.
++        assert_eq!(
++            silence_spans("silence_start: -0.001\nsilence_end: 2", 10.0),
++            vec![(0.0, 2.0)]
++        );
++    }
++
++    #[test]
++    fn a_log_with_no_silence_in_it_reads_as_no_spans() {
++        assert_eq!(
++            silence_spans("Input #0, mov,mp4\n  Duration: 00:00:10.00\n", 10.0),
++            vec![]
++        );
++        assert_eq!(silence_spans("", 10.0), vec![]);
++    }
++
++    #[test]
++    fn overlapping_spans_become_one() {
++        assert_eq!(
++            merge(&[(0.0, 5.0), (3.0, 8.0), (20.0, 21.0)], 0.0),
++            vec![(0.0, 8.0), (20.0, 21.0)]
++        );
++    }
++
++    #[test]
++    fn spans_that_only_touch_become_one() {
++        // Two detected pauses with a hair between them are one pause, and
++        // the hair is not worth a cut in the picture.
++        assert_eq!(merge(&[(0.0, 5.0), (5.0, 8.0)], 0.0), vec![(0.0, 8.0)]);
++    }
++
++    #[test]
++    fn unsorted_spans_come_back_sorted() {
++        assert_eq!(
++            merge(&[(20.0, 21.0), (0.0, 5.0), (9.0, 10.0)], 0.0),
++            vec![(0.0, 5.0), (9.0, 10.0), (20.0, 21.0)]
++        );
++    }
++
++    #[test]
++    fn a_pad_keeps_air_at_both_ends_of_every_cut_and_merges_what_it_joins() {
++        // Two pauses a fifth of a second apart, padded by a tenth on each
++        // side, meet: one span, not two with a sliver between.
++        assert_eq!(merge(&[(1.0, 2.0), (2.2, 3.0)], 0.1), vec![(0.9, 3.1)]);
++        assert_eq!(merge(&[(1.0, 2.0)], 0.1), vec![(0.9, 2.1)]);
++    }
++
++    #[test]
++    fn a_pad_never_takes_a_span_before_the_start_of_the_source() {
++        assert_eq!(merge(&[(0.05, 1.0)], 0.5), vec![(0.0, 1.5)]);
++    }
++
++    #[test]
++    fn the_complement_of_the_silences_is_what_survives_the_trim() {
++        let silences = vec![(1.0, 2.0), (5.0, 6.0)];
++        assert_eq!(
++            complement(&silences, 10.0, MIN_KEEP),
++            vec![(0.0, 1.0), (2.0, 5.0), (6.0, 10.0)]
++        );
++    }
++
++    #[test]
++    fn a_source_that_is_all_silence_keeps_nothing() {
++        assert_eq!(complement(&[(0.0, 10.0)], 10.0, MIN_KEEP), vec![]);
++    }
++
++    #[test]
++    fn a_source_with_no_silence_keeps_all_of_itself() {
++        assert_eq!(complement(&[], 10.0, MIN_KEEP), vec![(0.0, 10.0)]);
++    }
++
++    #[test]
++    fn a_kept_range_too_short_to_hold_is_not_kept() {
++        // Two silences 30 ms apart: the piece between them is shorter than
++        // MIN_KEEP, so it goes with them rather than becoming a stutter.
++        assert_eq!(
++            complement(&[(1.0, 2.0), (2.03, 4.0)], 10.0, MIN_KEEP),
++            vec![(0.0, 1.0), (4.0, 10.0)]
++        );
++    }
++
++    #[test]
++    fn a_silence_past_the_end_of_the_source_is_clipped_to_it() {
++        assert_eq!(complement(&[(8.0, 99.0)], 10.0, MIN_KEEP), vec![(0.0, 8.0)]);
++    }
++
++    #[test]
++    fn overlapping_silences_are_folded_before_the_complement_is_taken() {
++        assert_eq!(
++            complement(&[(1.0, 5.0), (3.0, 8.0)], 10.0, MIN_KEEP),
++            vec![(0.0, 1.0), (8.0, 10.0)]
++        );
++    }
++
++    #[test]
++    fn the_kept_ranges_add_up_to_the_source_minus_the_silence() {
++        let silences = silence_spans(DETECTED, 10.0);
++        let kept = complement(&silences, 10.0, MIN_KEEP);
++        let silence: f64 = merge(&silences, 0.0).iter().map(|(s, e)| e - s).sum();
++        let kept_total: f64 = kept.iter().map(|(s, e)| e - s).sum();
++        assert!(
++            (kept_total + silence - 10.0).abs() < 1e-9,
++            "{kept_total} + {silence}"
++        );
++    }
++
++    #[test]
++    fn a_tiling_covers_the_source_exactly() {
++        let cues = vec![cue(0.5, 2.0, "hello"), cue(4.0, 6.0, "world")];
++        let silences = vec![(2.5, 3.5)];
++        let sections = build_sections(10.0, &silences, &cues, MIN_SECTION_MS);
++
++        assert_eq!(sections.first().unwrap().start, 0.0, "starts at zero");
++        assert_eq!(sections.last().unwrap().end, 10.0, "ends at the source");
++        for pair in sections.windows(2) {
++            assert_eq!(pair[0].end, pair[1].start, "no gap and no overlap");
++        }
++        let total: f64 = sections.iter().map(|s| s.end - s.start).sum();
++        assert!((total - 10.0).abs() < 1e-9, "{total}");
++    }
++
++    #[test]
++    fn every_piece_is_one_kind_because_the_edges_come_from_both_sets() {
++        // A cue from 0.5 to 2.0 with a silence from 1.0 to 3.0 would be one
++        // row of two meanings if the boundaries came from one set only.
++        let sections = build_sections(4.0, &[(1.0, 3.0)], &[cue(0.5, 2.0, "hi")], MIN_SECTION_MS);
++        let kinds: Vec<_> = sections.iter().map(|s| s.kind).collect();
++        assert!(kinds.contains(&Kind::Caption), "{kinds:?}");
++        assert!(kinds.contains(&Kind::Silence), "{kinds:?}");
++        assert!(kinds.contains(&Kind::Other), "{kinds:?}");
++        for section in &sections {
++            let middle = (section.start + section.end) / 2.0;
++            assert_eq!(
++                section.kind,
++                kind_at(middle, &[(1.0, 3.0)], &[cue(0.5, 2.0, "hi")]),
++                "{section:?} is labelled by its own middle"
++            );
++        }
++    }
++
++    /// What a moment is, by the same rule the tiling uses.
++    fn kind_at(at: f64, silences: &[(f64, f64)], cues: &[Cue]) -> Kind {
++        if contains(silences, at) {
++            Kind::Silence
++        } else if cues
++            .iter()
++            .any(|c| c.start - TOUCH <= at && at <= c.end + TOUCH)
++        {
++            Kind::Caption
++        } else {
++            Kind::Other
++        }
++    }
++
++    #[test]
++    fn a_caption_section_carries_the_words_of_the_cue_it_covers() {
++        let sections = build_sections(5.0, &[], &[cue(1.0, 3.0, "the words")], MIN_SECTION_MS);
++        let caption = sections.iter().find(|s| s.kind == Kind::Caption).unwrap();
++        assert_eq!(caption.text, "the words");
++        assert_eq!((caption.start, caption.end), (1.0, 3.0));
++    }
++
++    #[test]
++    fn a_silence_and_an_other_section_carry_no_words() {
++        let sections = build_sections(5.0, &[(2.0, 3.0)], &no_cues(), MIN_SECTION_MS);
++        assert!(sections.iter().all(|s| s.text.is_empty()), "{sections:?}");
++    }
++
++    #[test]
++    fn a_cue_crossed_by_a_silence_reads_as_one_row_on_each_side_of_it() {
++        // One cue, one silence inside it: three sections, and the two
++        // caption ones are separate because a silence sits between them.
++        let sections = build_sections(
++            6.0,
++            &[(2.0, 3.0)],
++            &[cue(1.0, 4.0, "one two three")],
++            MIN_SECTION_MS,
++        );
++        let captions: Vec<_> = sections
++            .iter()
++            .filter(|s| s.kind == Kind::Caption)
++            .collect();
++        assert_eq!(captions.len(), 2, "{sections:?}");
++        assert!(captions.iter().all(|s| s.text == "one two three"));
++    }
++
++    #[test]
++    fn two_cues_that_touch_are_not_merged_into_one_row() {
++        // Merging is by kind *and* words: adjacent captions of different
++        // sentences stay two rows, or the list cannot choose between them.
++        let sections = build_sections(
++            4.0,
++            &[],
++            &[cue(0.0, 1.0, "first"), cue(1.0, 2.0, "second")],
++            MIN_SECTION_MS,
++        );
++        let captions: Vec<_> = sections
++            .iter()
++            .filter(|s| s.kind == Kind::Caption)
++            .collect();
++        assert_eq!(captions.len(), 2, "{sections:?}");
++        assert_eq!(captions[0].text, "first");
++        assert_eq!(captions[1].text, "second");
++    }
++
++    #[test]
++    fn a_sliver_folds_into_the_section_before_it() {
++        // 20 ms of other between two captions is under MIN_SECTION_MS, so
++        // it joins the first caption rather than becoming an unreadable row.
++        let cues = vec![cue(0.0, 1.0, "a"), cue(1.02, 2.0, "b")];
++        let sections = build_sections(2.0, &[], &cues, MIN_SECTION_MS);
++        assert!(
++            sections
++                .iter()
++                .all(|s| s.end - s.start >= 0.12 || s.kind == Kind::Caption),
++            "{sections:?}"
++        );
++        assert!(
++            !sections
++                .iter()
++                .any(|s| s.kind == Kind::Other && s.end - s.start < 0.12),
++            "no 20 ms row survives: {sections:?}"
++        );
++    }
++
++    #[test]
++    fn a_sliver_first_folds_forward_into_the_section_after_it() {
++        // The first section has nothing before it, so it joins the next.
++        let sections = build_sections(2.0, &[], &[cue(0.02, 2.0, "late start")], MIN_SECTION_MS);
++        assert_eq!(sections.first().unwrap().start, 0.0);
++        assert_eq!(sections.len(), 1, "{sections:?}");
++        assert_eq!(sections[0].kind, Kind::Caption);
++    }
++
++    #[test]
++    fn a_source_with_nothing_detected_is_one_section() {
++        let sections = build_sections(10.0, &[], &no_cues(), MIN_SECTION_MS);
++        assert_eq!(sections.len(), 1);
++        assert_eq!(sections[0].kind, Kind::Other);
++        assert_eq!((sections[0].start, sections[0].end), (0.0, 10.0));
++    }
++
++    #[test]
++    fn a_zero_length_source_tiles_to_nothing() {
++        assert_eq!(build_sections(0.0, &[], &no_cues(), MIN_SECTION_MS), vec![]);
++    }
++
++    #[test]
++    fn cues_and_silences_outside_the_source_are_clipped_into_it() {
++        let sections = build_sections(
++            5.0,
++            &[(-1.0, 1.0), (4.0, 99.0)],
++            &[cue(-2.0, 0.5, "early"), cue(4.5, 20.0, "late")],
++            MIN_SECTION_MS,
++        );
++        assert_eq!(sections.first().unwrap().start, 0.0);
++        assert_eq!(sections.last().unwrap().end, 5.0);
++        assert!(
++            sections.iter().all(|s| s.start >= 0.0 && s.end <= 5.0),
++            "{sections:?}"
++        );
++    }
++
++    #[test]
++    fn the_caption_layer_without_a_silence_pass_makes_the_gaps_other() {
++        let sections = sections_from_cues(
++            6.0,
++            &[cue(1.0, 2.0, "hi"), cue(4.0, 5.0, "again")],
++            MIN_SECTION_MS,
++        );
++        let kinds: Vec<_> = sections.iter().map(|s| s.kind).collect();
++        assert_eq!(
++            kinds,
++            vec![
++                Kind::Other,
++                Kind::Caption,
++                Kind::Other,
++                Kind::Caption,
++                Kind::Other
++            ]
++        );
++        assert!(
++            !kinds.contains(&Kind::Silence),
++            "nothing was detected as silence"
++        );
++    }
++
++    #[test]
++    fn a_summary_counts_the_seconds_and_the_rows_of_each_kind() {
++        let sections = build_sections(
++            10.0,
++            &[(3.0, 5.0)],
++            &[cue(0.0, 2.0, "a"), cue(6.0, 8.0, "b")],
++            MIN_SECTION_MS,
++        );
++        let summary = summarize(&sections);
++
++        assert_eq!(summary.count, sections.len());
++        assert_eq!(
++            summary.captions + summary.silences + summary.others,
++            summary.count
++        );
++        assert_eq!(summary.silences, 1);
++        assert_eq!(summary.silence_seconds, 2.0);
++        assert_eq!(summary.captions, 2);
++        assert_eq!(summary.caption_seconds, 4.0);
++        assert_eq!(summary.total, 10.0);
++        assert!(
++            (summary.caption_seconds + summary.silence_seconds + summary.other_seconds
++                - summary.total)
++                .abs()
++                < 1e-9,
++            "{summary:?}"
++        );
++    }
++
++    #[test]
++    fn a_summary_of_nothing_is_zeroes() {
++        assert_eq!(summarize(&[]), Summary::default());
++    }
++
++    #[test]
++    fn a_sections_duration_is_what_the_row_shows() {
++        let section = Section {
++            kind: Kind::Caption,
++            start: 1.0,
++            end: 2.5,
++            text: "x".to_owned(),
++        };
++        assert_eq!(section.duration(), 1.5);
++    }
++
++    #[test]
++    fn deleting_every_silence_section_is_the_same_trim_as_the_complement() {
++        // The two routes to a trim have to agree, or the list a user ticks
++        // and the ranges an export keeps are different edits.
++        let silences = silence_spans(DETECTED, 10.0);
++        let sections = build_sections(10.0, &silences, &no_cues(), MIN_SECTION_MS);
++
++        let mut ticked: Vec<(f64, f64)> = sections
++            .iter()
++            .filter(|s| s.kind != Kind::Silence)
++            .map(|s| (s.start, s.end))
++            .collect();
++        ticked.sort_by(|a, b| a.0.total_cmp(&b.0));
++
++        let kept = complement(&silences, 10.0, MIN_KEEP);
++        let ticked_total: f64 = ticked.iter().map(|(s, e)| e - s).sum();
++        let kept_total: f64 = kept.iter().map(|(s, e)| e - s).sum();
++        assert!(
++            (ticked_total - kept_total).abs() < 1e-9,
++            "ticked {ticked:?} vs kept {kept:?}"
++        );
++    }
++}
+diff --git a/src/crates/concat-project/src/subtitle.rs b/src/crates/concat-project/src/subtitle.rs
+new file mode 100644
+index 0000000..aa95603
+--- /dev/null
++++ b/src/crates/concat-project/src/subtitle.rs
+@@ -0,0 +1,515 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
++
++//! Sidecar subtitles: SubRip and WebVTT, in and out.
++//!
++//! A caption file is the one caption shape every player, every uploader and
++//! every other editor agrees on, so it is both how words arrive from
++//! somewhere else and how they leave. What is here is text and nothing else:
++//! no files, no FFmpeg, no engine type, so a cue list can be parsed, cut,
++//! remapped and written back without a project being open.
++//!
++//! Both formats are read by the same pass, because they differ in their
++//! header and their decimal mark and in almost nothing else: a block, a
++//! timing line holding two stamps either side of `-->`, and the words under
++//! it. WebVTT's extras - the `WEBVTT` header, `NOTE` and `STYLE` and
++//! `REGION` blocks, cue settings, and the `<v Roger>` tags - are recognised
++//! and dropped rather than parsed, since a subtitle file's job here is to
++//! say what was heard and when.
++//!
++//! Word-level timings do not survive this format: neither SRT nor VTT has a
++//! place for them. A cue that arrives from a file therefore carries its
++//! words and no timings for them, and [`crate::captionmap`] is where a cue's
++//! words are carried through a cut. See also [`crate::sections`] for the
++//! word grouping a transcription's own timings allow.
++
++/// One cue: what was said, and when, in seconds.
++#[derive(Clone, Debug, PartialEq)]
++pub struct Cue {
++    /// Seconds from the start of the media the words are heard over.
++    pub start: f64,
++    /// Seconds; always after [`Cue::start`], since a cue that ends where it
++    /// began is a cue nothing can read.
++    pub end: f64,
++    /// The words, one line's worth of them joined by single spaces.
++    pub text: String,
++}
++
++/// How close two times may be and still count as the same time. Float
++/// seconds that should meet exactly sometimes miss by a hair.
++const TOUCH: f64 = 1e-6;
++
++/// The most decimal digits a stamp's fraction carries. SRT writes three and
++/// tolerates fewer on the way in; a fourth digit is read and then rounded
++/// away, the way a player rounds it.
++const MILLIS: u32 = 3;
++
++/// Reads SubRip or WebVTT text into cues, in the order they are heard.
++///
++/// Tolerant on purpose: a byte-order mark, CRLF line endings, a lone CR,
++/// cue indices, a `WEBVTT` header with anything after it on the line,
++/// `NOTE` / `STYLE` / `REGION` blocks, cue settings that leaked onto their
++/// own line, inline tags, and a `MM:SS.mmm` stamp with the hours left off
++/// all arrive in real files. A block with no timing line in it is not a cue
++/// and is skipped, which is how a header or a note is skipped without
++/// anything naming it.
++pub fn parse(text: &str) -> Vec<Cue> {
++    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
++    let mut cues = Vec::new();
++
++    // A block is what sits between two blank lines. `split` on a predicate
++    // rather than on "\n\n" because a file may separate its blocks with a
++    // line of spaces, and may end without a trailing newline at all.
++    for block in split_blocks(text) {
++        let lines: Vec<&str> = block
++            .lines()
++            .map(str::trim)
++            .filter(|line| !line.is_empty())
++            .collect();
++
++        // The timing line is what makes a block a cue. Everything above it
++        // is an index or a header; everything below it is words.
++        let Some(at) = lines.iter().position(|line| timing(line).is_some()) else {
++            continue;
++        };
++        let Some((start, end)) = timing(lines[at]) else {
++            continue;
++        };
++        if end <= start + TOUCH {
++            continue;
++        }
++
++        let text = lines[at + 1..]
++            .iter()
++            // A VTT cue setting that ended up on its own line is not words.
++            .filter(|line| !is_block_keyword(line))
++            .map(|line| strip_tags(line))
++            .map(|line| line.trim().to_owned())
++            .filter(|line| !line.is_empty())
++            .collect::<Vec<_>>()
++            .join(" ");
++
++        cues.push(Cue {
++            start: round_millis(start),
++            end: round_millis(end),
++            text,
++        });
++    }
++
++    // A file out of order is still a file; the timeline wants them as heard.
++    cues.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.end.total_cmp(&b.end)));
++    cues
++}
++
++/// The two ends of a timing line, or None when the line is not one.
++///
++/// Reads `HH:MM:SS,mmm --> HH:MM:SS.mmm` and every relaxed form of it: the
++/// hours may be left off, the fraction may be one to three digits, and the
++/// mark between the seconds and it may be a comma or a point. What follows
++/// the second stamp is a WebVTT cue setting and is not part of it.
++fn timing(line: &str) -> Option<(f64, f64)> {
++    let arrow = line.find("-->")?;
++    let start = stamp(&line[..arrow])?;
++    let end = stamp(&line[arrow + 3..])?;
++    Some((start, end))
++}
++
++/// One timestamp as seconds, read from the front of a slice that may carry
++/// anything after it.
++///
++/// Reading forwards rather than taking the whole slice is what lets a VTT
++/// timing line keep its cue settings: in `00:00:02.000 line:90%`, the point
++/// in `line:90%` is not a decimal mark, and a reader that looked for the
++/// last one on the line would try to parse `90% position:50%` as a fraction
++/// of a second and lose the cue.
++fn stamp(slice: &str) -> Option<f64> {
++    let slice = slice.trim_start();
++    let end = slice
++        .find(|c: char| !c.is_ascii_digit() && c != ':' && c != ',' && c != '.')
++        .unwrap_or(slice.len());
++    let slice = slice[..end].trim_end();
++
++    let at = slice.rfind([',', '.'])?;
++    let (whole, fraction) = (&slice[..at], &slice[at + 1..]);
++    if fraction.is_empty() || fraction.len() > MILLIS as usize || !all_digits(fraction) {
++        return None;
++    }
++
++    // One to three digits, read as the leading digits of a millisecond
++    // count: `.5` is half a second, not five milliseconds.
++    let mut millis = 0u32;
++    for (place, digit) in fraction.bytes().enumerate() {
++        millis += (digit - b'0') as u32 * 10u32.pow(2 - place as u32);
++    }
++
++    let mut clock = whole.split(':');
++    let first = clock.next()?.trim();
++    if !all_digits(first) {
++        return None;
++    }
++    let (hours, minutes, seconds) = match (clock.next(), clock.next(), clock.next()) {
++        // HH:MM:SS
++        (Some(m), Some(s), None) => {
++            if !all_digits(m.trim()) || !all_digits(s.trim()) {
++                return None;
++            }
++            (
++                first.parse::<u32>().ok()?,
++                m.trim().parse::<u32>().ok()?,
++                s.trim().parse::<u32>().ok()?,
++            )
++        }
++        // MM:SS, which WebVTT permits when the hours are zero
++        (Some(s), None, None) => {
++            if !all_digits(s.trim()) {
++                return None;
++            }
++            (0, first.parse::<u32>().ok()?, s.trim().parse::<u32>().ok()?)
++        }
++        // Anything longer is not a clock
++        _ => return None,
++    };
++    if minutes > 59 || seconds > 59 {
++        return None;
++    }
++
++    Some(hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds as f64 + millis as f64 / 1000.0)
++}
++
++/// Whether every byte is an ASCII digit, and there is at least one.
++fn all_digits(slice: &str) -> bool {
++    !slice.is_empty() && slice.bytes().all(|byte| byte.is_ascii_digit())
++}
++
++/// Drops inline tags: `<v Roger>`, `<b>`, `<00:00:01.000>`, and the rest.
++///
++/// A tag's contents go with it, which is right for a voice or a class and
++/// wrong for nothing that carries words: every tag VTT defines wraps either
++/// styling or a name.
++fn strip_tags(line: &str) -> String {
++    let mut out = String::with_capacity(line.len());
++    let mut rest = line;
++    while let Some(open) = rest.find('<') {
++        out.push_str(&rest[..open]);
++        rest = match rest[open + 1..].find('>') {
++            Some(close) => &rest[open + 1 + close + 1..],
++            // An unclosed '<' is a character, not a tag: the rest is words.
++            None => {
++                out.push_str(&rest[open..]);
++                return out;
++            }
++        };
++    }
++    out.push_str(rest);
++    out
++}
++
++/// Whether a line opens one of WebVTT's block kinds, which hold no words.
++fn is_block_keyword(line: &str) -> bool {
++    ["WEBVTT", "NOTE", "STYLE", "REGION"]
++        .iter()
++        .any(|keyword| line == *keyword || line.starts_with(&format!("{keyword} ")))
++}
++
++/// Splits on blank lines, where a blank line may carry spaces or tabs.
++fn split_blocks(text: &str) -> Vec<&str> {
++    let mut blocks = Vec::new();
++    let mut start = 0;
++    let mut index = 0;
++
++    for line in text.split_inclusive('\n') {
++        let length = line.len();
++        if line.trim().is_empty() {
++            if index > start {
++                blocks.push(&text[start..index]);
++            }
++            start = index + length;
++        }
++        index += length;
++    }
++    if start < text.len() {
++        blocks.push(&text[start..]);
++    }
++    blocks
++}
++
++/// Seconds rounded to what a subtitle file can write, so a cue read back is
++/// the cue that was written.
++fn round_millis(seconds: f64) -> f64 {
++    (seconds * 1000.0).round() / 1000.0
++}
++
++/// Seconds as an SRT stamp: `HH:MM:SS,mmm`, the comma being SubRip's.
++pub fn srt_stamp(seconds: f64) -> String {
++    clock(seconds).replace('.', ",")
++}
++
++/// Seconds as a WebVTT stamp: `HH:MM:SS.mmm`.
++pub fn vtt_stamp(seconds: f64) -> String {
++    clock(seconds)
++}
++
++/// The `HH:MM:SS.mmm` both formats share, from a count of seconds that is
++/// held to zero rather than allowed to go negative and print a sign.
++fn clock(seconds: f64) -> String {
++    let seconds = seconds.max(0.0);
++    let whole = seconds.floor() as u64;
++    let millis = ((seconds - whole as f64) * 1000.0).round() as u64;
++    // A fraction that rounds up to a whole second carries into it, the way
++    // a player's own formatter would.
++    let (whole, millis) = if millis >= 1000 {
++        (whole + 1, millis - 1000)
++    } else {
++        (whole, millis)
++    };
++    format!(
++        "{:02}:{:02}:{:02}.{:03}",
++        whole / 3600,
++        whole / 60 % 60,
++        whole % 60,
++        millis
++    )
++}
++
++/// The cues as an SRT file's text: numbered, comma-separated stamps, a
++/// blank line between.
++pub fn to_srt(cues: &[Cue]) -> String {
++    let mut out = String::new();
++    for (index, cue) in cues.iter().enumerate() {
++        out.push_str(&(index + 1).to_string());
++        out.push('\n');
++        out.push_str(&srt_stamp(cue.start));
++        out.push_str(" --> ");
++        out.push_str(&srt_stamp(cue.end));
++        out.push('\n');
++        out.push_str(cue.text.trim());
++        out.push_str("\n\n");
++    }
++    out
++}
++
++/// The cues as a WebVTT file's text: the header, then unnumbered cues.
++pub fn to_vtt(cues: &[Cue]) -> String {
++    let mut out = String::from("WEBVTT\n\n");
++    for cue in cues {
++        out.push_str(&vtt_stamp(cue.start));
++        out.push_str(" --> ");
++        out.push_str(&vtt_stamp(cue.end));
++        out.push('\n');
++        out.push_str(cue.text.trim());
++        out.push_str("\n\n");
++    }
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn cue(start: f64, end: f64, text: &str) -> Cue {
++        Cue {
++            start,
++            end,
++            text: text.to_owned(),
++        }
++    }
++
++    #[test]
++    fn an_srt_file_reads_as_the_cues_it_holds() {
++        let text = "1\n00:00:01,000 --> 00:00:03,500\nHello there\n\n\
++                    2\n00:00:04,000 --> 00:00:05,250\nSecond line\n\n";
++        assert_eq!(
++            parse(text),
++            vec![cue(1.0, 3.5, "Hello there"), cue(4.0, 5.25, "Second line")]
++        );
++    }
++
++    #[test]
++    fn a_webvtt_file_reads_as_the_same_cues() {
++        let text = "WEBVTT\n\n00:00:01.000 --> 00:00:03.500\nHello there\n\n\
++                    00:00:04.000 --> 00:00:05.250\nSecond line\n";
++        assert_eq!(
++            parse(text),
++            vec![cue(1.0, 3.5, "Hello there"), cue(4.0, 5.25, "Second line")]
++        );
++    }
++
++    #[test]
++    fn a_file_written_by_the_one_format_is_read_by_the_other() {
++        // The only thing that differs is the decimal mark, and a reader
++        // that accepts both means a cue list survives any round trip.
++        let cues = vec![cue(0.5, 1.25, "one"), cue(2.0, 3.0, "two")];
++        assert_eq!(parse(&to_srt(&cues)), cues);
++        assert_eq!(parse(&to_vtt(&cues)), cues);
++    }
++
++    #[test]
++    fn the_hours_may_be_left_off_a_webvtt_stamp() {
++        assert_eq!(
++            parse("WEBVTT\n\n01:02.500 --> 01:05.000\nShort form\n"),
++            vec![cue(62.5, 65.0, "Short form")]
++        );
++    }
++
++    #[test]
++    fn a_byte_order_mark_and_windows_line_endings_are_read_through() {
++        let text = "\u{feff}1\r\n00:00:01,000 --> 00:00:02,000\r\nMarked\r\n\r\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Marked")]);
++    }
++
++    #[test]
++    fn a_fraction_of_one_or_two_digits_is_read_as_a_fraction_of_a_second() {
++        // `.5` is half a second, not five milliseconds: the digits are the
++        // leading digits of a millisecond count.
++        assert_eq!(stamp("00:00:01.5"), Some(1.5));
++        assert_eq!(stamp("00:00:01.25"), Some(1.25));
++        assert_eq!(stamp("00:00:01.250"), Some(1.25));
++    }
++
++    #[test]
++    fn a_fourth_decimal_digit_is_read_and_then_rounded_away() {
++        assert_eq!(
++            stamp("00:00:01.2500"),
++            None,
++            "too many digits is not a stamp"
++        );
++        assert_eq!(parse("1\n00:00:01,2504 --> 00:00:02,000\nx\n"), vec![]);
++    }
++
++    #[test]
++    fn voice_and_class_tags_go_and_their_words_stay() {
++        let text = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Roger>Good <b>morning</b>\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Good morning")]);
++    }
++
++    #[test]
++    fn an_unclosed_angle_bracket_is_a_character_and_not_a_tag() {
++        let text = "1\n00:00:01,000 --> 00:00:02,000\na < b\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "a < b")]);
++    }
++
++    #[test]
++    fn a_cue_setting_trailing_the_timing_line_is_not_words() {
++        // The settings belong to the timing line, so they are above the body
++        // and never reach it - which is why a line:90% position survives as a
++        // position and does not become the first word of the caption.
++        let text = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 line:90% position:50%\nWords here\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Words here")]);
++    }
++
++    #[test]
++    fn a_note_block_of_its_own_holds_no_cues_and_leaks_no_words() {
++        let text = "WEBVTT\n\nNOTE\na comment on two lines\n\n\
++                    00:00:01.000 --> 00:00:02.000\nWords here\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Words here")]);
++    }
++
++    #[test]
++    fn a_note_block_and_a_style_block_hold_no_cues() {
++        let text = "WEBVTT - a title is allowed here\n\nNOTE\nThis is a comment\n\n\
++                    STYLE\n::cue { color: white }\n\n\
++                    00:00:01.000 --> 00:00:02.000\nOnly this\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Only this")]);
++    }
++
++    #[test]
++    fn the_cue_index_is_optional_and_ignored_when_present() {
++        let with = parse("7\n00:00:01,000 --> 00:00:02,000\nWords\n");
++        let without = parse("00:00:01,000 --> 00:00:02,000\nWords\n");
++        assert_eq!(with, without);
++        assert_eq!(with, vec![cue(1.0, 2.0, "Words")]);
++    }
++
++    #[test]
++    fn a_cue_that_ends_where_it_begins_is_not_a_cue() {
++        assert_eq!(parse("1\n00:00:01,000 --> 00:00:01,000\nNothing\n"), vec![]);
++        assert_eq!(
++            parse("1\n00:00:02,000 --> 00:00:01,000\nBackwards\n"),
++            vec![]
++        );
++    }
++
++    #[test]
++    fn two_lines_of_one_cue_become_one_line_of_words() {
++        let text = "1\n00:00:01,000 --> 00:00:03,000\nFirst line\nSecond line\n";
++        assert_eq!(parse(text), vec![cue(1.0, 3.0, "First line Second line")]);
++    }
++
++    #[test]
++    fn cues_out_of_order_come_back_in_the_order_they_are_heard() {
++        let text = "1\n00:00:05,000 --> 00:00:06,000\nLater\n\n\
++                    2\n00:00:01,000 --> 00:00:02,000\nSooner\n";
++        assert_eq!(
++            parse(text),
++            vec![cue(1.0, 2.0, "Sooner"), cue(5.0, 6.0, "Later")]
++        );
++    }
++
++    #[test]
++    fn a_block_with_no_timing_line_in_it_is_skipped() {
++        let text = "WEBVTT\n\nKind: captions\nLanguage: en\n\n\
++                    00:00:01.000 --> 00:00:02.000\nReal cue\n";
++        assert_eq!(parse(text), vec![cue(1.0, 2.0, "Real cue")]);
++    }
++
++    #[test]
++    fn an_empty_file_and_a_file_of_nothing_but_a_header_have_no_cues() {
++        assert_eq!(parse(""), vec![]);
++        assert_eq!(parse("WEBVTT\n\n"), vec![]);
++        assert_eq!(parse("\n\n\n"), vec![]);
++    }
++
++    #[test]
++    fn words_in_any_script_survive_the_round_trip() {
++        // The point of a local editor is that it is nobody's business what
++        // language the words are in, so the writer escapes nothing.
++        let cues = vec![
++            cue(0.0, 1.5, "Selamat pagi"),
++            cue(1.5, 3.0, "こんにちは世界"),
++            cue(3.0, 4.5, "مرحبا بالعالم"),
++        ];
++        assert_eq!(parse(&to_srt(&cues)), cues);
++        assert_eq!(parse(&to_vtt(&cues)), cues);
++    }
++
++    #[test]
++    fn a_stamp_writes_the_hours_it_was_given() {
++        assert_eq!(srt_stamp(3661.5), "01:01:01,500");
++        assert_eq!(vtt_stamp(3661.5), "01:01:01.500");
++        assert_eq!(srt_stamp(0.0), "00:00:00,000");
++    }
++
++    #[test]
++    fn a_negative_time_writes_as_zero_rather_than_as_a_sign() {
++        assert_eq!(srt_stamp(-1.0), "00:00:00,000");
++        assert_eq!(vtt_stamp(-0.5), "00:00:00.000");
++    }
++
++    #[test]
++    fn a_fraction_that_rounds_up_to_a_second_carries_into_it() {
++        assert_eq!(vtt_stamp(1.9999), "00:00:02.000");
++        assert_eq!(vtt_stamp(59.9999), "00:01:00.000");
++    }
++
++    #[test]
++    fn the_srt_numbers_its_cues_from_one_and_the_vtt_does_not_number_them() {
++        let cues = vec![cue(0.0, 1.0, "a"), cue(1.0, 2.0, "b")];
++        assert!(to_srt(&cues).starts_with("1\n00:00:00,000"));
++        assert!(to_srt(&cues).contains("\n\n2\n00:00:01,000"));
++        assert!(to_vtt(&cues).starts_with("WEBVTT\n\n00:00:00.000"));
++        assert!(!to_vtt(&cues).contains("\n1\n"));
++    }
++
++    #[test]
++    fn a_cue_read_back_is_the_cue_that_was_written() {
++        // The writer rounds to milliseconds because the format cannot hold
++        // more, so a cue whose times are already on that grid is exact.
++        let cues = vec![
++            cue(0.0, 0.04, "a"),
++            cue(12.34, 12.71, "b"),
++            cue(3599.999, 3600.001, "c"),
++        ];
++        assert_eq!(parse(&to_srt(&cues)), cues);
++        assert_eq!(parse(&to_vtt(&cues)), cues);
++    }
++}
+-- 
+2.47.3
+
