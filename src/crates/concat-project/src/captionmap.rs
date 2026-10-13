@@ -547,6 +547,418 @@ pub fn has_words(cues: &[Cue]) -> bool {
     cues.iter().any(|cue| !cue.words.is_empty())
 }
 
+/// Named VTS caption layout presets for grouping words into cues.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptionLayoutPreset {
+    /// Keep the recognizer's own segments unchanged.
+    #[default]
+    Engine,
+    /// Classic readable subtitle lines (`<= 7` words, `42` chars, or `6.0` s).
+    Line,
+    /// Short-form vertical burst (`<= 3` words, `18` chars, or `2.5` s).
+    Burst,
+    /// One word (or CJK character) per cue.
+    Word,
+}
+
+impl CaptionLayoutPreset {
+    /// Parses a preset index or VTS preset id (`"engine"`, `"line"`, `"burst"`, `"word"`).
+    pub fn from_index(index: usize) -> Self {
+        match index {
+            1 => Self::Line,
+            2 => Self::Burst,
+            3 => Self::Word,
+            _ => Self::Engine,
+        }
+    }
+
+    /// The 0-based selector index matching `autocaption.txt`.
+    pub fn index(self) -> usize {
+        match self {
+            Self::Engine => 0,
+            Self::Line => 1,
+            Self::Burst => 2,
+            Self::Word => 3,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GroupPolicy {
+    max_words: usize,
+    max_chars: usize,
+    max_duration: f64,
+    min_duration: f64,
+    pause: f64,
+    break_punct: bool,
+}
+
+impl GroupPolicy {
+    fn for_preset(preset: CaptionLayoutPreset) -> Option<Self> {
+        match preset {
+            CaptionLayoutPreset::Engine => None,
+            CaptionLayoutPreset::Line => Some(Self {
+                max_words: 7,
+                max_chars: 42,
+                max_duration: 6.0,
+                min_duration: 0.8,
+                pause: 0.6,
+                break_punct: true,
+            }),
+            CaptionLayoutPreset::Burst => Some(Self {
+                max_words: 3,
+                max_chars: 18,
+                max_duration: 2.5,
+                min_duration: 0.4,
+                pause: 0.35,
+                break_punct: true,
+            }),
+            CaptionLayoutPreset::Word => Some(Self {
+                max_words: 1,
+                max_chars: 0,
+                max_duration: 0.0,
+                min_duration: 0.0,
+                pause: 0.0,
+                break_punct: false,
+            }),
+        }
+    }
+}
+
+fn is_cjk_char(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x1100..=0x11FF
+            | 0x2E80..=0x303F
+            | 0x3040..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xAC00..=0xD7AF
+            | 0xF900..=0xFAFF
+            | 0x0E00..=0x0E7F
+            | 0x0E80..=0x0EFF
+            | 0x1000..=0x109F
+            | 0x1780..=0x17FF
+    )
+}
+
+/// Splits caption text into layout units: whitespace-separated words for Latin
+/// scripts, and per-character units (with trailing punctuation attached) for
+/// scripts written without spaces.
+fn text_tokens(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut gap = true;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            gap = true;
+            continue;
+        }
+        if is_cjk_char(ch) {
+            if ch.is_alphanumeric() {
+                out.push(ch.to_string());
+            } else if let Some(last) = out.last_mut() {
+                last.push(ch);
+            } else {
+                out.push(ch.to_string());
+            }
+            gap = false;
+            continue;
+        }
+        if ch.is_alphanumeric() {
+            let append = !gap
+                && out
+                    .last()
+                    .and_then(|s| s.chars().last())
+                    .is_some_and(|tail| !is_cjk_char(tail) && tail.is_alphanumeric());
+            if append {
+                if let Some(last) = out.last_mut() {
+                    last.push(ch);
+                }
+            } else {
+                out.push(ch.to_string());
+            }
+            gap = false;
+            continue;
+        }
+        if let Some(last) = out.last_mut() {
+            last.push(ch);
+        } else {
+            out.push(ch.to_string());
+        }
+        gap = false;
+    }
+    out
+}
+
+fn expand_word_units(word: &Word) -> Vec<Word> {
+    let units = text_tokens(&word.text);
+    if units.len() <= 1 {
+        return vec![word.clone()];
+    }
+    let span = (word.end - word.start).max(MIN_WORD * units.len() as f64);
+    let weights: Vec<f64> = units
+        .iter()
+        .map(|u| (u.chars().count() + 1) as f64)
+        .collect();
+    let total: f64 = weights.iter().sum::<f64>().max(1.0);
+    let mut at = word.start;
+    units
+        .into_iter()
+        .zip(weights)
+        .map(|(text, wt)| {
+            let dur = span * wt / total;
+            let item = Word {
+                text,
+                start: round_millis(at),
+                end: round_millis(at + dur),
+            };
+            at += dur;
+            item
+        })
+        .collect()
+}
+
+fn words_for_resplit(cue: &Cue) -> (Vec<Word>, WordSource) {
+    let cleaned = clean_words(&cue.words, Some(cue.start), Some(cue.end)).0;
+    if !cleaned.is_empty() {
+        let expanded: Vec<Word> = cleaned.iter().flat_map(expand_word_units).collect();
+        let src = cue.word_source.unwrap_or(WordSource::Whispercpp);
+        return (
+            clean_words(&expanded, Some(cue.start), Some(cue.end)).0,
+            src,
+        );
+    }
+    let units = text_tokens(&cue.text);
+    if units.is_empty() {
+        return (Vec::new(), WordSource::Estimated);
+    }
+    let span = (cue.end - cue.start).max(0.05);
+    let weights: Vec<f64> = units
+        .iter()
+        .map(|u| (u.chars().count() + 1) as f64)
+        .collect();
+    let total: f64 = weights.iter().sum::<f64>().max(1.0);
+    let mut at = cue.start;
+    let raw: Vec<Word> = units
+        .into_iter()
+        .zip(weights)
+        .map(|(text, wt)| {
+            let dur = span * wt / total;
+            let w = Word {
+                text,
+                start: round_millis(at),
+                end: round_millis(at + dur),
+            };
+            at += dur;
+            w
+        })
+        .collect();
+    (
+        clean_words(&raw, Some(cue.start), Some(cue.end)).0,
+        WordSource::Estimated,
+    )
+}
+
+fn join_group_words(words: &[Word]) -> String {
+    let mut out = String::new();
+    for word in words {
+        let part = word.text.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if out.is_empty() {
+            out.push_str(part);
+        } else {
+            let prev_cjk = out.chars().last().is_some_and(is_cjk_char);
+            let next_cjk = part.chars().next().is_some_and(is_cjk_char);
+            if !(prev_cjk && next_cjk) {
+                out.push(' ');
+            }
+            out.push_str(part);
+        }
+    }
+    out
+}
+
+fn last_meaningful_char(word: &str) -> Option<char> {
+    word.trim_end()
+        .trim_end_matches(['"', '\'', '”', '’', ')', ']', '}', '»'])
+        .trim_end()
+        .chars()
+        .last()
+}
+
+fn ends_sentence(word: &str) -> bool {
+    last_meaningful_char(word).is_some_and(|ch| ".!?…。！？".contains(ch))
+}
+
+fn ends_clause(word: &str) -> bool {
+    last_meaningful_char(word).is_some_and(|ch| ",;:，、；：、".contains(ch))
+}
+
+fn word_fits_group(cur: &[Word], next: &Word, pol: GroupPolicy) -> bool {
+    let Some(last) = cur.last() else {
+        return true;
+    };
+    let first = &cur[0];
+    let gap = next.start - last.end;
+    if pol.pause > 0.0 && gap > pol.pause {
+        return false;
+    }
+    if pol.max_words > 0 && cur.len() + 1 > pol.max_words {
+        return false;
+    }
+    if pol.max_duration > 0.0 && (next.end - first.start) > pol.max_duration + 1e-9 {
+        return false;
+    }
+    if pol.break_punct {
+        if ends_sentence(&last.text) {
+            return false;
+        }
+        if cur.len() >= 2 && ends_clause(&last.text) {
+            return false;
+        }
+    }
+    if pol.max_chars > 0 {
+        let mut candidate = cur.to_vec();
+        candidate.push(next.clone());
+        if join_group_words(&candidate).chars().count() > pol.max_chars {
+            return false;
+        }
+    }
+    true
+}
+
+fn can_merge_groups(a: &[Word], b: &[Word], pol: GroupPolicy) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if pol.max_words > 0 && a.len() + b.len() > pol.max_words {
+        return false;
+    }
+    if pol.max_duration > 0.0 && (b.last().unwrap().end - a[0].start) > pol.max_duration + 1e-9 {
+        return false;
+    }
+    if pol.max_chars > 0 {
+        let mut combined = a.to_vec();
+        combined.extend_from_slice(b);
+        if join_group_words(&combined).chars().count() > pol.max_chars {
+            return false;
+        }
+    }
+    let gap_limit = (if pol.pause > 0.0 { pol.pause } else { 0.5 }) + 0.3;
+    (b[0].start - a.last().unwrap().end) <= gap_limit
+}
+
+/// Re-splits a list of cues into a new cue list using `preset`, without
+/// re-running transcription.
+pub fn resplit_cues(cues: &[Cue], preset: CaptionLayoutPreset) -> Vec<Cue> {
+    let Some(policy) = GroupPolicy::for_preset(preset) else {
+        return cues
+            .iter()
+            .filter_map(|cue| {
+                let text = cue.text.split_whitespace().collect::<Vec<_>>().join(" ");
+                if text.is_empty() || cue.end <= cue.start {
+                    return None;
+                }
+                let (words, source) = words_for_resplit(cue);
+                Some(Cue {
+                    start: round_millis(cue.start),
+                    end: round_millis(cue.end),
+                    text,
+                    words,
+                    word_source: Some(source),
+                    ..cue.clone()
+                })
+            })
+            .collect();
+    };
+
+    let mut tagged: Vec<(Word, WordSource)> = Vec::new();
+    for cue in cues {
+        let (words, source) = words_for_resplit(cue);
+        for word in words {
+            tagged.push((word, source));
+        }
+    }
+    if tagged.is_empty() {
+        return Vec::new();
+    }
+    tagged.sort_by(|a, b| {
+        a.0.start
+            .total_cmp(&b.0.start)
+            .then(a.0.end.total_cmp(&b.0.end))
+    });
+
+    let mut groups: Vec<Vec<(Word, WordSource)>> = vec![vec![tagged[0].clone()]];
+    for item in tagged.into_iter().skip(1) {
+        let cur_words: Vec<Word> = groups
+            .last()
+            .unwrap()
+            .iter()
+            .map(|(w, _)| w.clone())
+            .collect();
+        if word_fits_group(&cur_words, &item.0, policy) {
+            groups.last_mut().unwrap().push(item);
+        } else {
+            groups.push(vec![item]);
+        }
+    }
+
+    if policy.min_duration > 0.0 {
+        let mut merged: Vec<Vec<(Word, WordSource)>> = Vec::with_capacity(groups.len());
+        for group in groups {
+            let should_merge = if let Some(prev) = merged.last() {
+                let prev_words: Vec<Word> = prev.iter().map(|(w, _)| w.clone()).collect();
+                let next_words: Vec<Word> = group.iter().map(|(w, _)| w.clone()).collect();
+                let dur = prev_words.last().unwrap().end - prev_words[0].start;
+                dur + 1e-9 < policy.min_duration
+                    && can_merge_groups(&prev_words, &next_words, policy)
+            } else {
+                false
+            };
+            if should_merge {
+                merged.last_mut().unwrap().extend(group);
+            } else {
+                merged.push(group);
+            }
+        }
+        groups = merged;
+    }
+
+    groups
+        .into_iter()
+        .filter_map(|group| {
+            let words: Vec<Word> = group.iter().map(|(w, _)| w.clone()).collect();
+            let text = join_group_words(&words);
+            if text.is_empty() {
+                return None;
+            }
+            let start = round_millis(words.first()?.start);
+            let end = round_millis(words.last()?.end.max(start + 0.05));
+            let source = if group.iter().all(|(_, s)| *s == WordSource::Estimated) {
+                WordSource::Estimated
+            } else {
+                group
+                    .iter()
+                    .find(|(_, s)| *s != WordSource::Estimated)
+                    .map(|(_, s)| *s)
+                    .unwrap_or(WordSource::Whispercpp)
+            };
+            Some(Cue {
+                start,
+                end,
+                text,
+                words,
+                word_source: Some(source),
+                ..Cue::default()
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1328,5 +1740,40 @@ mod tests {
             vec![Some(0..1), Some(1..2), None]
         );
         assert_eq!(layout_words_of(&[Some(20..22)], &layout), vec![None]);
+    }
+
+    #[test]
+    fn resplit_cues_supports_engine_line_burst_and_word_layouts() {
+        let cues = vec![cue_with(
+            0.0,
+            2.4,
+            "One two three four five six",
+            vec![
+                word("One", 0.0, 0.4),
+                word("two", 0.4, 0.8),
+                word("three", 0.8, 1.2),
+                word("four", 1.2, 1.6),
+                word("five", 1.6, 2.0),
+                word("six", 2.0, 2.4),
+            ],
+        )];
+        let engine = resplit_cues(&cues, CaptionLayoutPreset::Engine);
+        assert_eq!(engine.len(), 1);
+        assert_eq!(engine[0].text, "One two three four five six");
+
+        let burst = resplit_cues(&cues, CaptionLayoutPreset::Burst);
+        assert_eq!(burst.len(), 2);
+        assert_eq!(burst[0].text, "One two three");
+        assert_eq!(burst[1].text, "four five six");
+
+        let per_word = resplit_cues(&cues, CaptionLayoutPreset::Word);
+        assert_eq!(per_word.len(), 6);
+        assert_eq!(per_word[0].text, "One");
+        assert_eq!(per_word[5].text, "six");
+
+        let cjk = vec![cue(0.0, 2.0, "日本語テスト")];
+        let cjk_words = resplit_cues(&cjk, CaptionLayoutPreset::Word);
+        assert_eq!(cjk_words.len(), 6);
+        assert_eq!(cjk_words[0].text, "日");
     }
 }

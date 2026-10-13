@@ -3453,6 +3453,72 @@ mod tests {
     }
 
     #[test]
+    fn clip_sections_with_options_respects_use_captions_and_min_section_ms() {
+        use crate::sectionlist::clip_sections_with_options;
+        use crate::sections::{Kind, MIN_SECTION_MS};
+
+        let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
+        linked_caption(&mut editor, &clip_id, 1.0, 2.0); // words over [1, 3)
+
+        // Disabling caption boundaries treats the spoken span as audible Other
+        // rather than splitting at the linked caption cues.
+        let without_captions = clip_sections_with_options(
+            editor.project().active(),
+            &clip_id,
+            &[(3.0, 5.0)],
+            0.0,
+            false,
+            MIN_SECTION_MS,
+        )
+        .expect("the clip exists");
+        let kinds: Vec<Kind> = without_captions
+            .rows
+            .iter()
+            .map(|row| row.section.kind)
+            .collect();
+        assert_eq!(kinds, [Kind::Other, Kind::Silence, Kind::Other]);
+        assert_eq!(without_captions.summary.captions, 0);
+        assert_eq!(without_captions.rows[0].timeline_start, 0.0);
+        assert_eq!(without_captions.rows[0].timeline_end, 3.0);
+
+        // A 200 ms leading sliver is preserved at 120 ms min_section_ms,
+        // and folded into its neighbour when min_section_ms is raised to 300 ms.
+        let preserved = clip_sections_with_options(
+            editor.project().active(),
+            &clip_id,
+            &[(0.2, 5.0)],
+            0.0,
+            false,
+            120,
+        )
+        .expect("the clip exists");
+        assert_eq!(preserved.rows.len(), 3);
+        assert_eq!(
+            (
+                preserved.rows[0].timeline_start,
+                preserved.rows[0].timeline_end
+            ),
+            (0.0, 0.2)
+        );
+
+        let folded = clip_sections_with_options(
+            editor.project().active(),
+            &clip_id,
+            &[(0.2, 5.0)],
+            0.0,
+            false,
+            300,
+        )
+        .expect("the clip exists");
+        assert_eq!(folded.rows.len(), 2);
+        assert_eq!(folded.rows[0].section.kind, Kind::Silence);
+        assert_eq!(
+            (folded.rows[0].timeline_start, folded.rows[0].timeline_end),
+            (0.0, 5.0)
+        );
+    }
+
+    #[test]
     fn an_autotrim_rebuilds_the_clip_and_its_captions_from_the_kept_ranges() {
         let (mut editor, media_id, clip_id) = fixture(); // clip is [0, 10)
         let first_words = linked_caption(&mut editor, &clip_id, 1.0, 2.0); // [1, 3)
@@ -4984,5 +5050,39 @@ mod tests {
             })
             .expect("no-op");
         assert!(!off.applied);
+    }
+
+    #[test]
+    fn clip_sections_with_cues_uses_external_srt_cues_shifted_to_source_start() {
+        let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
+        editor
+            .apply(Command::TrimClip {
+                clip_id: clip_id.clone(),
+                edge: TrimEdge::Start,
+                delta: 2.0,
+                ripple: false,
+            })
+            .expect("trim in-point to 2.0s source_start");
+        let external =
+            crate::subtitle::parse("1\n00:00:03,000 --> 00:00:05,000\nExternal subtitle cue\n");
+        let built = crate::sectionlist::clip_sections_with_cues(
+            editor.project().active(),
+            &clip_id,
+            &[],
+            0.0,
+            true,
+            120,
+            Some(&external),
+        )
+        .expect("sections");
+        assert_eq!(built.summary.captions, 1);
+        let cap_row = built
+            .rows
+            .iter()
+            .find(|r| r.section.kind == crate::sections::Kind::Caption)
+            .expect("caption row");
+        assert_eq!(cap_row.section.text, "External subtitle cue");
+        assert!((cap_row.timeline_start - 3.0).abs() < 1e-6);
+        assert!((cap_row.timeline_end - 5.0).abs() < 1e-6);
     }
 }

@@ -3,29 +3,39 @@
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
-import { Glyph } from "../icons.slint";
-import { Button, DialogRow, DialogSection, Modal } from "../primitives/modal.slint";
+import { Button, DialogRow, DialogSection, Field, Modal } from "../primitives/modal.slint";
+import { Check, Switch } from "../inspector/controls.slint";
 import { NumberField } from "../primitives/number-field.slint";
-import { SearchField, Switch } from "../inspector/controls.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 
-// The Sections sheet: a clip overview, an aligned timeline strip, and one
-// card per caption, silence or uncovered span. The card and timeline share
-// the same normalized start/end values, so a card always points at the block
-// it represents rather than a second, separately computed clock.
+// Sections: what the tray's Sections tool opens.
+//
+// Measures the silences in the selected clip (or the first clip with sound),
+// merges them with any captions linked to it or loaded from an external
+// .srt / .vtt file, and lists every section in order:
+//   - "Caption" for a span with words
+//   - "Silence" for a pause (selected for removal by default)
+//   - "Other"   for uncaptioned sound
+//
+// Checking a row marks it for removal; clicking "Remove selected" cuts the
+// checked sections out of the clip and closes the gaps, carrying linked
+// captions and audio with it. Clicking any row jumps the playhead to that
+// section's start, and caption text can be edited inline.
+
 export struct SectionRowData {
     source-index: int,
-    /// "Caption", "Silence" or "Other", in the interface's language.
+    track: string,
+    start: string,
+    end: string,
+    duration: string,
     kind: string,
-    /// The caption's words, or the kind again for a wordless row.
     label: string,
-    /// The row's timeline in/out points.
     range: string,
-    /// Ticked: this row survives the autotrim.
     keep: bool,
-    /// 0 caption, 1 silence, 2 other; a visual key for the strip.
+    at-playhead: bool,
+    /// 0 Caption, 1 Silence, 2 Other
     kind-code: int,
-    /// Normalized positions in the clip-wide strip, in 0..1.
+    /// Normalized [0..1] start and end positions across the clip for the mini-bar.
     start-ratio: float,
     end-ratio: float,
 }
@@ -33,147 +43,86 @@ export struct SectionRowData {
 export struct SectionsSheetData {
     open: bool,
     running: bool,
+    detect-silence: bool,
     noise-db: float,
     min-silence-ms: float,
     min-section-ms: float,
     use-captions: bool,
+    subtitle-path: string,
+    sub-info: string,
     search: string,
     min-duration: float,
     show-caption: bool,
     show-silence: bool,
     show-other: bool,
-    /// The clip being listed, by file and timeline start.
     clip-label: string,
-    /// "2 captions · 3 silences · 1 other".
     summary: string,
-    /// "Keeping 0:42 / 1:00".
     kept-label: string,
-    /// Range covered by the clip on the timeline.
     timeline-start: string,
     timeline-end: string,
-    /// Why the last run failed, when it did.
     message: string,
-    /// The ticks can be applied as a trim.
     can-apply: bool,
     rows: [SectionRowData],
 }
 
-component SectionTimeline inherits Rectangle {
-    in property <[SectionRowData]> rows;
+component KindChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <color> dot-color;
+    callback clicked();
 
-    horizontal-stretch: 1;
-    min-height: 20px;
-    max-height: 20px;
-    border-radius: Theme.r-sm;
-    background: Theme.well;
-    clip: true;
-
-    for row in root.rows: Rectangle {
-        x: root.width * row.start-ratio;
-        width: Math.max(2px, root.width * (row.end-ratio - row.start-ratio));
-        y: 3px;
-        height: 14px;
-        border-radius: 2px;
-        background: row.kind-code == 0 ? Theme.accent
-            : row.kind-code == 1 ? Theme.field-active
-            : Theme.green;
-        opacity: row.keep ? 1.0 : 0.55;
-    }
-}
-
-component SectionCard inherits Rectangle {
-    in property <SectionRowData> section-item;
-
-    callback toggle-keep();
-
-    border-radius: Theme.r;
+    height: 24px;
+    min-width: chip-row.preferred-width + 18px;
+    border-radius: 12px;
+    background: root.active ? Theme.field-hover : Theme.well;
     border-width: 1px;
-    border-color: touch.has-hover ? Theme.line-strong : Theme.line;
-    background: root.section-item.keep ? Theme.raised : Theme.well;
-    clip: true;
+    border-color: root.active ? root.dot-color : Theme.line;
+    opacity: root.active ? 1.0 : 0.55;
 
-    animate background, border-color {
-        duration: 120ms;
-        easing: cubic-bezier(0.4, 0, 0.2, 1);
-    }
+    chip-row := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 6px;
+        alignment: center;
 
-    touch := TouchArea {
-        // Cards are read-only except for the explicit keep switch. This area
-        // gives a quiet hover affordance without stealing the switch press.
-        mouse-cursor: default;
-    }
-
-    Rectangle {
-        width: 3px;
-        height: parent.height;
-        background: root.section-item.kind-code == 0 ? Theme.accent
-            : root.section-item.kind-code == 1 ? Theme.field-active
-            : Theme.green;
-    }
-
-    VerticalLayout {
-        padding: 9px;
-        padding-left: 12px;
-        spacing: 5px;
-
-        HorizontalLayout {
-            spacing: 8px;
-
+        VerticalLayout {
+            alignment: center;
             Rectangle {
                 width: 7px;
                 height: 7px;
                 border-radius: 4px;
-                background: root.section-item.kind-code == 0 ? Theme.accent
-                    : root.section-item.kind-code == 1 ? Theme.field-active
-                    : Theme.green;
-            }
-
-            Text {
-                text: root.section-item.kind;
-                color: Theme.fg-muted;
-                font-size: Theme.fs-sm;
-                vertical-alignment: center;
-            }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            Text {
-                text: root.section-item.range;
-                color: Theme.fg-dim;
-                font-family: Theme.font-technical;
-                font-size: Theme.fs-sm;
-                vertical-alignment: center;
-            }
-
-            VerticalLayout {
-                alignment: center;
-                Switch {
-                    checked: root.section-item.keep;
-                    toggled(on) => { root.toggle-keep(); }
-                }
+                background: root.dot-color;
             }
         }
 
         Text {
-            horizontal-stretch: 1;
-            text: root.section-item.label;
-            color: root.section-item.keep ? Theme.fg : Theme.fg-dim;
-            font-size: Theme.fs;
-            wrap: word-wrap;
+            text: root.label;
+            color: root.active ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
         }
     }
 
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
 }
 
 export component SectionsDialog inherits Modal {
     in property <SectionsSheetData> data;
 
     callback row-toggled(index: int);
+    callback row-seek(index: int);
+    callback row-text-edited(index: int, text: string);
     callback detect();
+    callback detect-silence-changed(on: bool);
     callback threshold-changed(value: float);
     callback min-silence-changed(value: float);
     callback min-section-changed(value: float);
     callback use-captions-changed(on: bool);
+    callback subtitle-path-edited(path: string);
+    callback browse-subtitle();
     callback search-changed(text: string);
     callback min-duration-changed(value: float);
     callback kind-toggled(kind: int);
@@ -186,220 +135,604 @@ export component SectionsDialog inherits Modal {
 
     open: root.data.open;
     title: I18n.t("sections.sections");
-    glyph: Glyph.rows;
-    surface-width: 760px;
-    surface-height: 620px;
-    dismissable: !root.data.running;
+    surface-width: 680px;
 
-    VerticalLayout {
-        padding: 13px;
-        spacing: 9px;
+    DialogSection {
+        first: true;
+        title: root.data.clip-label != "" ? root.data.clip-label : I18n.t("sections.detectSections");
+        summary: root.data.summary;
 
-        Text {
-            text: root.data.clip-label;
-            color: Theme.fg;
-            font-size: Theme.fs;
-            wrap: word-wrap;
-        }
+        // Silence detection controls (dSilence, dThresh, dMinSilence, dMinSection)
+        HorizontalLayout {
+            spacing: 12px;
 
-        if root.data.summary != "": Text {
-            text: root.data.summary;
-            color: Theme.fg-muted;
-            font-size: Theme.fs-sm;
-            wrap: word-wrap;
-        }
-
-        if !root.data.running: DialogSection {
-            first: true;
-            title: I18n.t("sections.detectSections");
-
-            DialogRow {
-                label: I18n.t("sections.threshold");
-                NumberField {
-                    value: root.data.noise-db;
-                    minimum: -100;
-                    maximum: 0;
-                    step: 1;
-                    precision: 0;
-                    unit: "dB";
-                    changed(value) => { root.threshold-changed(value); }
-                }
-            }
-            DialogRow {
-                label: I18n.t("sections.minSilence");
-                NumberField {
-                    value: root.data.min-silence-ms;
-                    minimum: 0;
-                    maximum: 60000;
-                    step: 50;
-                    precision: 0;
-                    unit: "ms";
-                    changed(value) => { root.min-silence-changed(value); }
-                }
-            }
-            DialogRow {
-                label: I18n.t("sections.minSection");
-                NumberField {
-                    value: root.data.min-section-ms;
-                    minimum: 0;
-                    maximum: 60000;
-                    step: 10;
-                    precision: 0;
-                    unit: "ms";
-                    changed(value) => { root.min-section-changed(value); }
-                }
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    horizontal-stretch: 1;
-                    text: I18n.t("sections.useCaptions");
-                    color: Theme.fg;
-                    font-size: Theme.fs;
-                    vertical-alignment: center;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Switch {
-                        checked: root.data.use-captions;
-                        toggled(on) => { root.use-captions-changed(on); }
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.detect-silence;
+                            toggled => { root.detect-silence-changed(!root.data.detect-silence); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("sections.silence");
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        vertical-alignment: center;
                     }
                 }
             }
-            Button {
-                label: I18n.t("sections.detectSections");
-                glyph: Glyph.rows;
-                primary: true;
-                clicked => { root.detect(); }
-            }
-        }
-
-        if root.data.rows.length > 0: VerticalLayout {
-            spacing: 5px;
 
             HorizontalLayout {
-                spacing: 8px;
-
+                spacing: 6px;
+                horizontal-stretch: 1;
                 Text {
-                    text: I18n.t("sections.timeline");
+                    text: I18n.t("sections.threshold");
                     color: Theme.fg-muted;
                     font-size: Theme.fs-sm;
                     vertical-alignment: center;
                 }
-
-                Rectangle { horizontal-stretch: 1; }
-
-                Text {
-                    text: root.data.timeline-start;
-                    color: Theme.fg-dim;
-                    font-family: Theme.font-technical;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: "–";
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: root.data.timeline-end;
-                    color: Theme.fg-dim;
-                    font-family: Theme.font-technical;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
+                NumberField {
+                    horizontal-stretch: 1;
+                    value: root.data.noise-db;
+                    minimum: -80;
+                    maximum: -5;
+                    step: 1;
+                    precision: 0;
+                    unit: "dB";
+                    enabled: !root.data.running && root.data.detect-silence;
+                    changed(v) => { root.threshold-changed(v); }
                 }
             }
 
-            SectionTimeline { rows: root.data.rows; }
+            HorizontalLayout {
+                spacing: 6px;
+                horizontal-stretch: 1;
+                Text {
+                    text: I18n.t("sections.minSilence");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+                NumberField {
+                    horizontal-stretch: 1;
+                    value: root.data.min-silence-ms;
+                    minimum: 100;
+                    maximum: 5000;
+                    step: 50;
+                    precision: 0;
+                    unit: "ms";
+                    enabled: !root.data.running && root.data.detect-silence;
+                    changed(v) => { root.min-silence-changed(v); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                horizontal-stretch: 1;
+                Text {
+                    text: I18n.t("sections.minSection");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+                NumberField {
+                    horizontal-stretch: 1;
+                    value: root.data.min-section-ms;
+                    minimum: 0;
+                    maximum: 2000;
+                    step: 20;
+                    precision: 0;
+                    unit: "ms";
+                    enabled: !root.data.running;
+                    changed(v) => { root.min-section-changed(v); }
+                }
+            }
+        }
+
+        // Captions (.srt / .vtt) controls (dCues, dSubPath, dSubFile, subInfo, detectBtn)
+        HorizontalLayout {
+            spacing: 8px;
+
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.use-captions;
+                            toggled => { root.use-captions-changed(!root.data.use-captions); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("sections.captionsSrtVtt");
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.subtitle-path;
+                placeholder: I18n.t("sections.subtitlePathPlaceholder");
+                edited(text) => { root.subtitle-path-edited(text); }
+            }
+
+            Button {
+                label: I18n.t("sections.uploadSubtitle");
+                enabled: !root.data.running;
+                clicked => { root.browse-subtitle(); }
+            }
+
+            Button {
+                label: I18n.t("sections.detectSections");
+                primary: true;
+                enabled: !root.data.running;
+                clicked => { root.detect(); }
+            }
+        }
+
+        if root.data.sub-info != "" || root.data.summary != "": HorizontalLayout {
+            spacing: 12px;
+
+            if root.data.sub-info != "": Text {
+                text: root.data.sub-info;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            if root.data.summary != "": Text {
+                text: root.data.summary;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
         }
 
         if root.data.running: Text {
             text: I18n.t("sections.listening");
-            color: Theme.fg;
+            color: Theme.fg-muted;
             font-size: Theme.fs;
         }
 
-        if root.data.message != "": Text {
+        if !root.data.running && root.data.message != "": Text {
             text: root.data.message;
-            color: Theme.danger;
-            font-size: Theme.fs-sm;
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
             wrap: word-wrap;
         }
 
-        if root.data.rows.length > 0: VerticalLayout {
-            spacing: 6px;
+        // Visual section timeline strip: color-coded spans for Caption, Silence,
+        // and Other, with dimmed bars for sections marked for removal.
+        if !root.data.running && root.data.rows.length > 0: VerticalLayout {
+            spacing: 4px;
+
+            HorizontalLayout {
+                Text {
+                    text: I18n.t("sections.timeline");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.data.kept-label;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+            }
+
+            timeline-bar := Rectangle {
+                height: 22px;
+                border-radius: Theme.r-sm;
+                background: Theme.well;
+                border-width: 1px;
+                border-color: Theme.line;
+                clip: true;
+
+                for row in root.data.rows: Rectangle {
+                    x: parent.width * row.start-ratio;
+                    y: 2px;
+                    width: Math.max(2px, parent.width * (row.end-ratio - row.start-ratio));
+                    height: parent.height - 4px;
+                    border-radius: 2px;
+                    background: row.kind-code == 0 ? Theme.accent
+                        : row.kind-code == 1 ? Theme.danger
+                        : Theme.green;
+                    opacity: row.keep ? 0.9 : 0.22;
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.row-toggled(row.source-index); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                Text {
+                    text: root.data.timeline-start;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.data.timeline-end;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+            }
+        }
+
+        // Filter & bulk-selection toolbar (matches VTS section.txt)
+        if !root.data.running: VerticalLayout {
+            spacing: 8px;
+
             HorizontalLayout {
                 spacing: 6px;
-                Button { label: I18n.t("sections.caption"); ghost: !root.data.show-caption; clicked => { root.kind-toggled(0); } }
-                Button { label: I18n.t("sections.silence"); ghost: !root.data.show-silence; clicked => { root.kind-toggled(1); } }
-                Button { label: I18n.t("sections.other"); ghost: !root.data.show-other; clicked => { root.kind-toggled(2); } }
+
+                KindChip {
+                    label: I18n.t("sections.caption");
+                    active: root.data.show-caption;
+                    dot-color: Theme.accent;
+                    clicked => { root.kind-toggled(0); }
+                }
+
+                KindChip {
+                    label: I18n.t("sections.silence");
+                    active: root.data.show-silence;
+                    dot-color: Theme.danger;
+                    clicked => { root.kind-toggled(1); }
+                }
+
+                KindChip {
+                    label: I18n.t("sections.other");
+                    active: root.data.show-other;
+                    dot-color: Theme.green;
+                    clicked => { root.kind-toggled(2); }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: I18n.t("sections.minSectionFilter");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                    }
+                }
+
                 NumberField {
-                    width: 110px;
+                    width: 68px;
                     value: root.data.min-duration;
                     minimum: 0;
-                    maximum: 3600;
+                    maximum: 30;
                     step: 0.1;
                     precision: 1;
                     unit: "s";
-                    changed(value) => { root.min-duration-changed(value); }
+                    enabled: !root.data.running;
+                    changed(v) => { root.min-duration-changed(v); }
                 }
-                SearchField {
+
+                Field {
                     horizontal-stretch: 1;
-                    text: root.data.search;
+                    value: root.data.search;
                     placeholder: I18n.t("sections.searchCaptions");
                     edited(text) => { root.search-changed(text); }
                 }
             }
+
             HorizontalLayout {
-                spacing: 5px;
-                Button { label: I18n.t("sections.selectVisible"); ghost: true; clicked => { root.select-visible(); } }
-                Button { label: I18n.t("sections.clearSelection"); ghost: true; clicked => { root.select-none(); } }
-                Button { label: I18n.t("sections.invertSelection"); ghost: true; clicked => { root.select-invert(); } }
-                Button { label: I18n.t("sections.allSilence"); ghost: true; clicked => { root.select-all-silence(); } }
-                Button { label: I18n.t("sections.allCaptions"); ghost: true; clicked => { root.select-all-captions(); } }
+                spacing: 6px;
+
+                Button {
+                    label: I18n.t("sections.selectVisible");
+                    clicked => { root.select-visible(); }
+                }
+
+                Button {
+                    label: I18n.t("sections.clearSelection");
+                    clicked => { root.select-none(); }
+                }
+
+                Button {
+                    label: I18n.t("sections.removeSelected");
+                    danger: true;
+                    enabled: root.data.can-apply;
+                    clicked => { root.apply(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    label: I18n.t("sections.invertSelection");
+                    ghost: true;
+                    clicked => { root.select-invert(); }
+                }
+
+                Button {
+                    label: I18n.t("sections.allSilence");
+                    ghost: true;
+                    clicked => { root.select-all-silence(); }
+                }
+
+                Button {
+                    label: I18n.t("sections.allCaptions");
+                    ghost: true;
+                    clicked => { root.select-all-captions(); }
+                }
+            }
+
+            // Selection hint banner (section.txt)
+            Rectangle {
+                min-height: 26px;
+                border-radius: Theme.r-sm;
+                background: Theme.well;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+
+                    Text {
+                        text: I18n.t("sections.selectionHint");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
             }
         }
 
-        PaneScroll {
-            vertical-stretch: 1;
-            finger: true;
+        if !root.data.running && root.data.rows.length > 0: Rectangle {
+            height: 280px;
+            border-radius: Theme.r;
+            background: Theme.well;
+            border-width: 1px;
+            border-color: Theme.line;
+            clip: true;
 
-            for row[index] in root.data.rows: SectionCard {
-                section-item: row;
-                toggle-keep => { root.row-toggled(row.source-index); }
+            VerticalLayout {
+                // Table header matching section.txt: [checkbox] | track | start | end | dur | kind | text
+                Rectangle {
+                    height: 26px;
+                    background: Theme.raised;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+
+                        Rectangle { width: 18px; }
+
+                        Text {
+                            width: 36px;
+                            text: I18n.t("sections.colTrack");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            width: 64px;
+                            text: I18n.t("sections.colStart");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            width: 64px;
+                            text: I18n.t("sections.colEnd");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            width: 52px;
+                            text: I18n.t("sections.colDur");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            width: 64px;
+                            text: I18n.t("sections.colKind");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: I18n.t("sections.colText");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.line;
+                    }
+                }
+
+                PaneScroll {
+                    vertical-stretch: 1;
+
+                    list := VerticalLayout {
+                        padding: 4px;
+                        spacing: 2px;
+
+                        for row in root.data.rows: Rectangle {
+                            height: 32px;
+                            border-radius: Theme.r-sm;
+                            background: row.at-playhead ? Theme.accent.transparentize(0.84)
+                                : !row.keep ? Theme.danger.transparentize(0.90)
+                                : Colors.transparent;
+
+                            // Playhead left indicator bar
+                            if row.at-playhead: Rectangle {
+                                x: 0;
+                                y: 2px;
+                                width: 3px;
+                                height: parent.height - 4px;
+                                border-radius: 1px;
+                                background: Theme.accent;
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Check {
+                                        // Checked = selected for removal (!row.keep), matching section.txt
+                                        checked: !row.keep;
+                                        toggled => { root.row-toggled(row.source-index); }
+                                    }
+                                }
+
+                                // Non-text cells jump the playhead when clicked (section.txt)
+                                Rectangle {
+                                    width: 328px;
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        Text {
+                                            width: 36px;
+                                            text: row.track;
+                                            color: Theme.fg-dim;
+                                            font-size: Theme.fs-xs;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            width: 64px;
+                                            text: row.start;
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-xs;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            width: 64px;
+                                            text: row.end;
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-xs;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            width: 52px;
+                                            text: row.duration;
+                                            color: Theme.fg-dim;
+                                            font-size: Theme.fs-xs;
+                                            vertical-alignment: center;
+                                        }
+
+                                        HorizontalLayout {
+                                            width: 64px;
+                                            spacing: 5px;
+
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
+                                                    width: 7px;
+                                                    height: 7px;
+                                                    border-radius: 4px;
+                                                    background: row.kind-code == 0 ? Theme.accent
+                                                        : row.kind-code == 1 ? Theme.danger
+                                                        : Theme.green;
+                                                }
+                                            }
+
+                                            Text {
+                                                text: row.kind;
+                                                color: row.keep ? Theme.fg : Theme.fg-muted;
+                                                font-size: Theme.fs-xs;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.row-seek(row.source-index); }
+                                    }
+                                }
+
+                                // Text cell: inline editable for caption rows, seek-on-click for silence/other
+                                if row.kind-code == 0: VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    Field {
+                                        value: row.label;
+                                        edited(text) => { root.row-text-edited(row.source-index, text); }
+                                    }
+                                }
+
+                                if row.kind-code != 0: Rectangle {
+                                    horizontal-stretch: 1;
+
+                                    Text {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: "—";
+                                        color: Theme.fg-dim;
+                                        font-size: Theme.fs-sm;
+                                        vertical-alignment: center;
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.row-seek(row.source-index); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
 
-        Rectangle { height: 1px; background: Theme.line; }
+    HorizontalLayout {
+        padding-top: 8px;
+        padding-bottom: 14px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
 
-        HorizontalLayout {
-            spacing: 8px;
+        Rectangle { horizontal-stretch: 1; }
 
-            Text {
-                horizontal-stretch: 1;
-                text: root.data.kept-label;
-                color: Theme.fg;
-                font-size: Theme.fs;
-                vertical-alignment: center;
-            }
+        Button {
+            label: I18n.t("common.cancel");
+            clicked => { root.closed(); }
+        }
 
-            Button {
-                label: I18n.t("sections.apply");
-                glyph: Glyph.razor;
-                primary: true;
-                enabled: root.data.can-apply;
-                clicked => { root.apply(); }
-            }
-
-            Button {
-                label: I18n.t("common.close");
-                glyph: Glyph.close;
-                ghost: true;
-                clicked => { root.closed(); }
-            }
+        Button {
+            label: I18n.t("sections.removeSelected");
+            primary: true;
+            enabled: root.data.can-apply;
+            clicked => { root.apply(); }
         }
     }
 }

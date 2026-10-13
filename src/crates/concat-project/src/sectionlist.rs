@@ -122,31 +122,63 @@ pub fn clip_sections_with_options(
     use_captions: bool,
     min_section_ms: u32,
 ) -> Option<ClipSections> {
+    clip_sections_with_cues(
+        timeline,
+        clip_id,
+        silences,
+        pad,
+        use_captions,
+        min_section_ms,
+        None,
+    )
+}
+
+/// Builds clip sections using either external subtitle cues (on the source
+/// file's clock, when `external_cues` is `Some` and non-empty) or the clip's
+/// linked timeline captions.
+pub fn clip_sections_with_cues(
+    timeline: &Timeline,
+    clip_id: &str,
+    silences: &[(f64, f64)],
+    pad: f64,
+    use_captions: bool,
+    min_section_ms: u32,
+    external_cues: Option<&[crate::subtitle::Cue]>,
+) -> Option<ClipSections> {
     let clip = timeline.clip(clip_id)?;
     let window = clip.duration * clip.speed;
 
-    // This clip's captions, moved onto the source clock.
-    let mut cues: Vec<Cue> = timeline
-        .captions_of(clip_id)
-        .iter()
-        .filter_map(|caption_id| timeline.clip(caption_id))
-        .map(|caption| Cue {
-            // Timeline -> the clip's source window: how far into the
-            // clip the caption sits, at the clip's speed.
-            start: (caption.start - clip.start) * clip.speed,
-            end: (caption.start + caption.duration - clip.start) * clip.speed,
-            text: caption
-                .text
-                .as_ref()
-                .map(|style| style.content.clone())
-                .unwrap_or_default(),
-        })
-        .filter(|cue| cue.end > 0.0 && cue.start < window)
-        .collect();
+    let mut cues: Vec<Cue> = if !use_captions {
+        Vec::new()
+    } else if let Some(ext) = external_cues.filter(|c| !c.is_empty()) {
+        ext.iter()
+            .map(|cue| Cue {
+                start: cue.start - clip.source_start,
+                end: cue.end - clip.source_start,
+                text: cue.text.clone(),
+            })
+            .filter(|cue| cue.end > 0.0 && cue.start < window)
+            .collect()
+    } else {
+        timeline
+            .captions_of(clip_id)
+            .iter()
+            .filter_map(|caption_id| timeline.clip(caption_id))
+            .map(|caption| Cue {
+                // Timeline -> the clip's source window: how far into the
+                // clip the caption sits, at the clip's speed.
+                start: (caption.start - clip.start) * clip.speed,
+                end: (caption.start + caption.duration - clip.start) * clip.speed,
+                text: caption
+                    .text
+                    .as_ref()
+                    .map(|style| style.content.clone())
+                    .unwrap_or_default(),
+            })
+            .filter(|cue| cue.end > 0.0 && cue.start < window)
+            .collect()
+    };
     cues.sort_by(|a, b| a.start.total_cmp(&b.start));
-    if !use_captions {
-        cues.clear();
-    }
 
     // The file's silences, into the window, shrunk by the pad, and
     // dropped when the pad swallows them whole.

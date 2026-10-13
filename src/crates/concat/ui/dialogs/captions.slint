@@ -7,24 +7,17 @@ import { Glyph, Icon } from "../icons.slint";
 import { Button, CopyChip, DialogRow, DialogSection, Field, Modal, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
-import { Switch } from "../inspector/controls.slint";
+import { Check, Switch } from "../inspector/controls.slint";
 import { NumberField } from "../primitives/number-field.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 
 // Captions: what the tray's Captions tool opens.
 //
-// Two sheets in one, and a switch between them: "Use voice from timeline".
-// On, the words are a clip's: one picked from the timeline's clips that
-// have sound, through the transcriber, cut to the words' own timing. Off,
-// they are a script typed here, one title per sentence at reading pace,
-// laid down from the playhead. The list holds only clips with sound, so a
-// silent video cannot be sent to the transcriber. The switch starts on
-// when the sheet is opened on a clip with sound - from the clip's menu, or
-// with one selected - and off otherwise. Then where the lines sit and how
-// big they are, and one button. While it runs
-// the sheet is the progress report: a transcription knows how far through
-// the sound it is, so it gets a real bar and not a sweep. The language is
-// the transcriber's to work out.
+// Two modes in one sheet ("Use voice from timeline"), plus VTS's full
+// Auto-caption setup (inline model download, 99 Whisper languages, English
+// translation with turbo fallback hint, collapsible Advanced options, manual
+// blank/SRT/VTT start) and interactive Caption Editor (add/undo/save cues,
+// 4-mode layout re-splitter, and "Use these captions → Detect sections").
 
 export struct CaptionDraftData {
     text: string,
@@ -43,10 +36,23 @@ export struct CaptionsSheetData {
     text: string,
     /// Row in the installed transcriber list.
     model: int,
+    /// Downloadable Whisper models (`Get model` selector in autocaption.txt).
+    download-models: [string],
+    download-model: int,
+    downloading-model: bool,
+    download-progress: float,
+    download-status: string,
     languages: [string],
     language: int,
     translate: bool,
+    translate-hint: string,
+    beam-size: float,
     prompt: string,
+    output-dir: string,
+    word-timestamps: bool,
+    temperature-fallback: bool,
+    normalize-audio: bool,
+    keep-wav: bool,
     /// 0 Bottom, 1 Centre, 2 Top
     placement: int,
     /// 0 Small, 1 Medium, 2 Large
@@ -57,6 +63,9 @@ export struct CaptionsSheetData {
     /// A transcriber model is installed.
     ready: bool,
     reviewing: bool,
+    can-undo: bool,
+    /// 0 Engine, 1 Readable lines, 2 Burst (3 words), 3 One word at a time
+    seg-preset: int,
     drafts: [CaptionDraftData],
     /// Why the last run failed, when it did.
     message: string,
@@ -71,18 +80,34 @@ export component CaptionsDialog inherits Modal {
     callback source-changed(index: int);
     callback text-edited(text: string);
     callback model-changed(index: int);
+    callback download-model-changed(index: int);
+    callback download-model-clicked();
     callback language-changed(index: int);
     callback translate-changed(on: bool);
+    callback beam-size-changed(value: float);
     callback prompt-changed(text: string);
+    callback output-dir-changed(text: string);
+    callback browse-output-dir();
+    callback word-timestamps-changed(on: bool);
+    callback temperature-fallback-changed(on: bool);
+    callback normalize-audio-changed(on: bool);
+    callback keep-wav-changed(on: bool);
     callback placement-changed(index: int);
     callback size-changed(index: int);
+    callback new-blank-captions();
+    callback open-subtitle-file();
     callback draft-text-changed(index: int, text: string);
     callback draft-start-changed(index: int, value: float);
     callback draft-end-changed(index: int, value: float);
     callback draft-delete(index: int);
     callback draft-add();
+    callback draft-undo();
+    callback draft-save();
+    callback seg-preset-changed(index: int);
+    callback draft-resplit();
     callback draft-discard();
     callback draft-insert();
+    callback draft-insert-and-detect();
     callback begin();
     callback cancel();
 
@@ -91,16 +116,11 @@ export component CaptionsDialog inherits Modal {
     open: root.data.open;
     title: I18n.t("captions.captions");
     glyph: Glyph.text-mark;
-    surface-width: root.data.reviewing ? 720px : 480px;
+    surface-width: root.data.reviewing ? 760px : 560px;
+    surface-height: root.data.reviewing ? 580px : 0px;
     dismissable: !root.data.running;
 
-    // The script being typed, held apart from `data.text` the way the Field
-    // primitive holds its draft: a TextInput's binding is dropped on the
-    // first keystroke, so the sheet re-seeds it when it opens and never
-    // while it is being typed into.
     property <string> draft;
-    /// The script has the caret. Kept up here because the box lives under
-    /// an `if`, and nothing outside one can reach into it.
     property <bool> typing;
     changed data => {
         if (!root.typing) {
@@ -110,8 +130,6 @@ export component CaptionsDialog inherits Modal {
     init => { root.draft = root.data.text; }
 
     VerticalLayout {
-        // The switch, above both halves. A row of its own rather than a
-        // DialogRow, whose label column is too narrow for the words.
         if !root.data.running && !root.data.reviewing: HorizontalLayout {
             padding-left: 14px;
             padding-right: 14px;
@@ -162,6 +180,36 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
+            // Inline model downloader (cDlModel, captionDlBtn, captionDlProgress, captionDlInfo)
+            HorizontalLayout {
+                spacing: 8px;
+
+                Select {
+                    horizontal-stretch: 1;
+                    options: root.data.download-models;
+                    current: root.data.download-model;
+                    enabled: !root.data.downloading-model && root.data.download-models.length > 0;
+                    changed(index) => { root.download-model-changed(index); }
+                }
+
+                Button {
+                    label: I18n.t("captions.getModel");
+                    enabled: !root.data.downloading-model && root.data.download-models.length > 0;
+                    clicked => { root.download-model-clicked(); }
+                }
+            }
+
+            if root.data.downloading-model: Progress {
+                value: root.data.download-progress;
+            }
+
+            if root.data.download-status != "": Text {
+                text: root.data.download-status;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+
             DialogRow {
                 label: I18n.t("captions.language");
                 Select {
@@ -180,23 +228,163 @@ export component CaptionsDialog inherits Modal {
                     font-size: Theme.fs;
                     vertical-alignment: center;
                 }
-                VerticalLayout { alignment: center; Switch { checked: root.data.translate; toggled(on) => { root.translate-changed(on); } } }
-            }
-
-            DialogRow {
-                label: I18n.t("captions.prompt");
-                Field {
-                    value: root.data.prompt;
-                    placeholder: I18n.t("captions.promptHint");
-                    edited(text) => { root.prompt-changed(text); }
+                VerticalLayout {
+                    alignment: center;
+                    Switch {
+                        checked: root.data.translate;
+                        toggled(on) => { root.translate-changed(on); }
+                    }
                 }
             }
 
-            if !root.data.ready: Text {
-                text: I18n.t("captions.downloadTranscriberModelFirst");
-                color: Theme.fg-muted;
-                font-size: Theme.fs-sm;
+            if root.data.translate-hint != "": Text {
+                text: root.data.translate-hint;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
                 wrap: word-wrap;
+            }
+        }
+
+        // Collapsible Advanced options (autocaption.txt lines 134-154)
+        if !root.data.running && !root.data.reviewing && root.from-voice: DialogSection {
+            collapsible: true;
+            open: false;
+            title: I18n.t("captions.advancedOptions");
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    width: 150px;
+                    Text {
+                        text: I18n.t("captions.beamSize");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                    NumberField {
+                        horizontal-stretch: 1;
+                        value: root.data.beam-size;
+                        minimum: 1;
+                        maximum: 10;
+                        step: 1;
+                        precision: 0;
+                        changed(v) => { root.beam-size-changed(v); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: I18n.t("captions.prompt");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.prompt;
+                        placeholder: I18n.t("captions.promptHint");
+                        edited(text) => { root.prompt-changed(text); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: I18n.t("captions.outputFolder");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Field {
+                    horizontal-stretch: 1;
+                    value: root.data.output-dir;
+                    placeholder: I18n.t("captions.outputDirPlaceholder");
+                    edited(text) => { root.output-dir-changed(text); }
+                }
+
+                Button {
+                    label: I18n.t("common.browse");
+                    clicked => { root.browse-output-dir(); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.word-timestamps;
+                            toggled => { root.word-timestamps-changed(!root.data.word-timestamps); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("captions.wordTimestamps");
+                        color: Theme.fg;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.temperature-fallback;
+                            toggled => { root.temperature-fallback-changed(!root.data.temperature-fallback); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("captions.temperatureFallback");
+                        color: Theme.fg;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.normalize-audio;
+                            toggled => { root.normalize-audio-changed(!root.data.normalize-audio); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("captions.normalizeAudio");
+                        color: Theme.fg;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.keep-wav;
+                            toggled => { root.keep-wav-changed(!root.data.keep-wav); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("captions.keepWav");
+                        color: Theme.fg;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
 
@@ -226,8 +414,6 @@ export component CaptionsDialog inherits Modal {
                     selection-foreground-color: Theme.on-accent;
                     changed has-focus => { root.typing = self.has-focus; }
                     edited => { root.text-edited(self.text); }
-                    // Home and End are unbound in Slint on macOS and would
-                    // walk up to the window's playhead shortcuts.
                     key-pressed(event) => {
                         if (event.text == Key.Home) {
                             self.set-selection-offsets(0, 0);
@@ -282,37 +468,193 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
+        // Caption Editor (autocaption.txt lines 163-196)
         if root.data.reviewing: VerticalLayout {
+            vertical-stretch: 1;
             padding: 14px;
             spacing: 8px;
+
+            // Header bar: Caption editor (N cues) | + Add cue | Undo changes | Save captions
             HorizontalLayout {
-                Text { horizontal-stretch: 1; text: I18n.t("captions.captionEditor"); color: Theme.fg; font-size: Theme.fs-lg; }
-                Text { text: "\{root.data.drafts.length} " + I18n.t("captions.cues"); color: Theme.fg-muted; font-size: Theme.fs-sm; }
-                Button { label: I18n.t("captions.addCue"); ghost: true; clicked => { root.draft-add(); } }
-            }
-            PaneScroll {
-                min-height: 300px;
-                vertical-stretch: 1;
-                finger: true;
-                for cue[index] in root.data.drafts: Rectangle {
-                    min-height: 42px;
-                    background: index % 2 == 0 ? Theme.well : Theme.raised;
-                    border-radius: Theme.r-sm;
-                    HorizontalLayout {
-                        padding: 6px;
-                        spacing: 6px;
-                        Text { width: 28px; text: "\{index + 1}"; color: Theme.fg-dim; vertical-alignment: center; }
-                        NumberField { width: 86px; value: cue.start; minimum: 0; maximum: 100000; step: 0.1; precision: 3; unit: "s"; changed(value) => { root.draft-start-changed(index, value); } }
-                        NumberField { width: 86px; value: cue.end; minimum: 0; maximum: 100000; step: 0.1; precision: 3; unit: "s"; changed(value) => { root.draft-end-changed(index, value); } }
-                        Field { horizontal-stretch: 1; value: cue.text; placeholder: I18n.t("captions.captionText"); edited(text) => { root.draft-text-changed(index, text); } }
-                        Button { label: I18n.t("common.delete"); danger: true; ghost: true; clicked => { root.draft-delete(index); } }
-                    }
+                spacing: 8px;
+
+                Text {
+                    text: I18n.t("captions.captionEditor");
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "(\{root.data.drafts.length} " + I18n.t("captions.cues") + ")";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    label: "+ " + I18n.t("captions.addCue");
+                    clicked => { root.draft-add(); }
+                }
+
+                Button {
+                    label: I18n.t("captions.undoChanges");
+                    enabled: root.data.can-undo;
+                    clicked => { root.draft-undo(); }
+                }
+
+                Button {
+                    label: I18n.t("captions.saveCaptions");
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-save(); }
                 }
             }
+
+            // Layout re-splitter bar (cSeg + Re-split button + hint)
             HorizontalLayout {
-                Button { label: I18n.t("captions.discardDraft"); ghost: true; clicked => { root.draft-discard(); } }
-                Rectangle { horizontal-stretch: 1; }
-                Button { label: I18n.t("captions.useCaptions"); primary: true; large: true; enabled: root.data.drafts.length > 0; clicked => { root.draft-insert(); } }
+                spacing: 8px;
+
+                Text {
+                    text: I18n.t("captions.layout");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Select {
+                    width: 240px;
+                    options: [
+                        I18n.t("captions.segEngine"),
+                        I18n.t("captions.segLine"),
+                        I18n.t("captions.segBurst"),
+                        I18n.t("captions.segWord"),
+                    ];
+                    current: root.data.seg-preset;
+                    changed(index) => { root.seg-preset-changed(index); }
+                }
+
+                Button {
+                    label: I18n.t("captions.resplit");
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-resplit(); }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("captions.layoutHint");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            // Cue table header (# | Start (s) | End (s) | Text | del)
+            Rectangle {
+                height: 24px;
+                background: Theme.raised;
+                border-radius: Theme.r-sm;
+
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 12px;
+                    spacing: 6px;
+
+                    Text {
+                        width: 28px;
+                        text: "#";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 86px;
+                        text: I18n.t("captions.colStartSec");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 86px;
+                        text: I18n.t("captions.colEndSec");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: I18n.t("captions.colText");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { width: 44px; }
+                }
+            }
+
+            PaneScroll {
+                min-height: 240px;
+                vertical-stretch: 1;
+                finger: true;
+                VerticalLayout {
+                    spacing: 4px;
+                    padding-right: 6px;
+                    for cue[index] in root.data.drafts: Rectangle {
+                        min-height: 38px;
+                        background: Math.mod(index, 2) == 0 ? Theme.well : Theme.raised;
+                        border-radius: Theme.r-sm;
+                        HorizontalLayout {
+                            padding: 5px;
+                            spacing: 6px;
+                            Text {
+                                width: 28px;
+                                text: "\{index + 1}";
+                                color: Theme.fg-dim;
+                                font-size: Theme.fs-xs;
+                                vertical-alignment: center;
+                            }
+                            NumberField {
+                                width: 86px;
+                                value: cue.start;
+                                minimum: 0;
+                                maximum: 100000;
+                                step: 0.05;
+                                precision: 3;
+                                unit: "s";
+                                changed(value) => { root.draft-start-changed(index, value); }
+                            }
+                            NumberField {
+                                width: 86px;
+                                value: cue.end;
+                                minimum: 0;
+                                maximum: 100000;
+                                step: 0.05;
+                                precision: 3;
+                                unit: "s";
+                                changed(value) => { root.draft-end-changed(index, value); }
+                            }
+                            Field {
+                                horizontal-stretch: 1;
+                                value: cue.text;
+                                placeholder: I18n.t("captions.captionText");
+                                edited(text) => { root.draft-text-changed(index, text); }
+                            }
+                            Button {
+                                label: "×";
+                                danger: true;
+                                ghost: true;
+                                clicked => { root.draft-delete(index); }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -385,14 +727,57 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if !root.data.running && !root.data.reviewing: Button {
-                block: true;
-                primary: true;
-                large: true;
-                glyph: Glyph.text-mark;
-                label: root.from-voice ? I18n.t("captions.generateCaptions") : I18n.t("captions.addCaptions");
-                enabled: root.from-voice ? root.data.ready && root.data.source >= 0 : root.draft != "";
-                clicked => { root.begin(); }
+            if !root.data.running && root.data.reviewing: HorizontalLayout {
+                spacing: 8px;
+
+                Button {
+                    label: I18n.t("captions.discardDraft");
+                    ghost: true;
+                    clicked => { root.draft-discard(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    label: I18n.t("captions.useCaptions");
+                    large: true;
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-insert(); }
+                }
+
+                Button {
+                    label: I18n.t("captions.useCaptionsDetect");
+                    primary: true;
+                    large: true;
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-insert-and-detect(); }
+                }
+            }
+
+            if !root.data.running && !root.data.reviewing: HorizontalLayout {
+                spacing: 8px;
+
+                Button {
+                    horizontal-stretch: 1;
+                    primary: true;
+                    large: true;
+                    glyph: Glyph.text-mark;
+                    label: root.from-voice ? I18n.t("captions.generateCaptions") : I18n.t("captions.addCaptions");
+                    enabled: root.from-voice ? root.data.ready && root.data.source >= 0 : root.draft != "";
+                    clicked => { root.begin(); }
+                }
+
+                Button {
+                    large: true;
+                    label: I18n.t("captions.newBlankCaptions");
+                    clicked => { root.new-blank-captions(); }
+                }
+
+                Button {
+                    large: true;
+                    label: I18n.t("captions.openSubtitleFile");
+                    clicked => { root.open-subtitle-file(); }
+                }
             }
         }
     }

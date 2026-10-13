@@ -295,18 +295,34 @@ export component App inherits Window {
     callback captions-source-changed(index: int);
     callback captions-text-edited(text: string);
     callback captions-model-changed(index: int);
+    callback captions-download-model-changed(index: int);
+    callback captions-download-model-clicked();
     callback captions-language-changed(index: int);
     callback captions-translate-changed(on: bool);
+    callback captions-beam-size-changed(value: float);
     callback captions-prompt-changed(text: string);
+    callback captions-output-dir-changed(text: string);
+    callback captions-browse-output-dir();
+    callback captions-word-timestamps-changed(on: bool);
+    callback captions-temperature-fallback-changed(on: bool);
+    callback captions-normalize-audio-changed(on: bool);
+    callback captions-keep-wav-changed(on: bool);
     callback captions-placement-changed(index: int);
     callback captions-size-changed(index: int);
+    callback captions-new-blank-captions();
+    callback captions-open-subtitle-file();
     callback captions-draft-text-changed(index: int, text: string);
     callback captions-draft-start-changed(index: int, value: float);
     callback captions-draft-end-changed(index: int, value: float);
     callback captions-draft-delete(index: int);
     callback captions-draft-add();
+    callback captions-draft-undo();
+    callback captions-draft-save();
+    callback captions-seg-preset-changed(index: int);
+    callback captions-draft-resplit();
     callback captions-draft-discard();
     callback captions-draft-insert();
+    callback captions-draft-insert-and-detect();
     callback captions-begin();
     callback captions-cancel();
 
@@ -318,11 +334,16 @@ export component App inherits Window {
     in property <SectionsSheetData> sections;
     callback sections-closed();
     callback sections-row-toggled(index: int);
+    callback sections-row-seek(index: int);
+    callback sections-row-text-edited(index: int, text: string);
     callback sections-detect();
+    callback sections-detect-silence-changed(on: bool);
     callback sections-threshold-changed(value: float);
     callback sections-min-silence-changed(value: float);
     callback sections-min-section-changed(value: float);
     callback sections-use-captions-changed(on: bool);
+    callback sections-subtitle-path-edited(path: string);
+    callback sections-browse-subtitle();
     callback sections-search-changed(text: string);
     callback sections-min-duration-changed(value: float);
     callback sections-kind-toggled(kind: int);
@@ -873,18 +894,34 @@ export component App inherits Window {
         source-changed(index) => { root.captions-source-changed(index); }
         text-edited(text) => { root.captions-text-edited(text); }
         model-changed(index) => { root.captions-model-changed(index); }
+        download-model-changed(index) => { root.captions-download-model-changed(index); }
+        download-model-clicked => { root.captions-download-model-clicked(); }
         language-changed(index) => { root.captions-language-changed(index); }
         translate-changed(on) => { root.captions-translate-changed(on); }
+        beam-size-changed(value) => { root.captions-beam-size-changed(value); }
         prompt-changed(text) => { root.captions-prompt-changed(text); }
+        output-dir-changed(text) => { root.captions-output-dir-changed(text); }
+        browse-output-dir => { root.captions-browse-output-dir(); }
+        word-timestamps-changed(on) => { root.captions-word-timestamps-changed(on); }
+        temperature-fallback-changed(on) => { root.captions-temperature-fallback-changed(on); }
+        normalize-audio-changed(on) => { root.captions-normalize-audio-changed(on); }
+        keep-wav-changed(on) => { root.captions-keep-wav-changed(on); }
         placement-changed(index) => { root.captions-placement-changed(index); }
         size-changed(index) => { root.captions-size-changed(index); }
+        new-blank-captions => { root.captions-new-blank-captions(); }
+        open-subtitle-file => { root.captions-open-subtitle-file(); }
         draft-text-changed(index, text) => { root.captions-draft-text-changed(index, text); }
         draft-start-changed(index, value) => { root.captions-draft-start-changed(index, value); }
         draft-end-changed(index, value) => { root.captions-draft-end-changed(index, value); }
         draft-delete(index) => { root.captions-draft-delete(index); }
         draft-add => { root.captions-draft-add(); }
+        draft-undo => { root.captions-draft-undo(); }
+        draft-save => { root.captions-draft-save(); }
+        seg-preset-changed(index) => { root.captions-seg-preset-changed(index); }
+        draft-resplit => { root.captions-draft-resplit(); }
         draft-discard => { root.captions-draft-discard(); }
         draft-insert => { root.captions-draft-insert(); }
+        draft-insert-and-detect => { root.captions-draft-insert-and-detect(); }
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
     }
@@ -910,11 +947,16 @@ export component App inherits Window {
 
         closed => { root.sections-closed(); }
         row-toggled(index) => { root.sections-row-toggled(index); }
+        row-seek(index) => { root.sections-row-seek(index); }
+        row-text-edited(index, text) => { root.sections-row-text-edited(index, text); }
         detect => { root.sections-detect(); }
+        detect-silence-changed(on) => { root.sections-detect-silence-changed(on); }
         threshold-changed(value) => { root.sections-threshold-changed(value); }
         min-silence-changed(value) => { root.sections-min-silence-changed(value); }
         min-section-changed(value) => { root.sections-min-section-changed(value); }
         use-captions-changed(on) => { root.sections-use-captions-changed(on); }
+        subtitle-path-edited(path) => { root.sections-subtitle-path-edited(path); }
+        browse-subtitle => { root.sections-browse-subtitle(); }
         search-changed(text) => { root.sections-search-changed(text); }
         min-duration-changed(value) => { root.sections-min-duration-changed(value); }
         kind-toggled(kind) => { root.sections-kind-toggled(kind); }

@@ -39,8 +39,8 @@ struct KnownModel {
     blurb: &'static str,
     approx_bytes: u64,
     /// What the finished file must hash to; a download with nothing to
-    /// check against is refused. See [`concat_host::models`].
-    sha256: Option<&'static str>,
+    /// check against is refused. Empty for local-only models. See [`concat_host::models`].
+    sha256: &'static str,
     english_only: bool,
     /// Managed by Concat (download/remove) versus supplied by another app.
     managed: bool,
@@ -55,7 +55,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Tiny (English)",
         blurb: "Fastest draft. Rough on names and punctuation.",
         approx_bytes: 77_704_715,
-        sha256: Some("921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"),
+        sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
         english_only: true,
         managed: true,
     },
@@ -64,7 +64,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Tiny (Multilingual)",
         blurb: "Fastest draft, any language.",
         approx_bytes: 77_691_713,
-        sha256: Some("be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
+        sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
         english_only: false,
         managed: true,
     },
@@ -73,7 +73,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Base (English)",
         blurb: "The sweet spot: solid captions at ~10x realtime.",
         approx_bytes: 147_964_211,
-        sha256: Some("a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"),
+        sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
         english_only: true,
         managed: true,
     },
@@ -82,7 +82,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Base (Multilingual)",
         blurb: "Solid captions, any language.",
         approx_bytes: 147_951_465,
-        sha256: Some("60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
+        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         english_only: false,
         managed: true,
     },
@@ -91,7 +91,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Small (English)",
         blurb: "Noticeably better wording; a few times slower.",
         approx_bytes: 487_614_201,
-        sha256: Some("c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"),
+        sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
         english_only: true,
         managed: true,
     },
@@ -100,7 +100,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Small (Multilingual)",
         blurb: "Best quality offered, any language.",
         approx_bytes: 487_601_967,
-        sha256: Some("1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"),
+        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         english_only: false,
         managed: true,
     },
@@ -109,7 +109,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Large v3 Turbo (Multilingual)",
         blurb: "Local VTS model only. Higher memory use; faster than Large v3.",
         approx_bytes: 1_620_000_000,
-        sha256: None,
+        sha256: "",
         english_only: false,
         managed: false,
     },
@@ -118,7 +118,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Large v3 (Multilingual)",
         blurb: "Local VTS model only. Highest quality; very high memory use.",
         approx_bytes: 3_100_000_000,
-        sha256: None,
+        sha256: "",
         english_only: false,
         managed: false,
     },
@@ -250,10 +250,36 @@ pub struct TranscribeRequest {
     /// Optional names and jargon to bias decoding.
     #[serde(default)]
     pub prompt: String,
+    /// Beam search width (`1..=10`; `1` uses greedy decoding).
+    #[serde(default = "default_beam_size")]
+    pub beam_size: u32,
+    /// Whether token-level word timestamps should be computed.
+    #[serde(default = "default_word_timestamps")]
+    pub word_timestamps: bool,
+    /// Retry hard segments at higher temperature (`0.2` step).
+    #[serde(default)]
+    pub temperature_fallback: bool,
+    /// Apply FFmpeg `loudnorm` filter before transcription.
+    #[serde(default)]
+    pub normalize_audio: bool,
+    /// Keep a copy of the decoded 16 kHz mono WAV file.
+    #[serde(default)]
+    pub keep_wav: bool,
+    /// Optional output directory for saved artifacts (`keep_wav` / exported subtitles).
+    #[serde(default)]
+    pub output_dir: Option<String>,
 }
 
 fn default_language() -> String {
     "auto".to_owned()
+}
+
+fn default_beam_size() -> u32 {
+    1
+}
+
+fn default_word_timestamps() -> bool {
+    true
 }
 
 struct LoadedModel {
@@ -329,9 +355,9 @@ impl Transcriber {
                 model.label
             ));
         }
-        let sha256 = model
-            .sha256
-            .ok_or_else(|| format!("no download digest is configured for {}", model.id))?;
+        if model.sha256.is_empty() {
+            return Err(format!("no download digest is configured for {}", model.id));
+        }
         let job = self.downloads.begin("model download")?;
         let destination = model_file(dirs, id)?;
         if destination.is_file() {
@@ -345,7 +371,7 @@ impl Transcriber {
             &partial,
             id,
             estimate,
-            sha256,
+            model.sha256,
             job.cancel_flag(),
             &mut progress,
         )?;
@@ -424,7 +450,11 @@ impl Transcriber {
             &AudioOptions {
                 start: Some(request.source_start),
                 duration: Some(request.window),
-                filters: Vec::new(),
+                filters: if request.normalize_audio {
+                    vec!["loudnorm".to_owned()]
+                } else {
+                    Vec::new()
+                },
                 rate: 16_000,
                 channels: 1,
                 format: SampleFormat::F32,
@@ -435,6 +465,9 @@ impl Transcriber {
         let samples = decoder.collect_f32().map_err(|error| error.to_string())?;
         if samples.is_empty() {
             return Err("nothing to transcribe: the clip has no audio".to_owned());
+        }
+        if request.keep_wav {
+            let _ = write_16khz_wav(&samples, &request.path, request.output_dir.as_deref());
         }
         if cancel.load(Ordering::Relaxed) {
             return Err("transcription cancelled".to_owned());
@@ -468,26 +501,33 @@ impl Transcriber {
         let threads = std::thread::available_parallelism()
             .map(|count| count.get().min(8))
             .unwrap_or(4);
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        let strategy = if request.beam_size > 1 {
+            SamplingStrategy::BeamSearch {
+                beam_size: request.beam_size.clamp(1, 10) as i32,
+                patience: -1.0,
+            }
+        } else {
+            SamplingStrategy::Greedy { best_of: 1 }
+        };
+        let mut params = FullParams::new(strategy);
         params.set_n_threads(threads as i32);
         // The language is whisper's to hear, when it can hear more than
         // one: a multilingual model detects it from the first window. An
         // English-only model asked for "auto" still runs the detection,
         // over a vocabulary it was never trained on, and "hears" Thai at
         // one percent - so it is simply told English.
-        let requested_language = request.language.trim();
-        let language = if !context.is_multilingual() {
-            "en"
-        } else if requested_language.is_empty() {
-            "auto"
-        } else {
-            requested_language
-        };
+        let (language, translate, prompt) =
+            effective_whisper_options(request, context.is_multilingual());
         params.set_language(Some(language));
-        params.set_translate(request.translate && context.is_multilingual());
-        if !request.prompt.trim().is_empty() {
-            params.set_initial_prompt(request.prompt.trim());
+        params.set_translate(translate);
+        if let Some(prompt) = prompt {
+            params.set_initial_prompt(prompt);
         }
+        params.set_temperature_inc(if request.temperature_fallback {
+            0.2
+        } else {
+            0.0
+        });
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -496,7 +536,7 @@ impl Transcriber {
         // Phase 6b: a time for every token, which is what makes a word's own
         // start and end heard rather than estimated. Whisper computes them
         // as it goes; the text it returns is the same either way.
-        params.set_token_timestamps(true);
+        params.set_token_timestamps(request.word_timestamps);
         // The raw hooks, not `set_abort_callback_safe`. whisper-rs 0.16's
         // safe one hands whisper a pointer to a boxed trait object with a
         // trampoline typed for the closure itself, so whisper reads the
@@ -532,26 +572,30 @@ impl Transcriber {
                 let start = segment.start_timestamp() as f64 / 100.0;
                 let end = segment.end_timestamp() as f64 / 100.0;
                 let text = segment.to_str_lossy().ok()?.trim().to_owned();
-                // Each token's bytes and span. The bytes are kept raw: a
-                // token can hold part of a character, and only the joined
-                // bytes of a whole word decode.
-                let tokens: Vec<(Vec<u8>, f64, f64)> = (0..segment.n_tokens())
-                    .filter_map(|index| segment.get_token(index))
-                    .filter(|token| token.token_id() < end_of_text)
-                    .filter_map(|token| {
-                        let data = token.token_data();
-                        Some((
-                            token.to_bytes().ok()?.to_vec(),
-                            data.t0 as f64 / 100.0,
-                            data.t1 as f64 / 100.0,
-                        ))
-                    })
-                    .collect();
-                let words = words_from_tokens(
-                    tokens
-                        .iter()
-                        .map(|(bytes, start, end)| (bytes.as_slice(), *start, *end)),
-                );
+                let words = if request.word_timestamps {
+                    // Each token's bytes and span. The bytes are kept raw: a
+                    // token can hold part of a character, and only the joined
+                    // bytes of a whole word decode.
+                    let tokens: Vec<(Vec<u8>, f64, f64)> = (0..segment.n_tokens())
+                        .filter_map(|index| segment.get_token(index))
+                        .filter(|token| token.token_id() < end_of_text)
+                        .filter_map(|token| {
+                            let data = token.token_data();
+                            Some((
+                                token.to_bytes().ok()?.to_vec(),
+                                data.t0 as f64 / 100.0,
+                                data.t1 as f64 / 100.0,
+                            ))
+                        })
+                        .collect();
+                    words_from_tokens(
+                        tokens
+                            .iter()
+                            .map(|(bytes, start, end)| (bytes.as_slice(), *start, *end)),
+                    )
+                } else {
+                    Vec::new()
+                };
                 keep_segment(start, end, text, words)
             })
             .collect())
@@ -619,9 +663,120 @@ fn words_from_tokens<'a>(tokens: impl IntoIterator<Item = (&'a [u8], f64, f64)>)
         .collect()
 }
 
+/// Writes a 16 kHz mono 16-bit PCM WAV file next to `source_path` or inside `output_dir`.
+fn write_16khz_wav(
+    samples: &[f32],
+    source_path: &str,
+    output_dir: Option<&str>,
+) -> Result<PathBuf, String> {
+    let src = std::path::Path::new(source_path);
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "audio".to_owned());
+    let dir = output_dir
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| src.parent().map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    let dest = dir.join(format!("{stem}.16k.wav"));
+    let data_bytes = (samples.len() * 2) as u32;
+    let riff_size = 36u32.saturating_add(data_bytes);
+    let mut bytes = Vec::with_capacity(44 + samples.len() * 2);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&riff_size.to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&16_000u32.to_le_bytes());
+    bytes.extend_from_slice(&32_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_bytes.to_le_bytes());
+    for &sample in samples {
+        let clamped = sample.clamp(-1.0, 1.0);
+        let pcm = (clamped * 32_767.0).round() as i16;
+        bytes.extend_from_slice(&pcm.to_le_bytes());
+    }
+    std::fs::write(&dest, bytes).map_err(|e| format!("could not write {}: {e}", dest.display()))?;
+    Ok(dest)
+}
+
+/// Resolves language, translation, and initial prompt for `whisper.cpp`
+/// according to whether the loaded model is multilingual.
+fn effective_whisper_options(
+    request: &TranscribeRequest,
+    is_multilingual: bool,
+) -> (&str, bool, Option<&str>) {
+    let requested_language = request.language.trim();
+    let language = if !is_multilingual {
+        "en"
+    } else if requested_language.is_empty() {
+        "auto"
+    } else {
+        requested_language
+    };
+    let translate = request.translate && is_multilingual && request.model_id != "large-v3-turbo";
+    let prompt = (!request.prompt.trim().is_empty()).then(|| request.prompt.trim());
+    (language, translate, prompt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_whisper_options_normalizes_language_translate_and_prompt() {
+        let req = TranscribeRequest {
+            path: "sample.mp4".to_owned(),
+            audio_stream: None,
+            source_start: 0.0,
+            window: 10.0,
+            model_id: "base".to_owned(),
+            language: "  id  ".to_owned(),
+            translate: true,
+            prompt: "  Concat, VTS  ".to_owned(),
+            beam_size: 1,
+            word_timestamps: true,
+            temperature_fallback: false,
+            normalize_audio: false,
+            keep_wav: false,
+            output_dir: None,
+        };
+        assert_eq!(
+            effective_whisper_options(&req, true),
+            ("id", true, Some("Concat, VTS"))
+        );
+        assert_eq!(
+            effective_whisper_options(&req, false),
+            ("en", false, Some("Concat, VTS"))
+        );
+        let turbo = TranscribeRequest {
+            model_id: "large-v3-turbo".to_owned(),
+            ..req.clone()
+        };
+        assert_eq!(
+            effective_whisper_options(&turbo, true),
+            ("id", false, Some("Concat, VTS"))
+        );
+
+        let blank = TranscribeRequest {
+            language: "   ".to_owned(),
+            translate: false,
+            prompt: "   ".to_owned(),
+            ..req
+        };
+        assert_eq!(
+            effective_whisper_options(&blank, true),
+            ("auto", false, None)
+        );
+    }
 
     #[test]
     fn stage_directions_and_degenerate_spans_are_not_captions() {
@@ -838,6 +993,12 @@ mod real_audio {
             language: "auto".to_owned(),
             translate: false,
             prompt: String::new(),
+            beam_size: 1,
+            word_timestamps: true,
+            temperature_fallback: false,
+            normalize_audio: false,
+            keep_wav: false,
+            output_dir: None,
         };
         let segments = transcriber
             .transcribe(&dirs, &request, |percent| eprintln!("{percent}%"))

@@ -201,6 +201,13 @@ def check() -> int:
         consts = dict(re.findall(r'const (\w+): &str = "([^"]+)"', text))
         ids = set(re.findall(r'^\s*(?:pub )?id: "([^"]+)"', text, re.M))
         ids |= {consts[name] for name in re.findall(r'^\s*(?:pub )?id: (\w+),', text, re.M) if name in consts}
+        unmanaged = set(
+            re.findall(
+                r'KnownModel \{\n(?:(?!\n    \},)[\s\S])*?\bid: "([^"]+)"(?:(?!\n    \},)[\s\S])*?\bmanaged: false\b',
+                text,
+            )
+        )
+        ids -= unmanaged
         if family == "cutout":
             ids = set(re.findall(r'^\s*file: "([^"]+)"', text, re.M))
         wanted = {engine_id(model) for model in rows}

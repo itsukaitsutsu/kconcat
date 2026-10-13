@@ -409,6 +409,9 @@ impl SettingsPane {
                 }
             }
             SettingsMsg::ModelRemove(id) => {
+                if self.is_transcriber(&id) && self.whisper_models_pending {
+                    return;
+                }
                 let result = if self.is_transcriber(&id) {
                     studio.host.transcriber.delete_model(&studio.host.dirs, &id)
                 } else {
@@ -524,7 +527,10 @@ impl SettingsPane {
             return;
         }
         if studio.host.transcriber.is_busy()
-            || self.transcribers.iter().any(|model| model.fetched.is_some())
+            || self
+                .transcribers
+                .iter()
+                .any(|model| model.fetched.is_some())
         {
             self.whisper_models_message = t("settings.whisperFolderBusy");
             return;
@@ -890,7 +896,10 @@ impl SettingsPane {
             whisper_models_message: self.whisper_models_message.as_str().into(),
             whisper_models_busy: self.whisper_models_pending
                 || studio.host.transcriber.is_busy()
-                || self.transcribers.iter().any(|model| model.fetched.is_some()),
+                || self
+                    .transcribers
+                    .iter()
+                    .any(|model| model.fetched.is_some()),
             whisper_models_dirty: self.whisper_models_draft.trim()
                 != self.whisper_models_dir.as_str(),
             server_enabled: studio.prefs.server.enabled,

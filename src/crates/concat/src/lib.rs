@@ -1607,20 +1607,55 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_captions_model_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::ModelChanged(index)));
     }));
+    app.on_captions_download_model_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::DownloadModelChanged(index)));
+    }));
+    app.on_captions_download_model_clicked(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DownloadModelClicked));
+    }));
     app.on_captions_language_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::LanguageChanged(index)));
     }));
     app.on_captions_translate_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Captions(CaptionsMsg::TranslateChanged(on)));
     }));
+    app.on_captions_beam_size_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Captions(CaptionsMsg::BeamSizeChanged(value)));
+    }));
     app.on_captions_prompt_changed(on_window!(|state, text: SharedString| {
         state.handle(Msg::Captions(CaptionsMsg::PromptChanged(text.to_string())));
+    }));
+    app.on_captions_output_dir_changed(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::OutputDirChanged(
+            text.to_string(),
+        )));
+    }));
+    app.on_captions_browse_output_dir(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::BrowseOutputDir));
+    }));
+    app.on_captions_word_timestamps_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::WordTimestampsChanged(on)));
+    }));
+    app.on_captions_temperature_fallback_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::TemperatureFallbackChanged(on)));
+    }));
+    app.on_captions_normalize_audio_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::NormalizeAudioChanged(on)));
+    }));
+    app.on_captions_keep_wav_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::KeepWavChanged(on)));
     }));
     app.on_captions_placement_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::PlacementChanged(index)));
     }));
     app.on_captions_size_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::SizeChanged(index)));
+    }));
+    app.on_captions_new_blank_captions(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::NewBlankCaptions));
+    }));
+    app.on_captions_open_subtitle_file(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::OpenSubtitleFile));
     }));
     app.on_captions_draft_text_changed(on_window!(|state, index: i32, text: SharedString| {
         state.handle(Msg::Captions(CaptionsMsg::DraftTextChanged(
@@ -1640,11 +1675,26 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_captions_draft_add(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DraftAdd));
     }));
+    app.on_captions_draft_undo(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftUndo));
+    }));
+    app.on_captions_draft_save(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftSave));
+    }));
+    app.on_captions_seg_preset_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::SegPresetChanged(index)));
+    }));
+    app.on_captions_draft_resplit(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftResplit));
+    }));
     app.on_captions_draft_discard(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DraftDiscard));
     }));
     app.on_captions_draft_insert(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DraftInsert));
+    }));
+    app.on_captions_draft_insert_and_detect(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftInsertAndDetect));
     }));
     app.on_captions_begin(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Begin));
@@ -1664,6 +1714,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_sections_detect(on_window!(|state| {
         state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Detect));
     }));
+    app.on_sections_detect_silence_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::DetectSilenceChanged(on),
+        ));
+    }));
     app.on_sections_threshold_changed(on_window!(|state, value: f32| {
         state.handle(Msg::Sections(
             crate::panes::sections::SectionsMsg::ThresholdChanged(value),
@@ -1682,6 +1737,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_sections_use_captions_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Sections(
             crate::panes::sections::SectionsMsg::UseCaptionsChanged(on),
+        ));
+    }));
+    app.on_sections_subtitle_path_edited(on_window!(|state, path: SharedString| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SubtitlePathEdited(path.to_string()),
+        ));
+    }));
+    app.on_sections_browse_subtitle(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::BrowseSubtitle,
         ));
     }));
     app.on_sections_search_changed(on_window!(|state, text: SharedString| {
@@ -1730,6 +1795,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_sections_row_toggled(on_window!(|state, index: i32| {
         state.handle(Msg::Sections(
             crate::panes::sections::SectionsMsg::RowToggled(index),
+        ));
+    }));
+    app.on_sections_row_seek(on_window!(|state, index: i32| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::RowSeek(
+            index,
+        )));
+    }));
+    app.on_sections_row_text_edited(on_window!(|state, index: i32, text: SharedString| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
         ));
     }));
     app.on_captions_cancel(on_window!(|state| {

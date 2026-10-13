@@ -16,7 +16,7 @@ use crate::ui::CaptionImportData;
 
 /// The timebase chosen for an import.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Timebase {
+pub enum Timebase {
     /// Subtitle times already refer to the project timeline.
     ProjectStart,
     /// Subtitle times refer to the selected clip's source media.
@@ -25,7 +25,7 @@ pub(crate) enum Timebase {
 
 /// The selected clip's clocks, captured before the file is parsed.
 #[derive(Clone, Debug)]
-pub(crate) struct ClipTarget {
+pub struct ClipTarget {
     id: String,
     label: String,
     timeline_start: f64,
@@ -36,7 +36,7 @@ pub(crate) struct ClipTarget {
 
 /// One parsed subtitle cue, in its file's clock.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CaptionCue {
+pub struct CaptionCue {
     start: f64,
     end: f64,
     text: String,
@@ -53,7 +53,7 @@ struct PlacedCue {
 
 /// One thing the import dialog or its worker reports.
 #[derive(Clone, Debug)]
-pub(crate) enum ImportCaptionsMsg {
+pub enum ImportCaptionsMsg {
     /// The native picker returned one or more SRT/VTT paths.
     FilesPicked(Vec<PathBuf>),
     /// Use the subtitle times from project time zero.
@@ -80,7 +80,7 @@ pub struct ImportCaptionsPane {
 
 impl ImportCaptionsPane {
     /// Applies one import-sheet message.
-    pub(crate) fn update(&mut self, msg: ImportCaptionsMsg, studio: &mut Studio) {
+    pub fn update(&mut self, msg: ImportCaptionsMsg, studio: &mut Studio) {
         match msg {
             ImportCaptionsMsg::FilesPicked(paths) => self.picked(paths, studio),
             ImportCaptionsMsg::ProjectStart => {
@@ -182,7 +182,7 @@ impl ImportCaptionsPane {
     }
 
     /// The data shown by the timebase choice sheet.
-    pub(crate) fn data(&self) -> CaptionImportData {
+    pub fn data(&self) -> CaptionImportData {
         let files = if self.files.len() == 1 {
             self.files[0]
                 .file_name()
@@ -247,8 +247,8 @@ fn parse_files(paths: &[PathBuf]) -> Result<Vec<CaptionCue>, String> {
         let bytes = std::fs::read(path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let text = String::from_utf8_lossy(&bytes);
-        let parsed = parse_subtitles(&text)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let parsed =
+            parse_subtitles(&text).map_err(|error| format!("{}: {error}", path.display()))?;
         cues.extend(parsed);
     }
     cues.sort_by(|left, right| left.start.total_cmp(&right.start));
@@ -259,7 +259,10 @@ fn parse_files(paths: &[PathBuf]) -> Result<Vec<CaptionCue>, String> {
 }
 
 fn parse_subtitles(input: &str) -> Result<Vec<CaptionCue>, String> {
-    let input = input.trim_start_matches('\u{feff}').replace("\r\n", "\n").replace('\r', "\n");
+    let input = input
+        .trim_start_matches('\u{feff}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     let lines: Vec<&str> = input.lines().collect();
     let mut cues = Vec::new();
     let mut index = 0;
@@ -288,7 +291,10 @@ fn parse_subtitles(input: &str) -> Result<Vec<CaptionCue>, String> {
         let end = parse_time(end_token)
             .ok_or_else(|| format!("invalid cue end on line {}", index + 1))?;
         if end <= start {
-            return Err(format!("cue end must follow its start on line {}", index + 1));
+            return Err(format!(
+                "cue end must follow its start on line {}",
+                index + 1
+            ));
         }
         index += 1;
         let mut body = Vec::new();
@@ -314,7 +320,11 @@ fn parse_time(value: &str) -> Option<f64> {
     let normalized = value.trim().replace(',', ".");
     let parts: Vec<&str> = normalized.split(':').collect();
     let (hours, minutes, seconds) = match parts.as_slice() {
-        [minutes, seconds] => (0.0, minutes.parse::<u64>().ok()?, seconds.parse::<f64>().ok()?),
+        [minutes, seconds] => (
+            0.0,
+            minutes.parse::<u64>().ok()? as f64,
+            seconds.parse::<f64>().ok()?,
+        ),
         [hours, minutes, seconds] => (
             hours.parse::<u64>().ok()? as f64,
             minutes.parse::<u64>().ok()? as f64,
@@ -322,7 +332,7 @@ fn parse_time(value: &str) -> Option<f64> {
         ),
         _ => return None,
     };
-    if minutes >= 60 && parts.len() == 3
+    if minutes >= 60.0 && parts.len() == 3
         || !seconds.is_finite()
         || !(0.0..60.0).contains(&seconds)
     {
@@ -395,9 +405,7 @@ fn clock(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CaptionCue, ClipTarget, Timebase, parse_subtitles, place_cues,
-    };
+    use super::{CaptionCue, ClipTarget, Timebase, parse_subtitles, place_cues};
 
     #[test]
     fn parses_srt_cues_and_strips_basic_markup() {
@@ -413,15 +421,17 @@ mod tests {
 
     #[test]
     fn parses_webvtt_header_ids_and_cue_settings() {
-        let cues = parse_subtitles(
-            "WEBVTT\n\ncue-1\n00:00.500 --> 00:02.000 align:start\nA caption\n",
-        )
-        .expect("valid WebVTT");
-        assert_eq!(cues, [CaptionCue {
-            start: 0.5,
-            end: 2.0,
-            text: "A caption".to_owned(),
-        }]);
+        let cues =
+            parse_subtitles("WEBVTT\n\ncue-1\n00:00.500 --> 00:02.000 align:start\nA caption\n")
+                .expect("valid WebVTT");
+        assert_eq!(
+            cues,
+            [CaptionCue {
+                start: 0.5,
+                end: 2.0,
+                text: "A caption".to_owned(),
+            }]
+        );
     }
 
     #[test]

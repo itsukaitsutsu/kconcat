@@ -145,13 +145,17 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
                 ),
             ));
         }
-        Msg::ImportCaptions(ImportCaptionsMsg::Parsed { result: Ok(cues), .. }) => {
+        Msg::ImportCaptions(ImportCaptionsMsg::Parsed {
+            result: Ok(cues), ..
+        }) => {
             return Some(Activity::once(
                 Info,
                 format!("caption import: parsed {} cue(s)", cues.len()),
             ));
         }
-        Msg::ImportCaptions(ImportCaptionsMsg::Parsed { result: Err(error), .. }) => {
+        Msg::ImportCaptions(ImportCaptionsMsg::Parsed {
+            result: Err(error), ..
+        }) => {
             return Some(Activity::once(
                 Info,
                 format!("caption import: failed, {error}"),
