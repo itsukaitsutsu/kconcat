@@ -25,6 +25,7 @@ use concat_core::frame::Frame;
 use concat_core::shader::RevealMap;
 
 use concat_export::{ClipKind, ExportClip};
+use concat_project::captionmap::{Word, layout_words_of, locate_words};
 use concat_project::model::{
     ClipKind as ModelClipKind, Project, ShapeKind, ShapeStyle, TextAlign, TextStyle,
 };
@@ -58,6 +59,13 @@ pub struct TitleClip {
 enum Painting<'a> {
     Title(&'a TextStyle),
     Shape(&'a ShapeStyle),
+    /// One title's words in its highlight colour, for the karaoke overlay
+    /// laid over the title. `words` are indices into the title's layout
+    /// words - see `concat_text::word_ranges` - as a half-open pair.
+    Highlight {
+        style: &'a TextStyle,
+        words: (usize, usize),
+    },
 }
 
 /// What one render left behind.
@@ -261,7 +269,7 @@ impl Titles {
                     continue;
                 }
             };
-            out.push(TitleClip {
+            let title = TitleClip {
                 clip_id: clip.id.clone(),
                 clip: ExportClip {
                     path: path.to_string_lossy().into_owned(),
@@ -286,18 +294,20 @@ impl Titles {
                     // A shape is pulled: that is how a square becomes
                     // the rectangle that was wanted.
                     stretch_x: match painting {
-                        Painting::Title(_) => 1.0,
                         Painting::Shape(_) => clip.stretch_x,
+                        Painting::Title(_) | Painting::Highlight { .. } => 1.0,
                     },
                     stretch_y: match painting {
-                        Painting::Title(_) => 1.0,
                         Painting::Shape(_) => clip.stretch_y,
+                        Painting::Title(_) | Painting::Highlight { .. } => 1.0,
                     },
                     // The style's own opacity multiplies the clip's: a
                     // half-transparent title fades to half, not to solid.
                     opacity: match painting {
                         Painting::Title(text) => (clip.opacity * text.opacity).clamp(0.0, 1.0),
-                        Painting::Shape(_) => clip.opacity.clamp(0.0, 1.0),
+                        Painting::Shape(_) | Painting::Highlight { .. } => {
+                            clip.opacity.clamp(0.0, 1.0)
+                        }
                     },
                     media_width: Some(width),
                     media_height: Some(height),
@@ -305,12 +315,108 @@ impl Titles {
                     // A shape has no words to reveal one at a time.
                     reveal_map: match painting {
                         Painting::Title(_) => Some(Arc::clone(&art.reveal)),
-                        Painting::Shape(_) => None,
+                        Painting::Shape(_) | Painting::Highlight { .. } => None,
                     },
                     ..ExportClip::blank(ClipKind::Image, clip.start, clip.duration, index)
                 },
                 block: art.block,
                 offset: art.offset,
+                frame,
+            };
+            // A word-timed caption's overlays come straight after it, so the
+            // one that is lit is drawn over the words it lights.
+            let overlays = match painting {
+                Painting::Title(style) if !style.highlight_color.is_empty() => {
+                    match clip.words.as_deref() {
+                        Some(words) => {
+                            self.highlights(project, &title, style, words, width, height, live)
+                        }
+                        None => Vec::new(),
+                    }
+                }
+                _ => Vec::new(),
+            };
+            out.push(title);
+            out.extend(overlays);
+        }
+        out
+    }
+
+    /// The karaoke highlight of a word-timed caption: one picture per heard
+    /// word, each the caption's own words with only that word in the accent,
+    /// on the clip's window for that word and nothing else.
+    ///
+    /// Each overlay copies the caption's clip, so its place, opacity and
+    /// track are the caption's. What does not carry over is what is timed
+    /// against the clip's own window: fades, a transition into the clip, and
+    /// the reveal map, none of which belongs to a word's moment. A caption
+    /// with keyframed animation gets no highlight yet: the keys are read
+    /// against the clip's window, which an overlay does not share, so the
+    /// overlay would move out of step with the caption it lights.
+    #[allow(clippy::too_many_arguments)]
+    fn highlights(
+        &self,
+        project: &Project,
+        title: &TitleClip,
+        style: &TextStyle,
+        words: &[Word],
+        width: u32,
+        height: u32,
+        live: bool,
+    ) -> Vec<TitleClip> {
+        let base = &title.clip;
+        if !base.animation.is_empty() {
+            log::info!("title {}: animated, so no highlight", title.clip_id);
+            return Vec::new();
+        }
+        let content = style.content.as_str();
+        let layout = concat_text::word_ranges(content);
+        let covers = layout_words_of(&locate_words(content, words), &layout);
+        let (window_start, window_end) = (base.start, base.start + base.duration);
+        let mut out = Vec::new();
+        for (word, covered) in words.iter().zip(covers) {
+            let Some(covered) = covered else { continue };
+            // Clipped to the caption's window: a word the trim has cut off
+            // has no moment to light, and a timing that is not a number
+            // has none either.
+            let from = word.start.max(window_start);
+            let to = word.end.min(window_end);
+            if !from.is_finite() || !to.is_finite() || to <= from {
+                continue;
+            }
+            let painting = Painting::Highlight {
+                style,
+                words: (covered.start, covered.end),
+            };
+            let painted = if live {
+                self.painted_live(project, painting, width, height)
+                    .map(|(path, _, frame)| (path, Some(frame)))
+            } else {
+                self.painted(project, painting, width, height)
+                    .map(|(path, _)| (path, None))
+            };
+            let (path, frame) = match painted {
+                Ok(painted) => painted,
+                Err(error) => {
+                    log::warn!("highlight of {}: {error}", title.clip_id);
+                    continue;
+                }
+            };
+            let mut clip = base.clone();
+            clip.path = path.to_string_lossy().into_owned();
+            clip.start = from;
+            clip.duration = to - from;
+            clip.fade_in = 0.0;
+            clip.fade_out = 0.0;
+            clip.video_fade_in = 0.0;
+            clip.transition = None;
+            clip.transition_shapes.clear();
+            clip.reveal_map = None;
+            out.push(TitleClip {
+                clip_id: title.clip_id.clone(),
+                clip,
+                block: title.block,
+                offset: title.offset,
                 frame,
             });
         }
@@ -342,6 +448,20 @@ impl Titles {
             Painting::Shape(style) => {
                 concat_text::render_shape_frame(&shape_style(style), width, height)
                     .map_err(|error| error.to_string())?
+            }
+            Painting::Highlight { style, words } => {
+                let title = title_style(style);
+                let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
+                let fonts = self.fonts_for(project, &mut fonts);
+                concat_text::render_highlight_frame(
+                    fonts,
+                    &title,
+                    width,
+                    height,
+                    words.0..words.1,
+                    &style.highlight_color,
+                )
+                .map_err(|error| error.to_string())?
             }
         };
         let art = Art {
@@ -403,6 +523,20 @@ impl Titles {
             }
             Painting::Shape(style) => concat_text::render_shape(&shape_style(style), width, height)
                 .map_err(|error| error.to_string())?,
+            Painting::Highlight { style, words } => {
+                let title = title_style(style);
+                let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
+                let fonts = self.fonts_for(project, &mut fonts);
+                concat_text::render_highlight(
+                    fonts,
+                    &title,
+                    width,
+                    height,
+                    words.0..words.1,
+                    &style.highlight_color,
+                )
+                .map_err(|error| error.to_string())?
+            }
         };
         std::fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
         std::fs::write(&png, &rendered.png).map_err(|error| error.to_string())?;
@@ -470,6 +604,13 @@ fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) ->
         Painting::Shape(style) => {
             bytes.extend_from_slice(b"shape:");
             bytes.extend_from_slice(serde_json::to_string(style).unwrap_or_default().as_bytes());
+        }
+        // A highlight is its title, which carries the accent, and the words
+        // it lights: a different word is a different picture.
+        Painting::Highlight { style, words } => {
+            bytes.extend_from_slice(b"highlight:");
+            bytes.extend_from_slice(serde_json::to_string(style).unwrap_or_default().as_bytes());
+            bytes.extend_from_slice(format!("|{}..{}", words.0, words.1).as_bytes());
         }
     }
     bytes.push(0);
@@ -754,6 +895,85 @@ mod tests {
             cold[0].clip.reveal_map.as_ref().map(|r| &*r.gray),
             left[0].clip.reveal_map.as_ref().map(|r| &*r.gray)
         );
+        let _ = std::fs::remove_dir_all(dirs.data.parent().unwrap());
+    }
+
+    /// A word-timed caption with a highlight colour comes back as itself
+    /// plus one overlay per heard word: the same block and place, on that
+    /// word's window, with its own picture. A caption with no colour is one
+    /// clip, as it was before.
+    #[test]
+    fn a_word_timed_caption_gets_one_highlight_per_heard_word() {
+        let dirs = scratch("a_word_highlight");
+        let mut editor = Editor::new();
+        let style = TextStyle {
+            content: "one two three".to_owned(),
+            highlight_color: "#ffd21f".to_owned(),
+            ..TextStyle::default()
+        };
+        let words = vec![
+            concat_project::captionmap::Word {
+                text: "one".to_owned(),
+                start: 2.0,
+                end: 2.4,
+            },
+            concat_project::captionmap::Word {
+                text: "two".to_owned(),
+                start: 2.4,
+                end: 2.9,
+            },
+            concat_project::captionmap::Word {
+                text: "three".to_owned(),
+                start: 2.9,
+                end: 3.5,
+            },
+        ];
+        let id = editor
+            .apply(Command::AddTextClip {
+                above: false,
+                track_id: None,
+                start: 2.0,
+                style: Some(style),
+                duration: Some(2.0),
+                offset_y: Some(0.3),
+                caption_of: None,
+                words: Some(words.clone()),
+            })
+            .expect("a caption is added")
+            .created_id
+            .expect("with an id");
+
+        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        assert_eq!(out.len(), 4, "the caption, and one highlight per word");
+        assert_eq!(out[0].clip_id, id);
+        for (overlay, word) in out[1..].iter().zip(&words) {
+            assert_eq!(overlay.clip_id, id);
+            assert_eq!(
+                (overlay.clip.start, overlay.clip.duration),
+                (word.start, word.end - word.start)
+            );
+            assert_eq!(overlay.block, out[0].block);
+            assert_eq!(overlay.offset, out[0].offset);
+            assert!(overlay.clip.reveal_map.is_none());
+            assert!(Path::new(&overlay.clip.path).is_file());
+        }
+        assert_ne!(out[1].clip.path, out[2].clip.path, "a word, a picture");
+
+        // No colour, no highlight: the caption alone, as before.
+        editor
+            .apply(Command::UpdateClip {
+                clip_id: id.clone(),
+                patch: concat_project::commands::ClipPatch {
+                    text: Some(Some(TextStyle {
+                        content: "one two three".to_owned(),
+                        ..TextStyle::default()
+                    })),
+                    ..Default::default()
+                },
+            })
+            .expect("the colour is taken off");
+        let alone = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        assert_eq!(alone.len(), 1);
         let _ = std::fs::remove_dir_all(dirs.data.parent().unwrap());
     }
 

@@ -2860,6 +2860,26 @@ mod tests {
     }
 
     #[test]
+    fn a_title_style_highlight_is_optional_and_off_by_default() {
+        use crate::model::TextStyle;
+        // A style with no highlight writes no field, so an older build reads
+        // it unchanged; an older document has no field and reads as none.
+        let plain = serde_json::to_value(TextStyle::default()).expect("serialises");
+        assert!(plain.get("highlightColor").is_none());
+        let old: TextStyle = serde_json::from_value(json!({ "content": "Hi" })).expect("reads");
+        assert_eq!(old.highlight_color, "");
+
+        let lit = TextStyle {
+            highlight_color: "#ffd21f".to_owned(),
+            ..TextStyle::default()
+        };
+        let text = serde_json::to_value(&lit).expect("serialises");
+        assert_eq!(text["highlightColor"], "#ffd21f");
+        let back: TextStyle = serde_json::from_value(text).expect("reads");
+        assert_eq!(back, lit);
+    }
+
+    #[test]
     fn a_medias_origin_round_trips_and_an_unknown_one_reads_as_an_import() {
         let mut editor = Editor::new();
         let Command::AddMedia { mut item } = media("/voice.wav", 3.0, true) else {

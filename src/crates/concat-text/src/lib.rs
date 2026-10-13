@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 
 use tiny_skia::{
     Color, FillRule, FilterQuality, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap,
-    PixmapPaint, Rect, Stroke, Transform,
+    PixmapPaint, PremultipliedColorU8, Rect, Stroke, Transform,
 };
 use unicode_bidi::ParagraphBidiInfo;
 use unicode_linebreak::BreakOpportunity;
@@ -1154,7 +1154,7 @@ pub fn render(
     width: u32,
     height: u32,
 ) -> Result<Rendered, Error> {
-    let (canvas, block, words) = paint(fonts, style, width, height)?;
+    let (canvas, block, words) = paint(fonts, style, width, height, None)?;
     let png = canvas
         .encode_png()
         .map_err(|error| Error::Encode(error.to_string()))?;
@@ -1180,7 +1180,7 @@ pub fn render_frame(
     width: u32,
     height: u32,
 ) -> Result<RenderedFrame, Error> {
-    let (canvas, block, words) = paint(fonts, style, width, height)?;
+    let (canvas, block, words) = paint(fonts, style, width, height, None)?;
     Ok(RenderedFrame {
         rgba: straight_rgba(&canvas),
         width,
@@ -1193,16 +1193,144 @@ pub fn render_frame(
     })
 }
 
+/// The words of `content` as byte ranges, in reading order: the same words
+/// [`render`] lays out, so a word's index here is its [`WordRect`]'s index.
+/// Lines are paragraphs, as they are to the layout; a line's break is not a
+/// byte of any word.
+pub fn word_ranges(content: &str) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    let mut offset = 0;
+    for line in content.split('\n') {
+        let text = line.strip_suffix('\r').unwrap_or(line);
+        out.extend(
+            words(text, 0..text.len())
+                .into_iter()
+                .map(|word| offset + word.start..offset + word.end),
+        );
+        offset += line.len() + 1;
+    }
+    out
+}
+
+/// The title's words in one colour, as a picture to lay over the title.
+///
+/// It is the title as [`render_frame`] lays it out - the same block, the same
+/// words in the same places - with only the words whose indices (see
+/// [`word_ranges`]) are in `words` kept, painted in `colour`. Everything else
+/// is transparent, and so are the title's plate, shadow and outline: the
+/// overlay carries the words alone, so a caption's highlighted word can be
+/// shown over the caption without a second copy of the caption's look. An
+/// accent that is not a colour is painted white, as a title's own fill is.
+pub fn render_highlight_frame(
+    fonts: &Fonts,
+    style: &TitleStyle,
+    width: u32,
+    height: u32,
+    words: Range<usize>,
+    colour_hex: &str,
+) -> Result<RenderedFrame, Error> {
+    let (canvas, block, rects) = highlight(fonts, style, width, height, words, colour_hex)?;
+    Ok(RenderedFrame {
+        rgba: straight_rgba(&canvas),
+        width,
+        height,
+        block_width: block.0,
+        block_height: block.1,
+        block_dx: block.2,
+        block_dy: block.3,
+        words: rects,
+    })
+}
+
+/// [`render_highlight_frame`] as a PNG, for the file a title is stored as.
+pub fn render_highlight(
+    fonts: &Fonts,
+    style: &TitleStyle,
+    width: u32,
+    height: u32,
+    words: Range<usize>,
+    colour_hex: &str,
+) -> Result<Rendered, Error> {
+    let (canvas, block, rects) = highlight(fonts, style, width, height, words, colour_hex)?;
+    let png = canvas
+        .encode_png()
+        .map_err(|error| Error::Encode(error.to_string()))?;
+    Ok(Rendered {
+        png,
+        width,
+        height,
+        block_width: block.0,
+        block_height: block.1,
+        block_dx: block.2,
+        block_dy: block.3,
+        words: rects,
+    })
+}
+
+/// The overlay's canvas: the title's words in `colour_hex`, the words outside
+/// `words` cleared. See [`render_highlight_frame`].
+fn highlight(
+    fonts: &Fonts,
+    style: &TitleStyle,
+    width: u32,
+    height: u32,
+    words: Range<usize>,
+    colour_hex: &str,
+) -> Result<(Pixmap, Block, Vec<WordRect>), Error> {
+    let accent = colour(colour_hex).unwrap_or(Color::WHITE);
+    let (mut canvas, block, rects) = paint(fonts, style, width, height, Some(accent))?;
+    let kept: Vec<WordRect> = rects
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| words.contains(index))
+        .map(|(_, rect)| *rect)
+        .collect();
+    clear_outside(&mut canvas, &kept);
+    Ok((canvas, block, rects))
+}
+
+/// Makes every pixel outside `rects` transparent. A word's box is its advance
+/// on the line, so the ink of a glyph that overhangs its box - an italic's
+/// tail, say - is cut at the box's edge; the neighbouring words are not in
+/// the overlay, so nothing else is.
+fn clear_outside(canvas: &mut Pixmap, rects: &[WordRect]) {
+    let (width, height) = (i64::from(canvas.width()), i64::from(canvas.height()));
+    let mut inside = vec![false; (width * height) as usize];
+    for rect in rects {
+        let x0 = i64::from(rect.x).clamp(0, width);
+        let x1 = (i64::from(rect.x) + i64::from(rect.width)).clamp(0, width);
+        let y0 = i64::from(rect.y).clamp(0, height);
+        let y1 = (i64::from(rect.y) + i64::from(rect.height)).clamp(0, height);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                inside[(y * width + x) as usize] = true;
+            }
+        }
+    }
+    for (pixel, keep) in canvas.pixels_mut().iter_mut().zip(inside) {
+        if !keep {
+            *pixel = PremultipliedColorU8::TRANSPARENT;
+        }
+    }
+}
+
 /// A painted block: (width, height, dx, dy), on [`Rendered`]'s terms.
 type Block = (u32, u32, i32, i32);
 
 /// The canvas with the title on it, the block, and every word's box on the
 /// canvas in reading order.
+///
+/// With `overlay` - an accent colour - the words are painted in that colour
+/// alone: no plate, no shadow, no outline, since those belong to the title
+/// the overlay is laid over. The layout does not change, so the block and
+/// every word's box are the same as the title's own; see
+/// [`render_highlight_frame`].
 fn paint(
     fonts: &Fonts,
     style: &TitleStyle,
     width: u32,
     height: u32,
+    overlay: Option<Color>,
 ) -> Result<(Pixmap, Block, Vec<WordRect>), Error> {
     let mut canvas = Pixmap::new(width, height).ok_or(Error::Canvas(width, height))?;
     let frame_h = height as f32;
@@ -1269,7 +1397,7 @@ fn paint(
     // Shape every line with the pen at the origin; placement comes after,
     // once the block's width is known. The words' colour goes along: a
     // `COLR` palette entry of 0xFFFF means "paint it with the text's own".
-    let fill = colour(&style.color).unwrap_or(Color::WHITE);
+    let fill = overlay.unwrap_or_else(|| colour(&style.color).unwrap_or(Color::WHITE));
     let setter = Setter {
         faces: &faces,
         em,
@@ -1366,6 +1494,7 @@ fn paint(
 
     // The plate, first and under everything: the whole box.
     if let Some(fill) = plate
+        && overlay.is_none()
         && let Some(rect) = Rect::from_xywh(outer_left, (frame_h - outer_h) / 2.0, outer_w, outer_h)
     {
         paint.set_color(fill);
@@ -1386,6 +1515,7 @@ fn paint(
     // The shadow: the words again, offset down and right, black, blurred on
     // a layer of their own and laid under the real words.
     if style.shadow
+        && overlay.is_none()
         && let Some(words) = &words
         && let Some(mut layer) = Pixmap::new(width, height)
     {
@@ -1411,6 +1541,7 @@ fn paint(
     // why it is drawn at twice the asked-for width.
     let stroke_w = style.stroke_width.max(0.0) as f32 * frame_h;
     if stroke_w > 0.0
+        && overlay.is_none()
         && let Some(edge) = colour(&style.stroke_color)
         && let Some(words) = &words
     {
@@ -1816,6 +1947,10 @@ mod tests {
         );
     }
 
+    fn straight_rgba_of(pixmap: &Pixmap) -> Vec<u8> {
+        super::straight_rgba(pixmap)
+    }
+
     fn style(content: &str) -> TitleStyle {
         TitleStyle {
             content: content.to_owned(),
@@ -1837,6 +1972,134 @@ mod tests {
             max_width: 0.0,
             max_height: 0.0,
         }
+    }
+
+    /// The words as the layout would break them: reading order, paragraphs
+    /// as lines, and a line's break not part of any word.
+    #[test]
+    fn word_ranges_are_the_layouts_words_in_reading_order() {
+        assert_eq!(
+            word_ranges("one two\nthree"),
+            vec![0..3, 4..7, 8..13],
+            "a newline ends a paragraph and is not a word"
+        );
+        assert_eq!(word_ranges("a  b"), vec![0..1, 3..4], "runs of spaces");
+        assert_eq!(word_ranges("  "), Vec::<Range<usize>>::new());
+        assert_eq!(word_ranges("one\r\ntwo"), vec![0..3, 5..8], "CRLF");
+    }
+
+    /// The highlight's indices mean the layout's words, so the ranges must
+    /// count the layout's rects one for one, whatever the script or the
+    /// punctuation.
+    #[test]
+    fn word_ranges_count_the_layouts_rects() {
+        let fonts = Fonts::new();
+        for content in [
+            "one two three",
+            "well-known fact, isn't it?",
+            "Hello, world!\nsecond line",
+            "  spaced   out  ",
+            "日本語のテキスト",
+            "a\r\nb",
+        ] {
+            let frame = render_frame(&fonts, &style(content), 640, 360).expect("renders");
+            assert_eq!(
+                word_ranges(content).len(),
+                frame.words.len(),
+                "the words of {content:?}"
+            );
+        }
+    }
+
+    /// Only the chosen words are painted, in the accent, and nothing else
+    /// of the picture is left: the middle word of three, and not the others.
+    #[test]
+    fn a_highlight_paints_only_its_words_in_the_accent() {
+        let fonts = Fonts::new();
+        let mut title = style("one two three");
+        title.background = "#101010cc".to_owned();
+        let base = render_frame(&fonts, &title, 640, 360).expect("renders");
+        let frame =
+            render_highlight_frame(&fonts, &title, 640, 360, 1..2, "#ff0000").expect("renders");
+        assert_eq!(frame.words, base.words, "the same layout, word for word");
+
+        let middle = base.words[1];
+        let inside = |x: usize, y: usize| {
+            let (x, y) = (x as i64, y as i64);
+            x >= i64::from(middle.x)
+                && x < i64::from(middle.x) + i64::from(middle.width)
+                && y >= i64::from(middle.y)
+                && y < i64::from(middle.y) + i64::from(middle.height)
+        };
+        let mut painted = 0;
+        for y in 0..360usize {
+            for x in 0..640usize {
+                let at = (y * 640 + x) * 4;
+                let alpha = frame.rgba[at + 3];
+                if alpha == 0 {
+                    continue;
+                }
+                assert!(inside(x, y), "ink outside the highlighted word at {x},{y}");
+                painted += 1;
+                if alpha == 255 {
+                    assert_eq!(
+                        &frame.rgba[at..at + 3],
+                        &[255, 0, 0],
+                        "the accent, at {x},{y}"
+                    );
+                }
+            }
+        }
+        assert!(painted > 0, "the highlighted word is painted");
+    }
+
+    /// The overlay must sit exactly over the title, so its block - plate and
+    /// all - is the title's own, even though the plate itself is not painted.
+    #[test]
+    fn the_overlay_has_the_titles_block_and_word_boxes() {
+        let fonts = Fonts::new();
+        let mut title = style("one two three");
+        title.background = "#101010cc".to_owned();
+        title.background_padding_x = 0.05;
+        title.align = Align::Left;
+        let base = render_frame(&fonts, &title, 640, 360).expect("renders");
+        let overlay =
+            render_highlight_frame(&fonts, &title, 640, 360, 0..3, "#00ff00").expect("renders");
+        assert_eq!(overlay.block_width, base.block_width);
+        assert_eq!(overlay.block_height, base.block_height);
+        assert_eq!(overlay.block_dx, base.block_dx);
+        assert_eq!(overlay.block_dy, base.block_dy);
+        assert_eq!(overlay.words, base.words);
+    }
+
+    /// Nothing named, or a range past the last word, paints nothing.
+    #[test]
+    fn a_highlight_of_no_words_is_empty() {
+        let fonts = Fonts::new();
+        let title = style("one two three");
+        for words in [0..0, 5..9] {
+            let frame = render_highlight_frame(&fonts, &title, 320, 180, words.clone(), "#ff0000")
+                .expect("renders");
+            assert!(
+                frame.rgba.chunks_exact(4).all(|px| px[3] == 0),
+                "nothing painted for {words:?}"
+            );
+        }
+    }
+
+    /// The PNG the disk cache keeps is the same picture as the frame.
+    #[test]
+    fn the_png_overlay_matches_the_frame_overlay() {
+        let fonts = Fonts::new();
+        let title = style("one two");
+        let frame =
+            render_highlight_frame(&fonts, &title, 320, 180, 0..1, "#ff0000").expect("renders");
+        let png = render_highlight(&fonts, &title, 320, 180, 0..1, "#ff0000").expect("renders");
+        assert_eq!((png.width, png.height), (320, 180));
+        assert_eq!(png.block_width, frame.block_width);
+        assert_eq!(png.words, frame.words);
+        let decoded = tiny_skia::Pixmap::decode_png(&png.png).expect("a PNG");
+        assert_eq!(straight_rgba_of(&decoded), frame.rgba);
     }
 
     /// A limit narrower than the words wraps them: the block comes out no

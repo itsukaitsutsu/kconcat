@@ -1037,6 +1037,13 @@ pub struct TextStyle {
     /// can be a band of a fixed size whatever is written on it.
     /// https://github.com/jub0t/Concat/issues/119
     pub max_height: f64,
+    /// The accent a word-timed caption paints the word being spoken in, as a
+    /// CSS hex colour. Empty - the default, and what every older document
+    /// reads as - is no highlight. The captions tool sets it on the captions
+    /// it makes from a clip's voice; see `concat_project::captionmap` for how
+    /// the words are matched to the title's words.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub highlight_color: String,
 }
 
 impl TextStyle {
@@ -1087,6 +1094,7 @@ impl Default for TextStyle {
             tracking: 0.0,
             max_width: 0.0,
             max_height: 0.0,
+            highlight_color: String::new(),
         }
     }
 }

@@ -27,6 +27,8 @@
 //! end survive an edit - and why a cue keeps [`Cue::word_source`] beside
 //! them, to say whether those times were heard or merely estimated.
 
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -160,9 +162,9 @@ fn is_alphanumeric(character: char) -> bool {
 /// Word timings estimated from the words themselves, spread across
 /// `[start, end]` in proportion to their length in characters.
 ///
-/// What a cue with no heard timings gets (a subtitle file, and - until
-/// the transcriber's token timestamps land - a whisper segment, which
-/// is timed as a phrase and no finer). Longer words take longer to say;
+/// What a cue with no heard timings gets: a subtitle file, and a whisper
+/// segment that came back without token timings (see [`caption_words`],
+/// which decides between the two). Longer words take longer to say;
 /// that is the whole of the model, and [`WordSource::Estimated`] is how
 /// a caller says these times are this and not heard ones. The result
 /// goes through [`clean_words`], so it obeys the same rules as heard
@@ -192,6 +194,99 @@ pub fn estimate_words(text: &str, start: f64, end: f64) -> Vec<Word> {
         })
         .collect();
     clean_words(&raw, Some(start), Some(end)).0
+}
+
+/// The word timings of one caption on a timeline, from what a recogniser
+/// heard when it has them, and an estimate when it does not.
+///
+/// `heard` are the recogniser's words on its own clock, and `to_timeline`
+/// maps that clock onto the timeline. The caption occupies `start..end`
+/// there. Heard words are placed, then clipped to the caption by
+/// [`clean_words`]; if none survive, the phrase is estimated instead. So a
+/// caption whose words were heard is never worse off than one that was not,
+/// and a word can never sit outside the caption that shows it.
+///
+/// Phase 6b. Before it, every caption was estimated, and this is the one
+/// place that says which of the two a caption got.
+pub fn caption_words(
+    text: &str,
+    heard: &[Word],
+    to_timeline: impl Fn(f64) -> f64,
+    start: f64,
+    end: f64,
+) -> Vec<Word> {
+    let placed: Vec<Word> = heard
+        .iter()
+        .map(|word| Word {
+            text: word.text.clone(),
+            start: to_timeline(word.start),
+            end: to_timeline(word.end),
+        })
+        .collect();
+    let (kept, _) = clean_words(&placed, Some(start), Some(end));
+    if kept.is_empty() {
+        estimate_words(text, start, end)
+    } else {
+        kept
+    }
+}
+
+/// Where each caption word is written in its caption's text, as a byte range.
+///
+/// The words are found in order, each one after the last one found, because
+/// that is the order they were heard in and the order they are written in: a
+/// word that is written twice is found at its own place, not at the first
+/// place. A word not found - whisper spelled it differently, or the text was
+/// edited since - is `None`, and does not move the search on.
+pub fn locate_words(content: &str, words: &[Word]) -> Vec<Option<Range<usize>>> {
+    let mut at = 0;
+    words
+        .iter()
+        .map(|word| {
+            let text = word.text.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let found = content[at..]
+                .find(text)
+                .map(|offset| at + offset..at + offset + text.len());
+            if let Some(range) = &found {
+                at = range.end;
+            }
+            found
+        })
+        .collect()
+}
+
+/// Which of a title's own words each caption word covers, as a range of
+/// indices into `layout`.
+///
+/// `layout` is the title's words as the title lays them out, as byte ranges
+/// in its text (`concat_text::word_ranges`). They need not match the caption's
+/// words one for one: a hyphenated word is two layout words and a whisper
+/// word, and an unspaced script's characters are each a layout word. So a
+/// caption word covers every layout word that overlaps it, and the
+/// covered words are contiguous, so the answer is a range. `None` where the
+/// caption word was not located, or where no layout word overlaps it.
+pub fn layout_words_of(
+    located: &[Option<Range<usize>>],
+    layout: &[Range<usize>],
+) -> Vec<Option<Range<usize>>> {
+    located
+        .iter()
+        .map(|found| {
+            let found = found.as_ref()?;
+            let covered: Vec<usize> = layout
+                .iter()
+                .enumerate()
+                .filter(|(_, word)| word.start < found.end && found.start < word.end)
+                .map(|(index, _)| index)
+                .collect();
+            let first = *covered.first()?;
+            let last = *covered.last()?;
+            Some(first..last + 1)
+        })
+        .collect()
 }
 
 /// Puts words into the shape everything downstream assumes.
@@ -1112,6 +1207,70 @@ mod tests {
         );
     }
 
+    // ── caption_words (Phase 6b) ─────────────────────────────────────────
+
+    #[test]
+    fn heard_words_are_placed_on_the_timeline_by_the_clock_they_came_on() {
+        // A clip at 10 s, played at double speed: the recogniser's 0..2 s is
+        // 10..11 on the timeline.
+        let heard = vec![word("hello", 0.0, 1.0), word("there", 1.0, 2.0)];
+        let words = caption_words("hello there", &heard, |t| 10.0 + t / 2.0, 10.0, 11.0);
+        assert_eq!(words.len(), 2, "{words:?}");
+        assert_eq!((words[0].start, words[0].end), (10.0, 10.5));
+        assert_eq!((words[1].start, words[1].end), (10.5, 11.0));
+        assert_eq!(
+            words[0].text, "hello",
+            "the heard spelling, not the estimate's"
+        );
+    }
+
+    #[test]
+    fn with_no_heard_words_the_phrase_is_estimated() {
+        // The case every caption was in before 6b, and still the case for a
+        // segment whose engine gave no token timings.
+        let words = caption_words("aa bbbb", &[], |t| t, 0.0, 3.0);
+        assert_eq!(words, estimate_words("aa bbbb", 0.0, 3.0));
+        assert_eq!(words[0].end, 1.0, "two letters of six take a third");
+    }
+
+    #[test]
+    fn heard_words_outside_the_caption_are_clipped_or_dropped() {
+        // The caption is 1..2 on the timeline. A word that starts after it is
+        // gone; one that runs past its end is clipped to it.
+        let heard = vec![
+            word("inside", 1.0, 1.5),
+            word("overrun", 1.5, 3.0),
+            word("after", 5.0, 6.0),
+        ];
+        let words = caption_words("inside overrun after", &heard, |t| t, 1.0, 2.0);
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert!(!texts.contains(&"after"), "{words:?}");
+        assert!(texts.contains(&"inside"), "{words:?}");
+        assert!(
+            words.iter().all(|w| w.start >= 1.0 && w.end <= 2.0 + 1e-9),
+            "every word inside the caption: {words:?}"
+        );
+    }
+
+    #[test]
+    fn heard_words_that_come_to_nothing_fall_back_to_the_estimate() {
+        // A word with no text is not a word; if that is all there is, the
+        // caption still gets timings, and they are the estimate's.
+        let heard = vec![word("   ", 0.0, 1.0)];
+        let words = caption_words("one two", &heard, |t| t, 0.0, 2.0);
+        assert_eq!(words, estimate_words("one two", 0.0, 2.0));
+    }
+
+    #[test]
+    fn a_heard_cue_never_overlaps_its_own_words() {
+        // Whisper's spans can overlap at a boundary; the placed words must
+        // not, or a karaoke highlight would light two at once.
+        let heard = vec![word("a", 0.0, 0.6), word("b", 0.5, 1.0)];
+        let words = caption_words("a b", &heard, |t| t, 0.0, 1.0);
+        assert_eq!(words.len(), 2);
+        assert!(words[1].start >= words[0].end - 1e-9, "{words:?}");
+    }
+
     #[test]
     fn the_default_remap_uses_the_shortest_fragment_worth_keeping() {
         let cues = vec![cue(0.0, 2.0, "words")];
@@ -1119,5 +1278,55 @@ mod tests {
             remap_default(&cues, &[(0.0, 10.0)]),
             remap(&cues, &[(0.0, 10.0)], MIN_PIECE)
         );
+    }
+
+    // ── karaoke: matching caption words to a title's words (Phase 6c) ─────
+
+    #[test]
+    fn caption_words_are_found_in_order_in_their_text() {
+        let words = vec![
+            word("dua", 0.0, 0.3),
+            word("perkataan", 0.3, 0.8),
+            word("baru", 0.8, 1.2),
+        ];
+        assert_eq!(
+            locate_words("dua perkataan baru", &words),
+            vec![Some(0..3), Some(4..13), Some(14..18)]
+        );
+    }
+
+    #[test]
+    fn a_repeated_word_is_found_at_its_own_place() {
+        let words = vec![
+            word("no", 0.0, 0.2),
+            word("no", 0.2, 0.4),
+            word("no", 0.4, 0.6),
+        ];
+        assert_eq!(
+            locate_words("no no no", &words),
+            vec![Some(0..2), Some(3..5), Some(6..8)]
+        );
+    }
+
+    #[test]
+    fn a_word_not_found_is_none_and_does_not_move_the_search_on() {
+        let words = vec![word("x", 0.0, 0.1), word("b", 0.1, 0.2)];
+        assert_eq!(locate_words("a b", &words), vec![None, Some(2..3)]);
+        assert_eq!(locate_words("a b", &[word("  ", 0.0, 0.1)]), vec![None]);
+    }
+
+    #[test]
+    fn a_caption_word_covers_the_title_words_it_overlaps() {
+        // "well-known" is one spoken word and two of the title's: "well-" and
+        // "known". Two words of the title, one of the caption: a range.
+        let layout = vec![0..5, 5..10];
+        assert_eq!(layout_words_of(&[Some(0..10)], &layout), vec![Some(0..2)]);
+        // One for one, and a caption word the title does not show is None.
+        let layout = vec![0..3, 4..7, 8..13];
+        assert_eq!(
+            layout_words_of(&[Some(0..3), Some(4..7), None], &layout),
+            vec![Some(0..1), Some(1..2), None]
+        );
+        assert_eq!(layout_words_of(&[Some(20..22)], &layout), vec![None]);
     }
 }

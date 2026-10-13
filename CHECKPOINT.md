@@ -1,4 +1,4 @@
-# CHECKPOINT — kconcat (VTS → Concat port) — updated 2026-10-13 (Asia/Bangkok)
+# CHECKPOINT — kconcat (VTS → Concat port) — updated 2026-10-13 (Asia/Bangkok), after 6c
 
 ## How to resume in a NEW Arena session (user: read this)
 1. Start a new Arena Agent session.
@@ -20,6 +20,11 @@ and continue. User handles all git commands themselves — deliverables are
   Rust workspace, pinned toolchain Rust 1.93.1 via src/rust-toolchain.toml)
 - User: newbie, Windows, VSCode; one-command-at-a-time style; stale
   terminal is the #1 past failure (close VSCode fully and reopen).
+- Sandbox (Arena) facts, learned 2026-10-13: rustup 1.93.1 installs in
+  ~15 s (`curl https://sh.rustup.rs`, `--default-toolchain 1.93.1 -c rustfmt
+  -c clippy`); `cargo test -p concat-project` ~35 s cold on 2 cores / 2 GB.
+  No sudo, no FFmpeg dev libs, no cmake -> concat-media, concat-speech and
+  the concat app cannot compile there. Those are always the user's `cargo check`.
 - Verify cheap first: `cd C:\dev\Concat\src` then
   `cargo test -p concat-project` (18 crates). The full app `concat` crate
   is 724 crates / 30–90 min — build it only when a phase says so.
@@ -60,12 +65,20 @@ and continue. User handles all git commands themselves — deliverables are
   text verbatim if any. This is expected and planned, not a failure.
 
 ## NEXT STEP (for the next session, in order)
-1. Confirm Phase 2+4a applied + tests from the user ("221 passed",
-   then with 4b-1 "223 passed"). If not, fix that first — do not
-   stack phases. (User said "next" on 2026-10-13 without reporting
-   numbers; 4b-1 was still delivered because it only touches the
-   cheap crate, but ASK for the numbers before doing 4b-2.)
+1. Repo HEAD ("6check") already holds phases 1-6a, so those were applied.
+   Ask for the numbers: `cargo test -p concat-project` should read
+   "232 passed" after 6b (227 after 6a) and "237 passed" after 6c.
+   If it does not, fix that first - do not stack phases.
 2. Confirm Phase 4a `cargo check -p concat` result if the user ran it.
+2a. Confirm Phase 6c: `cargo test -p concat-text` expects "30 passed";
+   `cargo test -p concat-project` expects "237 passed"; then
+   `cargo check -p concat-host` and `cargo check -p concat`. Do NOT treat
+   6c as verified until the user reports these numbers.
+2b. Confirm Phase 6b: `cargo check -p concat-speech` first (whisper.cpp
+   native, slow), then `cargo check -p concat`. Paste the first `error`
+   block verbatim if any. Optional: the ignored real-audio test,
+   `CONCAT_TRANSCRIBE_AUDIO=speech.wav cargo test -p concat-speech -- --ignored real_audio`
+   (needs tiny.en downloaded), which now prints each word's heard times.
 3. Phase 4b SPLIT IN TWO:
    - 4b-1 DONE, delivered 2026-10-13 as `phase-4b1-sectionlist.zip`:
      new concat-project/src/sectionlist.rs (`clip_sections(timeline,
@@ -113,16 +126,48 @@ and continue. User handles all git commands themselves — deliverables are
      move/trim/autotrim carry+split words (autotrim rebuilds piece
      text from its words), captions.rs creates estimated words.
      Verified: 227 passed, clippy/fmt clean.
-   - 6b NEXT: heard timings. Scout result: concat-speech Segment has
-     ONLY start/end/text (no words); whisper-rs FullParams supports
-     token_timestamps - enable it, read segment tokens -> Segment.words
-     {text,start,end} (window clock), captions.rs prefers Segment.words
-     over estimate_words. Touches concat-speech (whisper.cpp native;
-     user check-builds, likely `cargo check -p concat-speech` first).
-   - 6c: karaoke highlight - stage/text painting colours the word whose
-     [s,e] contains the playhead (words are timeline-clock). Scout
-     concat-text title painting + studio stage publish for where a
-     per-word accent can enter.
+   - 6b DELIVERED 2026-10-13 as `phase-6b-heard-word-timings.zip` (see
+     README-PHASE-6B.txt inside it for the file list). Design:
+     `set_token_timestamps(true)` in transcribe(); each segment's tokens
+     with id < token_eot (text tokens only, same cut as the segment text)
+     grouped into words by leading space (`words_from_tokens`, pure, raw
+     bytes so split UTF-8 decodes whole) -> `Segment.words: Vec<HeardWord>`
+     (window clock). captionmap::caption_words places heard words on the
+     timeline (clean_words clips them to the caption) and falls back to
+     estimate_words when none survive. captions.rs uses it for voice runs;
+     script titles still get None. Verified in sandbox: concat-project
+     232 passed (227 + 5 caption_words tests), clippy -D warnings clean,
+     fmt clean; words_from_tokens' 6 tests run green in a scratch copy of
+     the extracted function (clippy clean too). NOT compiled in sandbox:
+     concat-speech (needs FFmpeg dev libs via concat-media + whisper.cpp
+     via cmake; sandbox has neither, 2 GB RAM, no sudo) and the concat app.
+     Whisper glue calls were checked against whisper-rs 0.16.0 /
+     whisper-rs-sys 0.15.0 source. Known limit: languages without spaces
+     (ja/zh/th) come back as one word per run - honest, not a guess.
+     >>> USER: cargo check -p concat-speech, then -p concat; paste first
+         `error` verbatim. Run real_audio for a by-ear check. <<<
+   - 6c DELIVERED 2026-10-13 as `phase-6c-karaoke-highlight.zip` (see
+     README-PHASE-6C.txt inside it). Design: the spoken word only, in a
+     per-caption accent. `TextStyle.highlight_color` (optional; empty =
+     none; voice captions default to #ffd21f). concat-text: paint() takes
+     an overlay colour; `word_ranges`, `render_highlight_frame`,
+     `render_highlight` (PNG). Each heard word gets one overlay picture of
+     the whole caption with only that word lit, on that word's window; it
+     copies the caption's clip with fades, transition and reveal reset.
+     concat-project captionmap: `locate_words`, `layout_words_of`.
+     concat-host titles.rs: `Painting::Highlight`, disk and live paths.
+     Animated captions get no highlight yet (keys are clip-window-relative).
+     Verified in sandbox: concat-text 30 passed (24 + 6), concat-project
+     237 passed (232 + 5), clippy -D warnings clean, rustfmt clean.
+     NOT compiled: concat-host and the concat app (captions.rs, presets.rs).
+     >>> USER: cargo check -p concat-host, then -p concat; paste the first
+         `error` verbatim. Then eyeball a voice caption for the yellow word.
+         <<<
+   - 6c-2 NOT STARTED (decided, not in the zip): the highlight colour
+     control in the text inspector (swatch beside the text colour, via
+     ClipTextField like StrokeColor, plus en.json keys). App-crate only.
+     Known open items: live-monitor cost per word (measure first);
+     animated captions get no highlight.
 6. Phase 7 LAST: full build+smoke with a real video, docs
    (README/ARCHITECTURE), optional upstream-tidy commits. After Phase
    7 the original VTS feature list is complete: linked captions,

@@ -168,6 +168,21 @@ pub struct TranscriberStatus {
     pub models: Vec<ModelStatus>,
 }
 
+/// One word, and the moment whisper heard it: seconds from the window's start.
+///
+/// Phase 6b: these come from whisper's token timestamps, so they are heard
+/// times, not estimates. The app turns them into caption word timings.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeardWord {
+    /// The word as whisper spelled it, punctuation included.
+    pub text: String,
+    /// Seconds from the window's start where the word begins.
+    pub start: f64,
+    /// Seconds from the window's start where it ends.
+    pub end: f64,
+}
+
 /// One caption, in seconds relative to the transcribed window's start.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +193,9 @@ pub struct Segment {
     pub end: f64,
     /// What was said.
     pub text: String,
+    /// Each word and when it was heard, in order. Empty when whisper gave
+    /// no token timings for this segment; the caller then estimates.
+    pub words: Vec<HeardWord>,
 }
 
 /// What to transcribe.
@@ -314,6 +332,7 @@ impl Transcriber {
     /// Timestamps come back relative to the window: 0 is `source_start`. The
     /// caller owns the clip, so the map onto the timeline (divide by speed,
     /// add the clip's start) happens there, next to the numbers it needs.
+    /// Each segment's words come back on the same clock.
     pub fn transcribe(
         &self,
         dirs: &AppDirs,
@@ -396,6 +415,10 @@ impl Transcriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
+        // Phase 6b: a time for every token, which is what makes a word's own
+        // start and end heard rather than estimated. Whisper computes them
+        // as it goes; the text it returns is the same either way.
+        params.set_token_timestamps(true);
         // The raw hooks, not `set_abort_callback_safe`. whisper-rs 0.16's
         // safe one hands whisper a pointer to a boxed trait object with a
         // trampoline typed for the closure itself, so whisper reads the
@@ -419,6 +442,11 @@ impl Transcriber {
             return Err("transcription cancelled".to_owned());
         }
 
+        // Whisper's special tokens - end of text, the language tag, the
+        // timestamp markers - all have ids from end-of-text up. The text
+        // leaves them out, and so must the words.
+        let end_of_text = context.token_eot();
+
         Ok(state
             .as_iter()
             .filter_map(|segment| {
@@ -426,7 +454,27 @@ impl Transcriber {
                 let start = segment.start_timestamp() as f64 / 100.0;
                 let end = segment.end_timestamp() as f64 / 100.0;
                 let text = segment.to_str_lossy().ok()?.trim().to_owned();
-                keep_segment(start, end, text)
+                // Each token's bytes and span. The bytes are kept raw: a
+                // token can hold part of a character, and only the joined
+                // bytes of a whole word decode.
+                let tokens: Vec<(Vec<u8>, f64, f64)> = (0..segment.n_tokens())
+                    .filter_map(|index| segment.get_token(index))
+                    .filter(|token| token.token_id() < end_of_text)
+                    .filter_map(|token| {
+                        let data = token.token_data();
+                        Some((
+                            token.to_bytes().ok()?.to_vec(),
+                            data.t0 as f64 / 100.0,
+                            data.t1 as f64 / 100.0,
+                        ))
+                    })
+                    .collect();
+                let words = words_from_tokens(
+                    tokens
+                        .iter()
+                        .map(|(bytes, start, end)| (bytes.as_slice(), *start, *end)),
+                );
+                keep_segment(start, end, text, words)
             })
             .collect())
     }
@@ -445,11 +493,52 @@ impl Transcriber {
 /// Whisper marks silence and music with bracketed stage directions
 /// ("[BLANK_AUDIO]", "(upbeat music)"). Those are not captions, and neither
 /// is an empty or degenerate span.
-fn keep_segment(start: f64, end: f64, text: String) -> Option<Segment> {
+fn keep_segment(start: f64, end: f64, text: String, words: Vec<HeardWord>) -> Option<Segment> {
     if text.is_empty() || (text.starts_with('[') && text.ends_with(']')) {
         return None;
     }
-    (end > start).then_some(Segment { start, end, text })
+    (end > start).then_some(Segment {
+        start,
+        end,
+        text,
+        words,
+    })
+}
+
+/// Groups whisper's tokens into words, the way whisper spells them.
+///
+/// Whisper writes a word's first token with a leading space and the rest of
+/// its tokens without one, so a token that starts with whitespace begins a
+/// new word and any other continues the one before - "the", " quick", " fox",
+/// "." becomes "the", "quick", "fox.". Each word runs from its first token's
+/// start to its last token's end, both straight from whisper.
+///
+/// Input is `(bytes, start, end)` per token, in seconds on the window's clock.
+/// Bytes, not strings: some characters arrive split across tokens, and a
+/// word is only decoded once its bytes are whole.
+///
+/// Languages written without spaces (Japanese, Chinese, Thai) get few or
+/// no word breaks from this, so a run of them may come back as one long
+/// word. That is honest - whisper did not say where the words break - and a
+/// caption still highlights as one piece.
+fn words_from_tokens<'a>(tokens: impl IntoIterator<Item = (&'a [u8], f64, f64)>) -> Vec<HeardWord> {
+    let mut words: Vec<(Vec<u8>, f64, f64)> = Vec::new();
+    for (bytes, start, end) in tokens {
+        let begins_word = words.is_empty() || bytes.first().is_some_and(u8::is_ascii_whitespace);
+        if begins_word {
+            words.push((Vec::new(), start, end));
+        }
+        let word = words.last_mut().expect("a word was begun above");
+        word.0.extend_from_slice(bytes);
+        word.2 = end;
+    }
+    words
+        .into_iter()
+        .filter_map(|(bytes, start, end)| {
+            let text = String::from_utf8_lossy(&bytes).trim().to_owned();
+            (!text.is_empty()).then_some(HeardWord { text, start, end })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -459,12 +548,88 @@ mod tests {
     #[test]
     fn stage_directions_and_degenerate_spans_are_not_captions() {
         assert_eq!(
-            keep_segment(0.0, 2.5, " Hello there.".trim().to_owned()).map(|s| s.text),
+            keep_segment(0.0, 2.5, " Hello there.".trim().to_owned(), vec![]).map(|s| s.text),
             Some("Hello there.".to_owned())
         );
-        assert!(keep_segment(2.5, 2.5, "degenerate".to_owned()).is_none());
-        assert!(keep_segment(3.0, 4.0, "[BLANK_AUDIO]".to_owned()).is_none());
-        assert!(keep_segment(3.0, 4.0, String::new()).is_none());
+        assert!(keep_segment(2.5, 2.5, "degenerate".to_owned(), vec![]).is_none());
+        assert!(keep_segment(3.0, 4.0, "[BLANK_AUDIO]".to_owned(), vec![]).is_none());
+        assert!(keep_segment(3.0, 4.0, String::new(), vec![]).is_none());
+    }
+
+    /// Words as whisper's tokens spell them: a leading space starts a word.
+    #[test]
+    fn a_token_with_a_leading_space_begins_a_word() {
+        let tokens: [(&[u8], f64, f64); 4] = [
+            (b" The", 0.00, 0.30),
+            (b" quick", 0.30, 0.60),
+            (b" fox", 0.60, 0.90),
+            (b".", 0.90, 0.95),
+        ];
+        let words = words_from_tokens(tokens);
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["The", "quick", "fox."],
+            "the period rides on its word"
+        );
+        assert_eq!(words[0].start, 0.00);
+        assert_eq!(words[0].end, 0.30);
+        assert_eq!(words[2].start, 0.60);
+        assert_eq!(words[2].end, 0.95, "a word ends where its last token does");
+    }
+
+    /// A word whose tokens are split - a stem and a suffix - is one word,
+    /// and runs from the first piece's start to the last piece's end.
+    #[test]
+    fn a_word_split_over_several_tokens_is_still_one_word() {
+        let tokens: [(&[u8], f64, f64); 4] = [
+            (b" under", 1.0, 1.2),
+            (b"stand", 1.2, 1.5),
+            (b"ing", 1.5, 1.9),
+            (b" now", 1.9, 2.2),
+        ];
+        let words = words_from_tokens(tokens);
+        assert_eq!(words.len(), 2, "{words:?}");
+        assert_eq!(words[0].text, "understanding");
+        assert_eq!((words[0].start, words[0].end), (1.0, 1.9));
+    }
+
+    /// A character split across two tokens is decoded whole, not as two
+    /// replacement characters. "日" is E6 97 A5 in UTF-8.
+    #[test]
+    fn a_character_split_across_tokens_decodes_whole() {
+        let bytes = "日".as_bytes();
+        let tokens: [(&[u8], f64, f64); 2] = [(&bytes[..2], 0.0, 0.5), (&bytes[2..], 0.5, 1.0)];
+        let words = words_from_tokens(tokens);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "日", "not replacement characters");
+    }
+
+    /// A whitespace-only token is not a word on its own; the next token that
+    /// carries letters gives the word its text, and its start.
+    #[test]
+    fn whitespace_alone_makes_no_word() {
+        let tokens: [(&[u8], f64, f64); 2] = [(b" ", 0.0, 0.1), (b"hi", 0.1, 0.4)];
+        let words = words_from_tokens(tokens);
+        assert_eq!(words.len(), 1, "{words:?}");
+        assert_eq!(words[0].text, "hi");
+        assert!(words_from_tokens([(b"  ".as_slice(), 0.0, 0.1)]).is_empty());
+    }
+
+    /// Without spaces, the words are not separable, and the honest answer is
+    /// one word, not a guess at breaks.
+    #[test]
+    fn unspaced_text_is_one_word_not_a_guess() {
+        let tokens: [(&[u8], f64, f64); 2] =
+            [(b"\xE3\x81\x93", 0.0, 0.4), (b"\xE3\x82\x93", 0.4, 0.8)];
+        let words = words_from_tokens(tokens);
+        assert_eq!(words.len(), 1);
+        assert_eq!((words[0].start, words[0].end), (0.0, 0.8));
+    }
+
+    #[test]
+    fn no_tokens_make_no_words() {
+        assert!(words_from_tokens(Vec::<(&[u8], f64, f64)>::new()).is_empty());
     }
 
     #[test]
@@ -525,6 +690,11 @@ mod real_audio {
             .expect("transcription");
         for segment in &segments {
             eprintln!("{:.2}-{:.2} {}", segment.start, segment.end, segment.text);
+            // Phase 6b: each word as whisper heard it, to check the timings
+            // against the audio by ear.
+            for word in &segment.words {
+                eprintln!("    {:.2}-{:.2} {}", word.start, word.end, word.text);
+            }
         }
         assert!(!segments.is_empty(), "no words heard");
     }

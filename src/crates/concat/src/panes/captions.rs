@@ -174,13 +174,38 @@ impl CaptionsPane {
                             .filter_map(|segment| {
                                 let text = segment.text.trim().to_owned();
                                 (!text.is_empty()).then(|| {
+                                    let start = subject.start + segment.start / subject.speed;
+                                    let duration =
+                                        ((segment.end - segment.start) / subject.speed).max(0.2);
+                                    // Phase 6b: whisper's own word times when it gave
+                                    // them, placed on the timeline; an estimate when it
+                                    // did not. The heard words are on the segment's clock,
+                                    // which runs from the clip's source start, so the
+                                    // same mapping as the caption's own start applies.
+                                    let heard: Vec<concat_project::captionmap::Word> = segment
+                                        .words
+                                        .iter()
+                                        .map(|word| concat_project::captionmap::Word {
+                                            text: word.text.clone(),
+                                            start: word.start,
+                                            end: word.end,
+                                        })
+                                        .collect();
+                                    let words = concat_project::captionmap::caption_words(
+                                        &text,
+                                        &heard,
+                                        |at| subject.start + at / subject.speed,
+                                        start,
+                                        start + duration,
+                                    );
                                     caption_clip(
                                         text,
-                                        subject.start + segment.start / subject.speed,
-                                        ((segment.end - segment.start) / subject.speed).max(0.2),
+                                        start,
+                                        duration,
                                         look,
                                         base.as_ref(),
                                         Some(subject.clip_id.as_str()),
+                                        Some(words),
                                     )
                                 })
                             })
@@ -251,7 +276,7 @@ impl CaptionsPane {
             .map(|(text, seconds)| {
                 // A script belongs to the timeline, not to one clip's
                 // voice, so its captions are unlinked titles.
-                let command = caption_clip(text, at, seconds, look, base.as_ref(), None);
+                let command = caption_clip(text, at, seconds, look, base.as_ref(), None, None);
                 at += seconds;
                 command
             })
@@ -389,8 +414,8 @@ fn source_label(name: &str, start: f64) -> String {
     }
 }
 
-/// One caption as a title clip: its words, when and for how long, and
-/// its look.
+/// One caption as a title clip: its words, when and for how long, its look,
+/// and - for a caption transcribed from a clip's voice - its word timings.
 fn caption_clip(
     text: String,
     start: f64,
@@ -398,12 +423,13 @@ fn caption_clip(
     look: (f64, f64),
     base: Option<&TextStyle>,
     caption_of: Option<&str>,
+    words: Option<Vec<concat_project::captionmap::Word>>,
 ) -> Command {
     let (offset_y, font_size) = look;
     // The kept look where there is one - family, weight, colours, stroke,
     // shadow, background - at the caption's own size and place; the
     // bundled face otherwise.
-    let style = match base {
+    let mut style = match base {
         Some(base) => TextStyle {
             content: text,
             font_size,
@@ -419,6 +445,11 @@ fn caption_clip(
             ..TextStyle::default()
         },
     };
+    // Phase 6c: a word-timed caption lights the word being spoken in an
+    // accent. The default is this; the caption's own colour overrides it.
+    if words.is_some() && style.highlight_color.is_empty() {
+        style.highlight_color = CAPTION_HIGHLIGHT.to_owned();
+    }
     Command::AddTextClip {
         track_id: None,
         above: true,
@@ -427,15 +458,17 @@ fn caption_clip(
         duration: Some(duration),
         offset_y: Some(offset_y),
         caption_of: caption_of.map(str::to_owned),
-        // Phase 6a: estimated word timings for a transcribed caption -
-        // spread over the phrase by word length (captionmap says
-        // `Estimated`, and means it). A script's titles get none: they
-        // belong to no voice, and there is nothing to highlight.
-        words: caption_of.is_some().then(|| {
-            concat_project::captionmap::estimate_words(&style.content, start, start + duration)
-        }),
+        // Phase 6a/6b: the word timings the caller worked out - heard when
+        // whisper gave them, estimated otherwise (see captionmap::caption_words).
+        // A script's titles pass None: they belong to no voice, and there is
+        // nothing to highlight.
+        words,
     }
 }
+
+/// The accent a word-timed caption lights its spoken word in, until the
+/// caption's own highlight colour is set (`TextStyle::highlight_color`).
+const CAPTION_HIGHLIGHT: &str = "#ffd21f";
 
 /// Longest a caption line gets before it is wrapped: about what two lines
 /// of broadcast subtitle hold, and what a reader takes in at a glance.
