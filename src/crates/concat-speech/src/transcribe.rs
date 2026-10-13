@@ -241,6 +241,19 @@ pub struct TranscribeRequest {
     pub window: f64,
     /// Which model to use, e.g. "base.en".
     pub model_id: String,
+    /// ISO-639-1 Whisper language code, or "auto".
+    #[serde(default = "default_language")]
+    pub language: String,
+    /// Ask multilingual Whisper models to translate speech to English.
+    #[serde(default)]
+    pub translate: bool,
+    /// Optional names and jargon to bias decoding.
+    #[serde(default)]
+    pub prompt: String,
+}
+
+fn default_language() -> String {
+    "auto".to_owned()
 }
 
 struct LoadedModel {
@@ -431,9 +444,10 @@ impl Transcriber {
             .model
             .lock()
             .map_err(|_| "transcriber state poisoned".to_owned())?;
-        if !loaded.as_ref().is_some_and(|model| {
-            model.id == request.model_id && model.path == model_path
-        }) {
+        if !loaded
+            .as_ref()
+            .is_some_and(|model| model.id == request.model_id && model.path == model_path)
+        {
             // Load before overwriting: a failed load keeps the old model.
             // The folder is part of the cache key: changing it must not keep
             // transcribing with the file loaded from the previous directory.
@@ -461,11 +475,19 @@ impl Transcriber {
         // English-only model asked for "auto" still runs the detection,
         // over a vocabulary it was never trained on, and "hears" Thai at
         // one percent - so it is simply told English.
-        params.set_language(Some(if context.is_multilingual() {
+        let requested_language = request.language.trim();
+        let language = if !context.is_multilingual() {
+            "en"
+        } else if requested_language.is_empty() {
             "auto"
         } else {
-            "en"
-        }));
+            requested_language
+        };
+        params.set_language(Some(language));
+        params.set_translate(request.translate && context.is_multilingual());
+        if !request.prompt.trim().is_empty() {
+            params.set_initial_prompt(request.prompt.trim());
+        }
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -730,47 +752,59 @@ mod tests {
             ..AppDirs::under(&scratch)
         };
         let transcriber = Transcriber::new();
-        assert!(transcriber
-            .download_model(&dirs, "large-v3-turbo", |_| {})
-            .unwrap_err()
-            .contains("local-only"));
-        assert!(transcriber
-            .delete_model(&dirs, "large-v3-turbo")
-            .unwrap_err()
-            .contains("cannot be removed"));
+        assert!(
+            transcriber
+                .download_model(&dirs, "large-v3-turbo", |_| {})
+                .unwrap_err()
+                .contains("local-only")
+        );
+        assert!(
+            transcriber
+                .delete_model(&dirs, "large-v3-turbo")
+                .unwrap_err()
+                .contains("cannot be removed")
+        );
         assert!(file.is_file(), "the shared VTS model remains untouched");
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]
     fn status_uses_the_selected_shared_models_directory() {
-        let scratch = std::env::temp_dir().join(format!(
-            "concat-whisper-shared-test-{}",
-            std::process::id()
-        ));
+        let scratch =
+            std::env::temp_dir().join(format!("concat-whisper-shared-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scratch);
         let selected = scratch.join("shared").join("whisper-models");
         std::fs::create_dir_all(&selected).expect("shared model folder");
         std::fs::write(selected.join("ggml-base.bin"), b"model").expect("model file");
         std::fs::write(selected.join("ggml-large-v3-turbo.bin"), b"model")
             .expect("turbo model file");
-        std::fs::write(selected.join("ggml-large-v3.bin"), b"model")
-            .expect("large model file");
+        std::fs::write(selected.join("ggml-large-v3.bin"), b"model").expect("large model file");
         let dirs = AppDirs {
             whisper_models: Some(selected.clone()),
             ..AppDirs::under(&scratch)
         };
         let status = Transcriber::status(&dirs).expect("status");
         assert_eq!(status.models_dir, selected.to_string_lossy().into_owned());
-        assert!(status.models.iter().any(|model| model.id == "base" && model.downloaded));
+        assert!(
+            status
+                .models
+                .iter()
+                .any(|model| model.id == "base" && model.downloaded)
+        );
         for id in ["large-v3-turbo", "large-v3"] {
             let model = status
                 .models
                 .iter()
                 .find(|model| model.id == id)
                 .expect("VTS model is listed");
-            assert!(model.downloaded, "{id} should be detected in the shared folder");
-            assert!(!model.managed, "{id} is local-only and must not be removable");
+            assert!(
+                model.downloaded,
+                "{id} should be detected in the shared folder"
+            );
+            assert!(
+                !model.managed,
+                "{id} is local-only and must not be removable"
+            );
         }
         let _ = std::fs::remove_dir_all(&scratch);
     }
@@ -801,6 +835,9 @@ mod real_audio {
             source_start: 0.0,
             window: 30.0,
             model_id: "tiny.en".to_owned(),
+            language: "auto".to_owned(),
+            translate: false,
+            prompt: String::new(),
         };
         let segments = transcriber
             .transcribe(&dirs, &request, |percent| eprintln!("{percent}%"))

@@ -295,8 +295,18 @@ export component App inherits Window {
     callback captions-source-changed(index: int);
     callback captions-text-edited(text: string);
     callback captions-model-changed(index: int);
+    callback captions-language-changed(index: int);
+    callback captions-translate-changed(on: bool);
+    callback captions-prompt-changed(text: string);
     callback captions-placement-changed(index: int);
     callback captions-size-changed(index: int);
+    callback captions-draft-text-changed(index: int, text: string);
+    callback captions-draft-start-changed(index: int, value: float);
+    callback captions-draft-end-changed(index: int, value: float);
+    callback captions-draft-delete(index: int);
+    callback captions-draft-add();
+    callback captions-draft-discard();
+    callback captions-draft-insert();
     callback captions-begin();
     callback captions-cancel();
 
@@ -308,6 +318,19 @@ export component App inherits Window {
     in property <SectionsSheetData> sections;
     callback sections-closed();
     callback sections-row-toggled(index: int);
+    callback sections-detect();
+    callback sections-threshold-changed(value: float);
+    callback sections-min-silence-changed(value: float);
+    callback sections-min-section-changed(value: float);
+    callback sections-use-captions-changed(on: bool);
+    callback sections-search-changed(text: string);
+    callback sections-min-duration-changed(value: float);
+    callback sections-kind-toggled(kind: int);
+    callback sections-select-visible();
+    callback sections-select-none();
+    callback sections-select-invert();
+    callback sections-select-all-silence();
+    callback sections-select-all-captions();
     callback sections-apply();
 
     in property <SpeechSheetData> speech;
@@ -850,8 +873,18 @@ export component App inherits Window {
         source-changed(index) => { root.captions-source-changed(index); }
         text-edited(text) => { root.captions-text-edited(text); }
         model-changed(index) => { root.captions-model-changed(index); }
+        language-changed(index) => { root.captions-language-changed(index); }
+        translate-changed(on) => { root.captions-translate-changed(on); }
+        prompt-changed(text) => { root.captions-prompt-changed(text); }
         placement-changed(index) => { root.captions-placement-changed(index); }
         size-changed(index) => { root.captions-size-changed(index); }
+        draft-text-changed(index, text) => { root.captions-draft-text-changed(index, text); }
+        draft-start-changed(index, value) => { root.captions-draft-start-changed(index, value); }
+        draft-end-changed(index, value) => { root.captions-draft-end-changed(index, value); }
+        draft-delete(index) => { root.captions-draft-delete(index); }
+        draft-add => { root.captions-draft-add(); }
+        draft-discard => { root.captions-draft-discard(); }
+        draft-insert => { root.captions-draft-insert(); }
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
     }
@@ -877,6 +910,19 @@ export component App inherits Window {
 
         closed => { root.sections-closed(); }
         row-toggled(index) => { root.sections-row-toggled(index); }
+        detect => { root.sections-detect(); }
+        threshold-changed(value) => { root.sections-threshold-changed(value); }
+        min-silence-changed(value) => { root.sections-min-silence-changed(value); }
+        min-section-changed(value) => { root.sections-min-section-changed(value); }
+        use-captions-changed(on) => { root.sections-use-captions-changed(on); }
+        search-changed(text) => { root.sections-search-changed(text); }
+        min-duration-changed(value) => { root.sections-min-duration-changed(value); }
+        kind-toggled(kind) => { root.sections-kind-toggled(kind); }
+        select-visible => { root.sections-select-visible(); }
+        select-none => { root.sections-select-none(); }
+        select-invert => { root.sections-select-invert(); }
+        select-all-silence => { root.sections-select-all-silence(); }
+        select-all-captions => { root.sections-select-all-captions(); }
         apply => { root.sections-apply(); }
     }
 

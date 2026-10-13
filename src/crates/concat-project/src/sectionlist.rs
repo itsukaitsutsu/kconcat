@@ -98,6 +98,30 @@ pub fn clip_sections(
     silences: &[(f64, f64)],
     pad: f64,
 ) -> Option<ClipSections> {
+    clip_sections_with_options(
+        timeline,
+        clip_id,
+        silences,
+        pad,
+        true,
+        sections::MIN_SECTION_MS,
+    )
+}
+
+/// The configurable form used by the Sections UI.
+///
+/// `use_captions` controls whether linked caption boundaries classify rows;
+/// `min_section_ms` folds smaller fragments into their neighbours. Keeping the
+/// original [`clip_sections`] wrapper preserves the stable project API and its
+/// VTS-compatible defaults.
+pub fn clip_sections_with_options(
+    timeline: &Timeline,
+    clip_id: &str,
+    silences: &[(f64, f64)],
+    pad: f64,
+    use_captions: bool,
+    min_section_ms: u32,
+) -> Option<ClipSections> {
     let clip = timeline.clip(clip_id)?;
     let window = clip.duration * clip.speed;
 
@@ -120,6 +144,9 @@ pub fn clip_sections(
         .filter(|cue| cue.end > 0.0 && cue.start < window)
         .collect();
     cues.sort_by(|a, b| a.start.total_cmp(&b.start));
+    if !use_captions {
+        cues.clear();
+    }
 
     // The file's silences, into the window, shrunk by the pad, and
     // dropped when the pad swallows them whole.
@@ -134,7 +161,7 @@ pub fn clip_sections(
         .filter(|(start, end)| end > &0.0 && start < &window && end > start)
         .collect();
 
-    let sections = sections::build_sections(window, &silences, &cues, sections::MIN_SECTION_MS);
+    let sections = sections::build_sections(window, &silences, &cues, min_section_ms);
     let summary = sections::summarize(&sections);
     let rows = sections
         .into_iter()

@@ -4,10 +4,12 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
+import { Button, CopyChip, DialogRow, DialogSection, Field, Modal, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import { Switch } from "../inspector/controls.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { PaneScroll } from "../workspace/pane.slint";
 
 // Captions: what the tray's Captions tool opens.
 //
@@ -24,6 +26,12 @@ import { Switch } from "../inspector/controls.slint";
 // the sound it is, so it gets a real bar and not a sweep. The language is
 // the transcriber's to work out.
 
+export struct CaptionDraftData {
+    text: string,
+    start: float,
+    end: float,
+}
+
 export struct CaptionsSheetData {
     open: bool,
     /// "Use voice from timeline": the words come from a clip's sound.
@@ -35,6 +43,10 @@ export struct CaptionsSheetData {
     text: string,
     /// Row in the installed transcriber list.
     model: int,
+    languages: [string],
+    language: int,
+    translate: bool,
+    prompt: string,
     /// 0 Bottom, 1 Centre, 2 Top
     placement: int,
     /// 0 Small, 1 Medium, 2 Large
@@ -44,6 +56,8 @@ export struct CaptionsSheetData {
     progress: float,
     /// A transcriber model is installed.
     ready: bool,
+    reviewing: bool,
+    drafts: [CaptionDraftData],
     /// Why the last run failed, when it did.
     message: string,
 }
@@ -57,8 +71,18 @@ export component CaptionsDialog inherits Modal {
     callback source-changed(index: int);
     callback text-edited(text: string);
     callback model-changed(index: int);
+    callback language-changed(index: int);
+    callback translate-changed(on: bool);
+    callback prompt-changed(text: string);
     callback placement-changed(index: int);
     callback size-changed(index: int);
+    callback draft-text-changed(index: int, text: string);
+    callback draft-start-changed(index: int, value: float);
+    callback draft-end-changed(index: int, value: float);
+    callback draft-delete(index: int);
+    callback draft-add();
+    callback draft-discard();
+    callback draft-insert();
     callback begin();
     callback cancel();
 
@@ -67,7 +91,7 @@ export component CaptionsDialog inherits Modal {
     open: root.data.open;
     title: I18n.t("captions.captions");
     glyph: Glyph.text-mark;
-    surface-width: 480px;
+    surface-width: root.data.reviewing ? 720px : 480px;
     dismissable: !root.data.running;
 
     // The script being typed, held apart from `data.text` the way the Field
@@ -88,7 +112,7 @@ export component CaptionsDialog inherits Modal {
     VerticalLayout {
         // The switch, above both halves. A row of its own rather than a
         // DialogRow, whose label column is too narrow for the words.
-        if !root.data.running: HorizontalLayout {
+        if !root.data.running && !root.data.reviewing: HorizontalLayout {
             padding-left: 14px;
             padding-right: 14px;
             padding-top: 14px;
@@ -112,7 +136,7 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running && root.from-voice: DialogSection {
+        if !root.data.running && !root.data.reviewing && root.from-voice: DialogSection {
             first: true;
             title: I18n.t("common.transcriber");
 
@@ -138,6 +162,36 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
+            DialogRow {
+                label: I18n.t("captions.language");
+                Select {
+                    options: root.data.languages;
+                    current: root.data.language;
+                    changed(index) => { root.language-changed(index); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("captions.translateEnglish");
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+                VerticalLayout { alignment: center; Switch { checked: root.data.translate; toggled(on) => { root.translate-changed(on); } } }
+            }
+
+            DialogRow {
+                label: I18n.t("captions.prompt");
+                Field {
+                    value: root.data.prompt;
+                    placeholder: I18n.t("captions.promptHint");
+                    edited(text) => { root.prompt-changed(text); }
+                }
+            }
+
             if !root.data.ready: Text {
                 text: I18n.t("captions.downloadTranscriberModelFirst");
                 color: Theme.fg-muted;
@@ -146,7 +200,7 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running && !root.from-voice: DialogSection {
+        if !root.data.running && !root.data.reviewing && !root.from-voice: DialogSection {
             first: true;
             title: I18n.t("common.script");
 
@@ -197,7 +251,7 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running: DialogSection {
+        if !root.data.running && !root.data.reviewing: DialogSection {
             title: I18n.t("captions.captions");
 
             DialogRow {
@@ -225,6 +279,40 @@ export component CaptionsDialog inherits Modal {
                 color: Theme.fg-dim;
                 font-size: Theme.fs-sm;
                 wrap: word-wrap;
+            }
+        }
+
+        if root.data.reviewing: VerticalLayout {
+            padding: 14px;
+            spacing: 8px;
+            HorizontalLayout {
+                Text { horizontal-stretch: 1; text: I18n.t("captions.captionEditor"); color: Theme.fg; font-size: Theme.fs-lg; }
+                Text { text: "\{root.data.drafts.length} " + I18n.t("captions.cues"); color: Theme.fg-muted; font-size: Theme.fs-sm; }
+                Button { label: I18n.t("captions.addCue"); ghost: true; clicked => { root.draft-add(); } }
+            }
+            PaneScroll {
+                min-height: 300px;
+                vertical-stretch: 1;
+                finger: true;
+                for cue[index] in root.data.drafts: Rectangle {
+                    min-height: 42px;
+                    background: index % 2 == 0 ? Theme.well : Theme.raised;
+                    border-radius: Theme.r-sm;
+                    HorizontalLayout {
+                        padding: 6px;
+                        spacing: 6px;
+                        Text { width: 28px; text: "\{index + 1}"; color: Theme.fg-dim; vertical-alignment: center; }
+                        NumberField { width: 86px; value: cue.start; minimum: 0; maximum: 100000; step: 0.1; precision: 3; unit: "s"; changed(value) => { root.draft-start-changed(index, value); } }
+                        NumberField { width: 86px; value: cue.end; minimum: 0; maximum: 100000; step: 0.1; precision: 3; unit: "s"; changed(value) => { root.draft-end-changed(index, value); } }
+                        Field { horizontal-stretch: 1; value: cue.text; placeholder: I18n.t("captions.captionText"); edited(text) => { root.draft-text-changed(index, text); } }
+                        Button { label: I18n.t("common.delete"); danger: true; ghost: true; clicked => { root.draft-delete(index); } }
+                    }
+                }
+            }
+            HorizontalLayout {
+                Button { label: I18n.t("captions.discardDraft"); ghost: true; clicked => { root.draft-discard(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Button { label: I18n.t("captions.useCaptions"); primary: true; large: true; enabled: root.data.drafts.length > 0; clicked => { root.draft-insert(); } }
             }
         }
 
@@ -297,7 +385,7 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if !root.data.running: Button {
+            if !root.data.running && !root.data.reviewing: Button {
                 block: true;
                 primary: true;
                 large: true;

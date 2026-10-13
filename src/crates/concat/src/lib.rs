@@ -1607,11 +1607,44 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_captions_model_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::ModelChanged(index)));
     }));
+    app.on_captions_language_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::LanguageChanged(index)));
+    }));
+    app.on_captions_translate_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::TranslateChanged(on)));
+    }));
+    app.on_captions_prompt_changed(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::PromptChanged(text.to_string())));
+    }));
     app.on_captions_placement_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::PlacementChanged(index)));
     }));
     app.on_captions_size_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::SizeChanged(index)));
+    }));
+    app.on_captions_draft_text_changed(on_window!(|state, index: i32, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftTextChanged(
+            index,
+            text.to_string(),
+        )));
+    }));
+    app.on_captions_draft_start_changed(on_window!(|state, index: i32, value: f32| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftStartChanged(index, value)));
+    }));
+    app.on_captions_draft_end_changed(on_window!(|state, index: i32, value: f32| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftEndChanged(index, value)));
+    }));
+    app.on_captions_draft_delete(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftDelete(index)));
+    }));
+    app.on_captions_draft_add(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftAdd));
+    }));
+    app.on_captions_draft_discard(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftDiscard));
+    }));
+    app.on_captions_draft_insert(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftInsert));
     }));
     app.on_captions_begin(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Begin));
@@ -1627,6 +1660,69 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_sections_closed(on_window!(|state| {
         state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Close));
+    }));
+    app.on_sections_detect(on_window!(|state| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Detect));
+    }));
+    app.on_sections_threshold_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::ThresholdChanged(value),
+        ));
+    }));
+    app.on_sections_min_silence_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::MinSilenceChanged(value),
+        ));
+    }));
+    app.on_sections_min_section_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::MinSectionChanged(value),
+        ));
+    }));
+    app.on_sections_use_captions_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::UseCaptionsChanged(on),
+        ));
+    }));
+    app.on_sections_search_changed(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SearchChanged(text.to_string()),
+        ));
+    }));
+    app.on_sections_min_duration_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::MinDurationChanged(value),
+        ));
+    }));
+    app.on_sections_kind_toggled(on_window!(|state, kind: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::KindToggled(kind),
+        ));
+    }));
+    app.on_sections_select_visible(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectVisible,
+        ));
+    }));
+    app.on_sections_select_none(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectNone,
+        ));
+    }));
+    app.on_sections_select_invert(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectInvert,
+        ));
+    }));
+    app.on_sections_select_all_silence(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectAllSilence,
+        ));
+    }));
+    app.on_sections_select_all_captions(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectAllCaptions,
+        ));
     }));
     app.on_sections_apply(on_window!(|state| {
         state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Apply));
@@ -1715,9 +1811,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                             i18n::t("lib.importCaptions"),
                             Some((i18n::t("lib.captionFiles"), &["srt", "vtt"])),
                             |studio, _, _, paths| {
-                                studio.handle(Msg::ImportCaptions(
-                                    ImportCaptionsMsg::FilesPicked(paths),
-                                ));
+                                studio.handle(Msg::ImportCaptions(ImportCaptionsMsg::FilesPicked(
+                                    paths,
+                                )));
                             },
                         ),
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),

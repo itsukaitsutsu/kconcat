@@ -24,7 +24,7 @@ use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::panes::settings::installed;
 use crate::studio::Studio;
-use crate::ui::CaptionsSheetData;
+use crate::ui::{CaptionDraftData, CaptionsSheetData};
 
 /// Where a caption sits, by the sheet's row: a frame-height fraction from
 /// the centre, positive down. Bottom, centre, top.
@@ -50,8 +50,18 @@ pub enum CaptionsMsg {
     SourceChanged(i32),
     TextEdited(String),
     ModelChanged(i32),
+    LanguageChanged(i32),
+    TranslateChanged(bool),
+    PromptChanged(String),
     PlacementChanged(i32),
     SizeChanged(i32),
+    DraftTextChanged(i32, String),
+    DraftStartChanged(i32, f32),
+    DraftEndChanged(i32, f32),
+    DraftDelete(i32),
+    DraftAdd,
+    DraftDiscard,
+    DraftInsert,
     /// Run the pass the sheet describes.
     Begin,
     Cancel,
@@ -78,6 +88,15 @@ struct Subject {
     clip_id: String,
 }
 
+#[derive(Clone, Debug)]
+struct CaptionDraft {
+    text: String,
+    start: f64,
+    end: f64,
+    words: Vec<concat_project::captionmap::Word>,
+    edited: bool,
+}
+
 /// The captions sheet's state.
 #[derive(Default)]
 pub struct CaptionsPane {
@@ -93,6 +112,10 @@ pub struct CaptionsPane {
     pub text: String,
     /// Row in the installed transcriber list.
     pub model: usize,
+    /// Row in Whisper's language list; zero is auto-detect.
+    pub language: usize,
+    pub translate: bool,
+    pub prompt: String,
     /// 0 bottom, 1 centre, 2 top.
     pub placement: usize,
     /// 0 small, 1 medium, 2 large.
@@ -103,6 +126,7 @@ pub struct CaptionsPane {
     pub message: String,
     /// The clip under the running transcription.
     subject: Option<Subject>,
+    drafts: Vec<CaptionDraft>,
 }
 
 impl CaptionsPane {
@@ -140,11 +164,66 @@ impl CaptionsPane {
             }
             CaptionsMsg::TextEdited(text) => self.text = text,
             CaptionsMsg::ModelChanged(index) => self.model = index.max(0) as usize,
+            CaptionsMsg::LanguageChanged(index) => {
+                self.language = (index.max(0) as usize).min(language_codes().len() - 1)
+            }
+            CaptionsMsg::TranslateChanged(on) => self.translate = on,
+            CaptionsMsg::PromptChanged(text) => self.prompt = text,
             CaptionsMsg::PlacementChanged(index) => {
                 self.placement = (index.max(0) as usize).min(2);
             }
             CaptionsMsg::SizeChanged(index) => self.size = (index.max(0) as usize).min(2),
+            CaptionsMsg::DraftTextChanged(index, text) => {
+                if let Some(draft) = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| self.drafts.get_mut(i))
+                {
+                    draft.text = text;
+                    draft.edited = true;
+                }
+            }
+            CaptionsMsg::DraftStartChanged(index, value) => {
+                if let Some(draft) = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| self.drafts.get_mut(i))
+                {
+                    draft.start = f64::from(value).max(0.0).min(draft.end - 0.05);
+                    draft.edited = true;
+                }
+            }
+            CaptionsMsg::DraftEndChanged(index, value) => {
+                if let Some(draft) = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| self.drafts.get_mut(i))
+                {
+                    draft.end = f64::from(value).max(draft.start + 0.05);
+                    draft.edited = true;
+                }
+            }
+            CaptionsMsg::DraftDelete(index) => {
+                if let Ok(index) = usize::try_from(index) {
+                    if index < self.drafts.len() {
+                        self.drafts.remove(index);
+                    }
+                }
+            }
+            CaptionsMsg::DraftAdd => {
+                let start = self.drafts.last().map_or(0.0, |cue| cue.end);
+                self.drafts.push(CaptionDraft {
+                    text: String::new(),
+                    start,
+                    end: start + 2.0,
+                    words: Vec::new(),
+                    edited: true,
+                });
+            }
+            CaptionsMsg::DraftDiscard => {
+                self.drafts.clear();
+                self.subject = None;
+            }
+            CaptionsMsg::DraftInsert => self.insert_drafts(studio),
             CaptionsMsg::Begin => {
+                self.drafts.clear();
                 if self.from_voice {
                     self.run_sound(studio);
                 } else {
@@ -164,59 +243,47 @@ impl CaptionsPane {
                 let subject = self.subject.take();
                 match result {
                     Ok(segments) => {
-                        let Some(subject) = subject else {
+                        let Some(subject) = self.subject.as_ref() else {
                             return;
                         };
-                        let look = subject.look;
-                        let base = studio.prefs.title_style.clone();
-                        let commands: Vec<Command> = segments
+                        self.drafts = segments
                             .into_iter()
                             .filter_map(|segment| {
                                 let text = segment.text.trim().to_owned();
-                                (!text.is_empty()).then(|| {
-                                    let start = subject.start + segment.start / subject.speed;
-                                    let duration =
-                                        ((segment.end - segment.start) / subject.speed).max(0.2);
-                                    // Phase 6b: whisper's own word times when it gave
-                                    // them, placed on the timeline; an estimate when it
-                                    // did not. The heard words are on the segment's clock,
-                                    // which runs from the clip's source start, so the
-                                    // same mapping as the caption's own start applies.
-                                    let heard: Vec<concat_project::captionmap::Word> = segment
-                                        .words
-                                        .iter()
-                                        .map(|word| concat_project::captionmap::Word {
-                                            text: word.text.clone(),
-                                            start: word.start,
-                                            end: word.end,
-                                        })
-                                        .collect();
-                                    let words = concat_project::captionmap::caption_words(
-                                        &text,
-                                        &heard,
-                                        |at| subject.start + at / subject.speed,
-                                        start,
-                                        start + duration,
-                                    );
-                                    caption_clip(
-                                        text,
-                                        start,
-                                        duration,
-                                        look,
-                                        base.as_ref(),
-                                        Some(subject.clip_id.as_str()),
-                                        Some(words),
-                                    )
+                                if text.is_empty() {
+                                    return None;
+                                }
+                                let start = subject.start + segment.start / subject.speed;
+                                let end = start
+                                    + ((segment.end - segment.start) / subject.speed).max(0.2);
+                                let heard: Vec<concat_project::captionmap::Word> = segment
+                                    .words
+                                    .iter()
+                                    .map(|word| concat_project::captionmap::Word {
+                                        text: word.text.clone(),
+                                        start: word.start,
+                                        end: word.end,
+                                    })
+                                    .collect();
+                                let words = concat_project::captionmap::caption_words(
+                                    &text,
+                                    &heard,
+                                    |at| subject.start + at / subject.speed,
+                                    start,
+                                    end,
+                                );
+                                Some(CaptionDraft {
+                                    text,
+                                    start,
+                                    end,
+                                    words,
+                                    edited: false,
                                 })
                             })
                             .collect();
-                        let count = commands.len();
-                        self.open = false;
-                        if count == 0 {
+                        if self.drafts.is_empty() {
+                            self.subject = None;
                             studio.notify(&t("captions.nothingSaidClip"), true);
-                        } else {
-                            studio.apply(Command::Batch { commands });
-                            studio.notify(&tf("captions.addedCaptions", &[&count]), false);
                         }
                     }
                     // Asked for: the sheet is already on its way down.
@@ -311,6 +378,9 @@ impl CaptionsPane {
             source_start: clip.source_start,
             window: clip.duration * clip.speed,
             model_id: model,
+            language: language_codes()[self.language.min(language_codes().len() - 1)].to_owned(),
+            translate: self.translate,
+            prompt: self.prompt.clone(),
         };
         let dirs = studio.host.dirs.clone();
         let transcriber = Arc::clone(&studio.host.transcriber);
@@ -336,6 +406,42 @@ impl CaptionsPane {
         );
     }
 
+    fn insert_drafts(&mut self, studio: &mut Studio) {
+        let Some(subject) = self.subject.take() else {
+            return;
+        };
+        let base = studio.prefs.title_style.clone();
+        let commands: Vec<Command> = self
+            .drafts
+            .drain(..)
+            .filter(|cue| !cue.text.trim().is_empty() && cue.end > cue.start)
+            .map(|cue| {
+                let words = if cue.edited {
+                    concat_project::captionmap::estimate_words(&cue.text, cue.start, cue.end)
+                } else {
+                    cue.words
+                };
+                caption_clip(
+                    cue.text.trim().to_owned(),
+                    cue.start,
+                    cue.end - cue.start,
+                    subject.look,
+                    base.as_ref(),
+                    Some(subject.clip_id.as_str()),
+                    Some(words),
+                )
+            })
+            .collect();
+        let count = commands.len();
+        if count == 0 {
+            self.message = t("captions.nothingToCaptionYet");
+            return;
+        }
+        self.open = false;
+        studio.apply(Command::Batch { commands });
+        studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+    }
+
     /// The sheet as Slint shows it.
     pub fn data(&self, studio: &Studio) -> CaptionsSheetData {
         let sources = if self.open {
@@ -359,14 +465,50 @@ impl CaptionsPane {
             source,
             text: self.text.as_str().into(),
             model: self.model as i32,
+            languages: std::rc::Rc::new(slint::VecModel::from(
+                language_codes()
+                    .iter()
+                    .map(|code| slint::SharedString::from(*code))
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+            language: self.language as i32,
+            translate: self.translate,
+            prompt: self.prompt.as_str().into(),
             placement: self.placement as i32,
             size: self.size as i32,
             running: self.running,
             progress: self.progress,
             ready: !installed(&studio.settings.transcribers).is_empty(),
+            reviewing: !self.drafts.is_empty(),
+            drafts: std::rc::Rc::new(slint::VecModel::from(
+                self.drafts
+                    .iter()
+                    .map(|cue| CaptionDraftData {
+                        text: cue.text.as_str().into(),
+                        start: cue.start as f32,
+                        end: cue.end as f32,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
             message: self.message.as_str().into(),
         }
     }
+}
+
+/// Languages understood by multilingual Whisper models. Codes are used as
+/// labels too: they stay compact and match VTS's language selector exactly.
+fn language_codes() -> &'static [&'static str] {
+    &[
+        "auto", "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs",
+        "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha",
+        "haw", "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km",
+        "kn", "ko", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms",
+        "mt", "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd",
+        "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk",
+        "tl", "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "zh",
+    ]
 }
 
 /// A clip on the timeline whose voice can be captioned, as the sheet's

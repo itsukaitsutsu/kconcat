@@ -4,8 +4,9 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph } from "../icons.slint";
-import { Button, Modal } from "../primitives/modal.slint";
-import { Switch } from "../inspector/controls.slint";
+import { Button, DialogRow, DialogSection, Modal } from "../primitives/modal.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { SearchField, Switch } from "../inspector/controls.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 
 // The Sections sheet: a clip overview, an aligned timeline strip, and one
@@ -13,6 +14,7 @@ import { PaneScroll } from "../workspace/pane.slint";
 // the same normalized start/end values, so a card always points at the block
 // it represents rather than a second, separately computed clock.
 export struct SectionRowData {
+    source-index: int,
     /// "Caption", "Silence" or "Other", in the interface's language.
     kind: string,
     /// The caption's words, or the kind again for a wordless row.
@@ -31,6 +33,15 @@ export struct SectionRowData {
 export struct SectionsSheetData {
     open: bool,
     running: bool,
+    noise-db: float,
+    min-silence-ms: float,
+    min-section-ms: float,
+    use-captions: bool,
+    search: string,
+    min-duration: float,
+    show-caption: bool,
+    show-silence: bool,
+    show-other: bool,
     /// The clip being listed, by file and timeline start.
     clip-label: string,
     /// "2 captions · 3 silences · 1 other".
@@ -158,12 +169,25 @@ export component SectionsDialog inherits Modal {
     in property <SectionsSheetData> data;
 
     callback row-toggled(index: int);
+    callback detect();
+    callback threshold-changed(value: float);
+    callback min-silence-changed(value: float);
+    callback min-section-changed(value: float);
+    callback use-captions-changed(on: bool);
+    callback search-changed(text: string);
+    callback min-duration-changed(value: float);
+    callback kind-toggled(kind: int);
+    callback select-visible();
+    callback select-none();
+    callback select-invert();
+    callback select-all-silence();
+    callback select-all-captions();
     callback apply();
 
     open: root.data.open;
     title: I18n.t("sections.sections");
     glyph: Glyph.rows;
-    surface-width: 590px;
+    surface-width: 760px;
     surface-height: 620px;
     dismissable: !root.data.running;
 
@@ -183,6 +207,71 @@ export component SectionsDialog inherits Modal {
             color: Theme.fg-muted;
             font-size: Theme.fs-sm;
             wrap: word-wrap;
+        }
+
+        if !root.data.running: DialogSection {
+            first: true;
+            title: I18n.t("sections.detectSections");
+
+            DialogRow {
+                label: I18n.t("sections.threshold");
+                NumberField {
+                    value: root.data.noise-db;
+                    minimum: -100;
+                    maximum: 0;
+                    step: 1;
+                    precision: 0;
+                    unit: "dB";
+                    changed(value) => { root.threshold-changed(value); }
+                }
+            }
+            DialogRow {
+                label: I18n.t("sections.minSilence");
+                NumberField {
+                    value: root.data.min-silence-ms;
+                    minimum: 0;
+                    maximum: 60000;
+                    step: 50;
+                    precision: 0;
+                    unit: "ms";
+                    changed(value) => { root.min-silence-changed(value); }
+                }
+            }
+            DialogRow {
+                label: I18n.t("sections.minSection");
+                NumberField {
+                    value: root.data.min-section-ms;
+                    minimum: 0;
+                    maximum: 60000;
+                    step: 10;
+                    precision: 0;
+                    unit: "ms";
+                    changed(value) => { root.min-section-changed(value); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("sections.useCaptions");
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Switch {
+                        checked: root.data.use-captions;
+                        toggled(on) => { root.use-captions-changed(on); }
+                    }
+                }
+            }
+            Button {
+                label: I18n.t("sections.detectSections");
+                glyph: Glyph.rows;
+                primary: true;
+                clicked => { root.detect(); }
+            }
         }
 
         if root.data.rows.length > 0: VerticalLayout {
@@ -240,13 +329,47 @@ export component SectionsDialog inherits Modal {
             wrap: word-wrap;
         }
 
+        if root.data.rows.length > 0: VerticalLayout {
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 6px;
+                Button { label: I18n.t("sections.caption"); ghost: !root.data.show-caption; clicked => { root.kind-toggled(0); } }
+                Button { label: I18n.t("sections.silence"); ghost: !root.data.show-silence; clicked => { root.kind-toggled(1); } }
+                Button { label: I18n.t("sections.other"); ghost: !root.data.show-other; clicked => { root.kind-toggled(2); } }
+                NumberField {
+                    width: 110px;
+                    value: root.data.min-duration;
+                    minimum: 0;
+                    maximum: 3600;
+                    step: 0.1;
+                    precision: 1;
+                    unit: "s";
+                    changed(value) => { root.min-duration-changed(value); }
+                }
+                SearchField {
+                    horizontal-stretch: 1;
+                    text: root.data.search;
+                    placeholder: I18n.t("sections.searchCaptions");
+                    edited(text) => { root.search-changed(text); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 5px;
+                Button { label: I18n.t("sections.selectVisible"); ghost: true; clicked => { root.select-visible(); } }
+                Button { label: I18n.t("sections.clearSelection"); ghost: true; clicked => { root.select-none(); } }
+                Button { label: I18n.t("sections.invertSelection"); ghost: true; clicked => { root.select-invert(); } }
+                Button { label: I18n.t("sections.allSilence"); ghost: true; clicked => { root.select-all-silence(); } }
+                Button { label: I18n.t("sections.allCaptions"); ghost: true; clicked => { root.select-all-captions(); } }
+            }
+        }
+
         PaneScroll {
             vertical-stretch: 1;
             finger: true;
 
             for row[index] in root.data.rows: SectionCard {
                 section-item: row;
-                toggle-keep => { root.row-toggled(index); }
+                toggle-keep => { root.row-toggled(row.source-index); }
             }
         }
 
