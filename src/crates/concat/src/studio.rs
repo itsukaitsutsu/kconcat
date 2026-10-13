@@ -4840,7 +4840,14 @@ impl Studio {
                 ClipTextField::Color => text.color = hex_of(value),
                 ClipTextField::StrokeColor => text.stroke_color = hex_rgba(value),
                 ClipTextField::Background => text.background = hex_with_alpha(value),
-                ClipTextField::HighlightColor => text.highlight_color = hex_of(value),
+                // A transparent accent is the switch off: no colour at all.
+                ClipTextField::HighlightColor => {
+                    text.highlight_color = if value.alpha() == 0 {
+                        String::new()
+                    } else {
+                        hex_of(value)
+                    }
+                }
                 _ => {}
             }
         }
@@ -9065,6 +9072,7 @@ impl Studio {
             highlight,
             highlight_hex: hex_of(highlight).into(),
             highlightable: clip.words.is_some(),
+            highlight_on: !text.highlight_color.is_empty(),
             shadow: text.shadow,
             plate,
             plate_hex: hex_of(plate).into(),

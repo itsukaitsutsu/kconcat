@@ -173,9 +173,15 @@ and continue. User handles all git commands themselves — deliverables are
      clean. NOT compiled: the concat app and its .slint files.
      >>> USER: cargo check -p concat; paste the first `error` verbatim.
          Then check the swatch by eye. <<<
-     Known open items: no clear-to-none for the colour; older captions
-     (no accent set) show yellow but do not light until a colour is
-     picked; live-monitor cost per word (measure first).
+     Known open items: older captions (no accent set) show yellow but do
+     not light until a colour is picked; live-monitor cost per word
+     (measure first). (Clear-to-none: DONE in 6c-4.)
+   - 6c-4 DELIVERED 2026-10-13 as `phase-6c4-clear-highlight.zip` (see
+     README-PHASE-6C4.txt). "Spoken word" switch above the swatch: off
+     clears the caption's highlight colour (transparent = none), on
+     restores the default. Verified in sandbox: rustfmt clean on studio.rs;
+     concat-project 237 (unchanged). NOT compiled: the concat app.
+     >>> USER: cargo check -p concat; paste the first `error` verbatim. <<<
    - 6c-3 DELIVERED 2026-10-13 as `phase-6c3-animated-highlight.zip` (see
      README-PHASE-6C3.txt). Highlights now follow keyframed captions:
      concat-core `Track::window` re-times the caption's keys onto each
