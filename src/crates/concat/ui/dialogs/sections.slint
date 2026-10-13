@@ -71,14 +71,14 @@ component SectionTimeline inherits Rectangle {
 }
 
 component SectionCard inherits Rectangle {
-    in property <SectionRowData> row;
+    in property <SectionRowData> section-item;
 
     callback toggle-keep();
 
     border-radius: Theme.r;
     border-width: 1px;
     border-color: touch.has-hover ? Theme.line-strong : Theme.line;
-    background: root.row.keep ? Theme.raised : Theme.well;
+    background: root.section-item.keep ? Theme.raised : Theme.well;
     clip: true;
 
     animate background, border-color {
@@ -95,8 +95,8 @@ component SectionCard inherits Rectangle {
     Rectangle {
         width: 3px;
         height: parent.height;
-        background: root.row.kind-code == 0 ? Theme.accent
-            : root.row.kind-code == 1 ? Theme.field-active
+        background: root.section-item.kind-code == 0 ? Theme.accent
+            : root.section-item.kind-code == 1 ? Theme.field-active
             : Theme.green;
     }
 
@@ -112,13 +112,13 @@ component SectionCard inherits Rectangle {
                 width: 7px;
                 height: 7px;
                 border-radius: 4px;
-                background: root.row.kind-code == 0 ? Theme.accent
-                    : root.row.kind-code == 1 ? Theme.field-active
+                background: root.section-item.kind-code == 0 ? Theme.accent
+                    : root.section-item.kind-code == 1 ? Theme.field-active
                     : Theme.green;
             }
 
             Text {
-                text: root.row.kind;
+                text: root.section-item.kind;
                 color: Theme.fg-muted;
                 font-size: Theme.fs-sm;
                 vertical-alignment: center;
@@ -127,7 +127,7 @@ component SectionCard inherits Rectangle {
             Rectangle { horizontal-stretch: 1; }
 
             Text {
-                text: root.row.range;
+                text: root.section-item.range;
                 color: Theme.fg-dim;
                 font-family: Theme.font-technical;
                 font-size: Theme.fs-sm;
@@ -137,7 +137,7 @@ component SectionCard inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 Switch {
-                    checked: root.row.keep;
+                    checked: root.section-item.keep;
                     toggled(on) => { root.toggle-keep(); }
                 }
             }
@@ -145,8 +145,8 @@ component SectionCard inherits Rectangle {
 
         Text {
             horizontal-stretch: 1;
-            text: root.row.label;
-            color: root.row.keep ? Theme.fg : Theme.fg-dim;
+            text: root.section-item.label;
+            color: root.section-item.keep ? Theme.fg : Theme.fg-dim;
             font-size: Theme.fs;
             wrap: word-wrap;
         }
@@ -245,7 +245,7 @@ export component SectionsDialog inherits Modal {
             finger: true;
 
             for row[index] in root.data.rows: SectionCard {
-                row: row;
+                section-item: row;
                 toggle-keep => { root.row-toggled(index); }
             }
         }

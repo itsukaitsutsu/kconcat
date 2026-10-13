@@ -64,22 +64,13 @@ Use this file if work is interrupted or continued in a fresh assistant turn. It 
 - Overlay ZIP: `/home/user/kconcat-phase-8.zip`. It contains the 16 modified `src/` files, this checkpoint, `README-PHASE-8.md`, and a root manifest. ZIP integrity was verified.
 - `git diff --check` is clean; `src/crates/concat/locales/en.json` parses as JSON.
 - `python3 scripts/locales.py --check` exits 0 but reports the repository's missing/untranslated locale backlog (including the new English-only keys).
+- Windows feedback: after `cargo fmt --all` and `cargo clean -p concat`, the refreshed Slint build found a collision because `SectionCard` declared an input property named `row`. Fixed the source by renaming it to `section-item` and updating its references. The user has not yet verified this fix with a new `cargo check`.
 - No Rust toolchain is installed here; do not claim the Phase 8 patch compiled or that post-change tests passed.
 
 ## Next steps
 
-1. Extract the overlay per `README-PHASE-8.md`, then run on the user's Windows build terminal from `C:\dev\kconcat\src`:
-   ```bat
-   cargo fmt --all -- --check
-   cargo test -p concat-project
-   cargo test -p concat-text
-   cargo test -p concat-host
-   cargo test -p concat-speech
-   cargo test -p concat-api
-   cargo test -p concat-server
-   cargo test -p concat
-   cargo check -p concat
-   ```
-3. Fix the first compile/Slint error before making further design changes; then rerun the checks.
+1. In the user's checkout, update only `src/crates/concat/ui/dialogs/sections.slint` from the refreshed ZIP (or rename the `SectionCard` input property `row` to `section-item`, all its `root.row.*` references to `root.section-item.*`, and the instance assignment `row: row` to `section-item: row`). Avoid overwriting the Rust files the user already formatted.
+2. From the same Windows build terminal at `C:\dev\kconcat\src`, run `cargo fmt --all -- --check`, then `cargo check -p concat`. The prior `cargo clean -p concat` already forced Slint regeneration.
+3. If check passes, run the remaining commands from `README-PHASE-8.md`. Fix the first error before proceeding to visual tweaks.
 4. Do the UI smoke steps in `README-PHASE-8.md`. If the user attaches a VTS screenshot, adjust the card/timeline styling to match it.
 5. If interrupted, start by reading this checkpoint and `README-PHASE-8.md`, then inspect `git status` and the first failing command rather than redoing the work.
