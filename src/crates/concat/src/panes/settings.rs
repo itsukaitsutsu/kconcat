@@ -47,6 +47,15 @@ pub enum SettingsMsg {
     MagneticChanged(bool),
     DownloadSourceChanged(i32),
     DownloadBaseEdited(String),
+    /// The editable draft of the shared Whisper-model directory.
+    WhisperModelsDirectoryEdited(String),
+    WhisperModelsBrowse,
+    WhisperModelsApply,
+    WhisperModelsPicked(String),
+    WhisperModelsFolderReady {
+        path: String,
+        result: Result<(), String>,
+    },
     ServerEnabledChanged(bool),
     /// The address half of where the server listens; the port is its own
     /// field, so a person types "127.0.0.1" and "7420" and never a colon.
@@ -163,6 +172,12 @@ pub struct SettingsPane {
     pub download_source: usize,
     /// The base URL of a custom download source.
     pub download_base: String,
+    /// Active and editable paths for Whisper model storage.
+    pub whisper_models_dir: String,
+    pub whisper_models_draft: String,
+    /// Progress or validation feedback for a folder change.
+    pub whisper_models_message: String,
+    pub whisper_models_pending: bool,
     /// Why the server is not running when the switch is on: the bind that
     /// failed. Empty while it runs, or is off.
     pub server_error: String,
@@ -211,6 +226,15 @@ impl SettingsPane {
                 concat_media::set_hardware_decode(true);
                 self.download_source = Self::download_source(studio).0;
                 self.download_base = studio.prefs.download_base.clone().unwrap_or_default();
+                self.whisper_models_dir = studio
+                    .host
+                    .dirs
+                    .whisper_models_dir()
+                    .to_string_lossy()
+                    .into_owned();
+                self.whisper_models_draft = self.whisper_models_dir.clone();
+                self.whisper_models_message.clear();
+                self.whisper_models_pending = false;
                 Self::apply_download_source(studio);
                 self.apply_server(studio);
                 self.refresh(studio);
@@ -289,6 +313,50 @@ impl SettingsPane {
                 studio.prefs.save(&studio.host.dirs);
                 Self::apply_download_source(studio);
             }
+            SettingsMsg::WhisperModelsDirectoryEdited(text) => {
+                self.whisper_models_draft = text;
+                self.whisper_models_message.clear();
+            }
+            SettingsMsg::WhisperModelsBrowse => {
+                let title = t("settings.whisperModelsFolder");
+                let current = if self.whisper_models_draft.trim().is_empty() {
+                    self.whisper_models_dir.clone()
+                } else {
+                    self.whisper_models_draft.clone()
+                };
+                crate::host::after_dialog(
+                    move || platform::pick_folder(&title, &current),
+                    |studio, _, _, folder| {
+                        studio.handle(Msg::Settings(SettingsMsg::WhisperModelsPicked(
+                            folder.to_string_lossy().into_owned(),
+                        )));
+                    },
+                );
+            }
+            SettingsMsg::WhisperModelsApply => {
+                self.apply_whisper_models_folder(self.whisper_models_draft.clone(), studio);
+            }
+            SettingsMsg::WhisperModelsPicked(folder) => {
+                self.apply_whisper_models_folder(folder, studio);
+            }
+            SettingsMsg::WhisperModelsFolderReady { path, result } => {
+                self.whisper_models_pending = false;
+                match result {
+                    Ok(()) => {
+                        let folder = std::path::PathBuf::from(&path);
+                        self.whisper_models_dir = path.clone();
+                        self.whisper_models_draft = path.clone();
+                        self.whisper_models_message.clear();
+                        studio.host.dirs.whisper_models = Some(folder);
+                        studio.prefs.whisper_models_dir = Some(path);
+                        studio.prefs.save(&studio.host.dirs);
+                        self.refresh(studio);
+                    }
+                    Err(error) => {
+                        self.whisper_models_message = error;
+                    }
+                }
+            }
             SettingsMsg::ServerEnabledChanged(on) => {
                 studio.prefs.server.enabled = on;
                 studio.prefs.save(&studio.host.dirs);
@@ -325,7 +393,11 @@ impl SettingsPane {
                 studio.prefs.save(&studio.host.dirs);
                 self.refresh(studio);
             }
-            SettingsMsg::ModelDownload(id) => self.download(&id, studio),
+            SettingsMsg::ModelDownload(id) => {
+                if !self.whisper_models_pending {
+                    self.download(&id, studio);
+                }
+            }
             SettingsMsg::ModelCancel(id) => {
                 if self.is_transcriber(&id) {
                     studio.host.transcriber.cancel_download();
@@ -439,6 +511,43 @@ impl SettingsPane {
                 }
             }
         }
+    }
+
+    /// Validates and creates the chosen model folder off the UI thread. A
+    /// folder is applied only once it is usable, so a typo never strands the
+    /// transcriber in a path that cannot be written.
+    fn apply_whisper_models_folder(&mut self, folder: String, studio: &Studio) {
+        if self.whisper_models_pending {
+            return;
+        }
+        if studio.host.transcriber.is_busy()
+            || self.transcribers.iter().any(|model| model.fetched.is_some())
+        {
+            self.whisper_models_message = t("settings.whisperFolderBusy");
+            return;
+        }
+        let folder = folder.trim().to_owned();
+        if folder.is_empty() || !std::path::Path::new(&folder).is_absolute() {
+            self.whisper_models_message = t("settings.whisperFolderRequiresAbsolute");
+            return;
+        }
+        self.whisper_models_draft = folder.clone();
+        self.whisper_models_pending = true;
+        self.whisper_models_message = t("settings.whisperFolderPreparing");
+        let path = std::path::PathBuf::from(&folder);
+        let display = path.to_string_lossy().into_owned();
+        spawn(
+            move || {
+                std::fs::create_dir_all(&path)
+                    .map_err(|error| format!("could not create {}: {error}", path.display()))
+            },
+            move |studio, _, _, result| {
+                studio.handle(Msg::Settings(SettingsMsg::WhisperModelsFolderReady {
+                    path: display,
+                    result,
+                }));
+            },
+        );
     }
 
     /// Asks GitHub for the releases on a worker; the answer comes back as
@@ -627,32 +736,41 @@ impl SettingsPane {
             .collect();
         let chosen_transcriber = studio.prefs.transcriber_model.clone();
         let chosen_voice = studio.prefs.tts_model.clone();
-        if let Ok(status) = concat_speech::Transcriber::status(dirs) {
-            self.transcribers = status
-                .models
-                .iter()
-                .map(|model| {
-                    let (fetched, unpacking) =
-                        downloading.get(&model.id).copied().unwrap_or((None, false));
-                    ModelState {
-                        id: model.id.clone(),
-                        name: model.label.clone(),
-                        note: model.blurb.clone(),
-                        megabytes: model.size_bytes as f32 / 1_000_000.0,
-                        accuracy: if model.id.starts_with("tiny") {
-                            2
-                        } else if model.id.starts_with("base") {
-                            3
-                        } else {
-                            4
-                        },
-                        installed: model.downloaded,
-                        active: chosen_transcriber.as_deref() == Some(model.id.as_str()),
-                        fetched,
-                        unpacking,
-                    }
-                })
-                .collect();
+        match concat_speech::Transcriber::status(dirs) {
+            Ok(status) => {
+                if !self.whisper_models_pending {
+                    self.whisper_models_message.clear();
+                }
+                self.transcribers = status
+                    .models
+                    .iter()
+                    .map(|model| {
+                        let (fetched, unpacking) =
+                            downloading.get(&model.id).copied().unwrap_or((None, false));
+                        ModelState {
+                            id: model.id.clone(),
+                            name: model.label.clone(),
+                            note: model.blurb.clone(),
+                            megabytes: model.size_bytes as f32 / 1_000_000.0,
+                            accuracy: if model.id.starts_with("tiny") {
+                                2
+                            } else if model.id.starts_with("base") {
+                                3
+                            } else {
+                                4
+                            },
+                            installed: model.downloaded,
+                            active: chosen_transcriber.as_deref() == Some(model.id.as_str()),
+                            fetched,
+                            unpacking,
+                        }
+                    })
+                    .collect();
+            }
+            Err(error) => {
+                self.whisper_models_message = error;
+                self.transcribers.clear();
+            }
         }
         if let Ok(status) = concat_speech::Speech::status(dirs) {
             studio.speech.speakers = status.voices.clone();
@@ -760,6 +878,14 @@ impl SettingsPane {
             magnetic: studio.prefs.magnetic,
             download_source: self.download_source as i32,
             download_base: self.download_base.as_str().into(),
+            whisper_models_dir: self.whisper_models_dir.as_str().into(),
+            whisper_models_draft: self.whisper_models_draft.as_str().into(),
+            whisper_models_message: self.whisper_models_message.as_str().into(),
+            whisper_models_busy: self.whisper_models_pending
+                || studio.host.transcriber.is_busy()
+                || self.transcribers.iter().any(|model| model.fetched.is_some()),
+            whisper_models_dirty: self.whisper_models_draft.trim()
+                != self.whisper_models_dir.as_str(),
             server_enabled: studio.prefs.server.enabled,
             server_host: split_listen(&studio.prefs.server.listen).0.into(),
             server_port: i32::from(split_listen(&studio.prefs.server.listen).1),

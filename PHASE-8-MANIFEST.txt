@@ -1,0 +1,4 @@
+kconcat Phase 8 source overlay
+Base commit: 85ee8bf0ca2b036d9bc96b81d125921a66be7b87
+Extract into the repository root (the folder containing src/).
+See README-PHASE-8.md and CHECKPOINT-PHASE-8.md.

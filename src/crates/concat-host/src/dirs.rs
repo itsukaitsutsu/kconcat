@@ -10,8 +10,9 @@
 //! `Application Support` and the rest in its `Caches`. On Windows the
 //! settings roam (`%APPDATA%`) and the models and caches stay on the
 //! machine (`%LOCALAPPDATA%`), since gigabytes of model have no business
-//! following a domain profile to every PC it logs into. On Linux they
-//! follow the XDG split.
+//! following a domain profile to every PC it logs into. Whisper models are
+//! the exception: the editor may route them to a user-selected shared folder.
+//! On Linux they follow the XDG split.
 //!
 //! Or one directory, chosen by the person running the app: a folder named
 //! `portable` beside the executable holds both, and nothing is written
@@ -31,6 +32,9 @@ pub struct AppDirs {
     pub config: PathBuf,
     /// Large state: downloaded models.
     pub data: PathBuf,
+    /// Optional user-selected shared folder for Whisper models. `None` keeps
+    /// the default `<data>/whisper-models` location.
+    pub whisper_models: Option<PathBuf>,
 }
 
 impl AppDirs {
@@ -39,7 +43,9 @@ impl AppDirs {
     /// when there is one.
     pub fn locate() -> Result<AppDirs, String> {
         if let Some(portable) = portable_root() {
-            return Ok(AppDirs::under(&portable));
+            let mut dirs = AppDirs::under(&portable);
+            dirs.whisper_models = Some(portable.join("whisper-models"));
+            return Ok(dirs);
         }
         let convention = convention(std::env::consts::OS);
         if convention == Convention::Apple {
@@ -53,7 +59,11 @@ impl AppDirs {
                 .map(PathBuf::from)
                 .map_or_else(|| config.clone(), |base| base.join(IDENTIFIER));
             move_data(&config, &data);
-            Ok(AppDirs { config, data })
+            Ok(AppDirs {
+                config,
+                data,
+                whisper_models: None,
+            })
         } else {
             // Linux follows the XDG split. Android arrives here too: the
             // activity names both bases before the window starts, since an
@@ -74,6 +84,7 @@ impl AppDirs {
             Ok(AppDirs {
                 config: config_base.join(IDENTIFIER),
                 data: data_base.join(IDENTIFIER),
+                whisper_models: None,
             })
         }
     }
@@ -84,7 +95,15 @@ impl AppDirs {
         AppDirs {
             config: root.to_path_buf(),
             data: root.to_path_buf(),
+            whisper_models: None,
         }
+    }
+
+    /// The selected Whisper model folder, or the legacy app-data default.
+    pub fn whisper_models_dir(&self) -> PathBuf {
+        self.whisper_models
+            .clone()
+            .unwrap_or_else(|| self.data.join("whisper-models"))
     }
 }
 
@@ -158,7 +177,11 @@ fn apple(home: &Path, phone: bool) -> AppDirs {
     } else {
         config.clone()
     };
-    AppDirs { config, data }
+    AppDirs {
+        config,
+        data,
+        whisper_models: None,
+    }
 }
 
 /// The `portable` folder beside the executable, when someone has made one.

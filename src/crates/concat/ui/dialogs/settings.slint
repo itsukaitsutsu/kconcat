@@ -64,6 +64,12 @@ export struct SettingsData {
     download-source: int,
     /// the base URL of a custom source
     download-base: string,
+    /// Current and editable Whisper model directory.
+    whisper-models-dir: string,
+    whisper-models-draft: string,
+    whisper-models-message: string,
+    whisper-models-busy: bool,
+    whisper-models-dirty: bool,
     /// the Concat API served on a socket while the window is open
     server-enabled: bool,
     /// the two halves of "127.0.0.1:7420"
@@ -449,6 +455,9 @@ export component SettingsDialog inherits Modal {
     callback magnetic-changed(on: bool);
     callback download-source-changed(index: int);
     callback download-base-edited(text: string);
+    callback whisper-models-directory-edited(text: string);
+    callback whisper-models-browse();
+    callback whisper-models-apply();
     callback server-enabled-changed(on: bool);
     callback server-host-edited(text: string);
     callback server-port-edited(port: int);
@@ -939,6 +948,57 @@ export component SettingsDialog inherits Modal {
                             color: Theme.green;
                             font-size: Theme.fs-sm;
                             vertical-alignment: center;
+                        }
+                    }
+                }
+
+                if !root.phone: DialogSection {
+                    title: I18n.t("settings.whisperModelsFolder");
+                    hint: I18n.t("settings.whisperModelsFolderHint");
+
+                    VerticalLayout {
+                        spacing: 7px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+
+                            Field {
+                                value: root.data.whisper-models-draft;
+                                placeholder: "D:\\path\\to\\whisper-models";
+                                technical: true;
+                                enabled: !root.data.whisper-models-busy;
+                                edited(text) => { root.whisper-models-directory-edited(text); }
+                            }
+
+                            Button {
+                                label: I18n.t("export.browse");
+                                glyph: Glyph.folder;
+                                enabled: !root.data.whisper-models-busy;
+                                clicked => { root.whisper-models-browse(); }
+                            }
+
+                            Button {
+                                label: I18n.t("common.apply");
+                                glyph: Glyph.check;
+                                primary: true;
+                                enabled: root.data.whisper-models-dirty && !root.data.whisper-models-busy;
+                                clicked => { root.whisper-models-apply(); }
+                            }
+                        }
+
+                        if root.data.whisper-models-dirty: Text {
+                            text: I18n.t1("settings.whisperFolderCurrent", "\{root.data.whisper-models-dir}");
+                            color: Theme.fg-dim;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-xs;
+                            wrap: word-wrap;
+                        }
+
+                        if root.data.whisper-models-message != "": Text {
+                            text: root.data.whisper-models-message;
+                            color: root.data.whisper-models-busy ? Theme.fg-muted : Theme.danger;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
                         }
                     }
                 }

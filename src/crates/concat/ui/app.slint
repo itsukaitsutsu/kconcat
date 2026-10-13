@@ -252,6 +252,9 @@ export component App inherits Window {
     callback settings-magnetic-changed(on: bool);
     callback settings-download-source-changed(index: int);
     callback settings-download-base-edited(text: string);
+    callback settings-whisper-models-directory-edited(text: string);
+    callback settings-whisper-models-browse();
+    callback settings-whisper-models-apply();
     callback settings-server-enabled-changed(on: bool);
     callback settings-server-host-edited(text: string);
     callback settings-server-port-edited(port: int);
@@ -765,6 +768,9 @@ export component App inherits Window {
         magnetic-changed(on) => { root.settings-magnetic-changed(on); }
         download-source-changed(index) => { root.settings-download-source-changed(index); }
         download-base-edited(text) => { root.settings-download-base-edited(text); }
+        whisper-models-directory-edited(text) => { root.settings-whisper-models-directory-edited(text); }
+        whisper-models-browse => { root.settings-whisper-models-browse(); }
+        whisper-models-apply => { root.settings-whisper-models-apply(); }
         server-enabled-changed(on) => { root.settings-server-enabled-changed(on); }
         server-host-edited(text) => { root.settings-server-host-edited(text); }
         server-port-edited(port) => { root.settings-server-port-edited(port); }

@@ -6,10 +6,33 @@
 //! models are chosen, which languages. A missing or unreadable file is the
 //! defaults, never an error.
 
+use std::path::{Path, PathBuf};
+
 use concat_host::AppDirs;
 use serde::{Deserialize, Serialize};
 
 const FILE: &str = "settings.json";
+
+/// The Windows default the user chose: the same shared Whisper directory as
+/// Video Trim Studio. Settings keeps it editable for machines with a different
+/// workspace drive or folder.
+pub const DEFAULT_WINDOWS_WHISPER_MODELS_DIR: &str = concat!(
+    r"D:\autotrim\workspace-01a11267-3c03-70c7-ba2b-746368a13969",
+    r"\video-trim-studio\work\whisper-models",
+);
+
+/// The folder used for Whisper models when Settings has no saved override.
+pub fn default_whisper_models_dir(dirs: &AppDirs) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = dirs;
+        PathBuf::from(DEFAULT_WINDOWS_WHISPER_MODELS_DIR)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dirs.data.join("whisper-models")
+    }
+}
 
 /// Remembered preferences.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -25,6 +48,10 @@ pub struct Preferences {
     /// The playhead's colour as "#rrggbb", when one was picked by hand in
     /// Settings > Appearance. `None` is the palette's own, which is lime.
     pub playhead: Option<String>,
+    /// The shared folder holding Whisper `.bin` models. Absent in older
+    /// settings files; those use the VTS workspace folder on Windows and the
+    /// app-data default on other platforms.
+    pub whisper_models_dir: Option<String>,
     /// The chosen transcriber model id, e.g. "base.en".
     pub transcriber_model: Option<String>,
     /// The chosen speech model id.
@@ -79,6 +106,19 @@ pub struct Preferences {
 }
 
 impl Preferences {
+    /// The configured model folder, ignoring an invalid relative value from a
+    /// hand-edited settings file; portable AppDirs take precedence over the
+    /// platform default when no setting is saved.
+    pub fn effective_whisper_models_dir(&self, dirs: &AppDirs) -> PathBuf {
+        self.whisper_models_dir
+            .as_deref()
+            .map(Path::new)
+            .filter(|path| path.is_absolute())
+            .map(Path::to_path_buf)
+            .or_else(|| dirs.whisper_models.clone())
+            .unwrap_or_else(|| default_whisper_models_dir(dirs))
+    }
+
     /// Which of `names` — the theme's accents, in its order — the remembered
     /// accent is. The first when nothing is remembered, and the first when
     /// the name is one the list no longer has: it is the default, and a
@@ -214,6 +254,47 @@ mod tests {
         assert_eq!(back.accent_index(NAMES), 1);
     }
 
+    #[test]
+    fn whisper_models_use_the_saved_absolute_folder() {
+        let dirs = AppDirs::under(&std::env::temp_dir().join("concat-pref-test"));
+        let chosen = std::env::temp_dir().join("concat-shared-whisper");
+        let prefs = Preferences {
+            whisper_models_dir: Some(chosen.to_string_lossy().into_owned()),
+            ..Preferences::default()
+        };
+        assert_eq!(prefs.effective_whisper_models_dir(&dirs), chosen);
+    }
+
+    #[test]
+    fn app_dirs_whisper_override_is_respected_before_platform_default() {
+        let root = std::env::temp_dir().join("concat-portable-pref-test");
+        let chosen = root.join("whisper-models");
+        let dirs = AppDirs {
+            whisper_models: Some(chosen.clone()),
+            ..AppDirs::under(&root)
+        };
+        assert_eq!(
+            Preferences::default().effective_whisper_models_dir(&dirs),
+            chosen
+        );
+    }
+
+    #[test]
+    fn a_relative_whisper_folder_falls_back_to_the_platform_default() {
+        let root = std::env::temp_dir().join("concat-pref-test");
+        let dirs = AppDirs::under(&root);
+        let prefs = Preferences {
+            whisper_models_dir: Some("relative/models".to_owned()),
+            ..Preferences::default()
+        };
+        let expected = if cfg!(target_os = "windows") {
+            PathBuf::from(DEFAULT_WINDOWS_WHISPER_MODELS_DIR)
+        } else {
+            root.join("whisper-models")
+        };
+        assert_eq!(prefs.effective_whisper_models_dir(&dirs), expected);
+    }
+
     /// A hex is a picked colour and a word is not, whatever else is around
     /// it; and a picked colour is no name, so the index falls back to the
     /// default until the caller has parsed it.
@@ -245,6 +326,7 @@ mod tests {
         let back: Preferences = serde_json::from_str(r#"{"dark": false}"#).unwrap();
         assert_eq!(back.dark, Some(false));
         assert_eq!(back.accent, None);
+        assert_eq!(back.whisper_models_dir, None);
         assert_eq!(back.accent_index(NAMES), 0);
     }
 

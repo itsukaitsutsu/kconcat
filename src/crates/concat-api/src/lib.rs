@@ -996,6 +996,7 @@ mod tests {
         let dirs = AppDirs {
             config: scratch.path().join("config"),
             data: scratch.path().join("data"),
+            whisper_models: None,
         };
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&events);

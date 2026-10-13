@@ -6,26 +6,26 @@ import { Theme } from "../theme/theme.slint";
 import { Glyph } from "../icons.slint";
 import { Button, Modal } from "../primitives/modal.slint";
 import { Switch } from "../inspector/controls.slint";
+import { PaneScroll } from "../workspace/pane.slint";
 
-// Sections (Phase 4b-2): what the selected clip is made of, as a list.
-//
-// The rows come from concat-project's sectionlist: caption, silence and
-// other pieces tiling the clip, each with where it sits on the timeline.
-// Silence starts unticked, everything else ticked; flipping a row's
-// switch is the reader saying "keep that pause" or "cut that speech".
-// The line at the bottom - "Keeping X / Y" - is recomputed from the
-// ticks on every publish. There is no Apply in this sheet yet: turning
-// ticks into cuts is the autotrim, and it gets its own step.
-
+// The Sections sheet: a clip overview, an aligned timeline strip, and one
+// card per caption, silence or uncovered span. The card and timeline share
+// the same normalized start/end values, so a card always points at the block
+// it represents rather than a second, separately computed clock.
 export struct SectionRowData {
     /// "Caption", "Silence" or "Other", in the interface's language.
     kind: string,
     /// The caption's words, or the kind again for a wordless row.
     label: string,
-    /// Where the row sits on the timeline, "m:ss – m:ss".
+    /// The row's timeline in/out points.
     range: string,
     /// Ticked: this row survives the autotrim.
     keep: bool,
+    /// 0 caption, 1 silence, 2 other; a visual key for the strip.
+    kind-code: int,
+    /// Normalized positions in the clip-wide strip, in 0..1.
+    start-ratio: float,
+    end-ratio: float,
 }
 
 export struct SectionsSheetData {
@@ -37,11 +37,121 @@ export struct SectionsSheetData {
     summary: string,
     /// "Keeping 0:42 / 1:00".
     kept-label: string,
+    /// Range covered by the clip on the timeline.
+    timeline-start: string,
+    timeline-end: string,
     /// Why the last run failed, when it did.
     message: string,
     /// The ticks can be applied as a trim.
     can-apply: bool,
     rows: [SectionRowData],
+}
+
+component SectionTimeline inherits Rectangle {
+    in property <[SectionRowData]> rows;
+
+    horizontal-stretch: 1;
+    min-height: 20px;
+    max-height: 20px;
+    border-radius: Theme.r-sm;
+    background: Theme.well;
+    clip: true;
+
+    for row in root.rows: Rectangle {
+        x: root.width * row.start-ratio;
+        width: Math.max(2px, root.width * (row.end-ratio - row.start-ratio));
+        y: 3px;
+        height: 14px;
+        border-radius: 2px;
+        background: row.kind-code == 0 ? Theme.accent
+            : row.kind-code == 1 ? Theme.field-active
+            : Theme.green;
+        opacity: row.keep ? 1.0 : 0.55;
+    }
+}
+
+component SectionCard inherits Rectangle {
+    in property <SectionRowData> row;
+
+    callback toggle-keep();
+
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: touch.has-hover ? Theme.line-strong : Theme.line;
+    background: root.row.keep ? Theme.raised : Theme.well;
+    clip: true;
+
+    animate background, border-color {
+        duration: 120ms;
+        easing: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    touch := TouchArea {
+        // Cards are read-only except for the explicit keep switch. This area
+        // gives a quiet hover affordance without stealing the switch press.
+        mouse-cursor: default;
+    }
+
+    Rectangle {
+        width: 3px;
+        height: parent.height;
+        background: root.row.kind-code == 0 ? Theme.accent
+            : root.row.kind-code == 1 ? Theme.field-active
+            : Theme.green;
+    }
+
+    VerticalLayout {
+        padding: 9px;
+        padding-left: 12px;
+        spacing: 5px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 4px;
+                background: root.row.kind-code == 0 ? Theme.accent
+                    : root.row.kind-code == 1 ? Theme.field-active
+                    : Theme.green;
+            }
+
+            Text {
+                text: root.row.kind;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: root.row.range;
+                color: Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Switch {
+                    checked: root.row.keep;
+                    toggled(on) => { root.toggle-keep(); }
+                }
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.row.label;
+            color: root.row.keep ? Theme.fg : Theme.fg-dim;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+    }
+
 }
 
 export component SectionsDialog inherits Modal {
@@ -53,12 +163,13 @@ export component SectionsDialog inherits Modal {
     open: root.data.open;
     title: I18n.t("sections.sections");
     glyph: Glyph.rows;
-    surface-width: 480px;
+    surface-width: 590px;
+    surface-height: 620px;
     dismissable: !root.data.running;
 
     VerticalLayout {
-        padding: 14px;
-        spacing: 10px;
+        padding: 13px;
+        spacing: 9px;
 
         Text {
             text: root.data.clip-label;
@@ -74,6 +185,48 @@ export component SectionsDialog inherits Modal {
             wrap: word-wrap;
         }
 
+        if root.data.rows.length > 0: VerticalLayout {
+            spacing: 5px;
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: I18n.t("sections.timeline");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: root.data.timeline-start;
+                    color: Theme.fg-dim;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "–";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.data.timeline-end;
+                    color: Theme.fg-dim;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+            }
+
+            SectionTimeline { rows: root.data.rows; }
+        }
+
         if root.data.running: Text {
             text: I18n.t("sections.listening");
             color: Theme.fg;
@@ -87,40 +240,13 @@ export component SectionsDialog inherits Modal {
             wrap: word-wrap;
         }
 
-        for row[index] in root.data.rows: HorizontalLayout {
-            spacing: 10px;
+        PaneScroll {
+            vertical-stretch: 1;
+            finger: true;
 
-            Text {
-                width: 72px;
-                text: row.kind;
-                color: Theme.fg-muted;
-                font-size: Theme.fs-sm;
-                vertical-alignment: center;
-            }
-
-            Text {
-                horizontal-stretch: 1;
-                text: row.label;
-                color: row.keep ? Theme.fg : Theme.fg-dim;
-                font-size: Theme.fs;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                text: row.range;
-                color: Theme.fg-dim;
-                font-family: Theme.font-technical;
-                font-size: Theme.fs-sm;
-                vertical-alignment: center;
-            }
-
-            VerticalLayout {
-                alignment: center;
-                Switch {
-                    checked: row.keep;
-                    toggled(on) => { root.row-toggled(index); }
-                }
+            for row[index] in root.data.rows: SectionCard {
+                row: row;
+                toggle-keep => { root.row-toggled(index); }
             }
         }
 

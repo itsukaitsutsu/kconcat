@@ -204,6 +204,7 @@ mod tests {
         let dirs = AppDirs {
             config: scratch.path().join("config"),
             data: scratch.path().join("data"),
+            whisper_models: None,
         };
         let config = Config {
             grpc: Some("127.0.0.1:0".parse().expect("an address")),

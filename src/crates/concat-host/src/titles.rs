@@ -809,6 +809,7 @@ mod tests {
         AppDirs {
             config: dir.join("config"),
             data: dir.join("data"),
+            whisper_models: None,
         }
     }
 

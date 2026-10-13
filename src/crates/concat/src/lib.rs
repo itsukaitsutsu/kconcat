@@ -1520,6 +1520,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             text.to_string(),
         )));
     }));
+    app.on_settings_whisper_models_directory_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Settings(SettingsMsg::WhisperModelsDirectoryEdited(
+            text.to_string(),
+        )));
+    }));
+    app.on_settings_whisper_models_browse(on_window!(|state| {
+        state.handle(Msg::Settings(SettingsMsg::WhisperModelsBrowse));
+    }));
+    app.on_settings_whisper_models_apply(on_window!(|state| {
+        state.handle(Msg::Settings(SettingsMsg::WhisperModelsApply));
+    }));
     app.on_settings_server_enabled_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::ServerEnabledChanged(on)));
     }));

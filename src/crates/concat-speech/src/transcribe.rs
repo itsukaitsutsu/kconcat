@@ -10,8 +10,8 @@
 //!
 //! Two pieces:
 //!
-//! 1. **Models.** Downloaded on demand from Hugging Face into the app data
-//!    folder as plain `.bin` files, streamed with progress, written to a
+//! 1. **Models.** Downloaded on demand into the selected shared folder (or
+//!    the platform's app-data default) as plain `.bin` files, streamed with progress, written to a
 //!    `.part` and renamed - a torn download must never look usable. A loaded
 //!    model is cached until another is asked for, because loading one takes
 //!    seconds.
@@ -118,9 +118,10 @@ fn model_upstream(id: &str) -> String {
     format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/{UPSTREAM_COMMIT}/ggml-{id}.bin")
 }
 
-/// Where downloaded models live: `<app data>/whisper-models/ggml-<id>.bin`.
+/// Where downloaded models live: the selected shared folder, or the app-data
+/// default when no override is configured.
 fn models_dir(dirs: &AppDirs) -> Result<PathBuf, String> {
-    let dir = dirs.data.join("whisper-models");
+    let dir = dirs.whisper_models_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
     Ok(dir)
@@ -218,6 +219,9 @@ pub struct TranscribeRequest {
 
 struct LoadedModel {
     id: String,
+    /// The same model id can exist in two configured folders. Include its
+    /// location in the cache key so changing the folder loads the right file.
+    path: PathBuf,
     context: WhisperContext,
 }
 
@@ -318,7 +322,10 @@ impl Transcriber {
         let mut loaded = self.model.try_lock().map_err(|_| {
             "a transcription is running - wait for it or cancel it first".to_owned()
         })?;
-        if loaded.as_ref().is_some_and(|model| model.id == id) {
+        if loaded
+            .as_ref()
+            .is_some_and(|model| model.id == id && model.path == file)
+        {
             *loaded = None;
         }
         std::fs::remove_file(&file)
@@ -380,13 +387,18 @@ impl Transcriber {
             .model
             .lock()
             .map_err(|_| "transcriber state poisoned".to_owned())?;
-        if loaded.as_ref().map(|model| model.id.as_str()) != Some(request.model_id.as_str()) {
+        if !loaded.as_ref().is_some_and(|model| {
+            model.id == request.model_id && model.path == model_path
+        }) {
             // Load before overwriting: a failed load keeps the old model.
+            // The folder is part of the cache key: changing it must not keep
+            // transcribing with the file loaded from the previous directory.
             let context =
                 WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
                     .map_err(|error| format!("could not load the model: {error}"))?;
             *loaded = Some(LoadedModel {
                 id: request.model_id.clone(),
+                path: model_path.clone(),
                 context,
             });
         }
@@ -655,6 +667,26 @@ mod tests {
         let status = Transcriber::status(&AppDirs::under(&scratch)).expect("status");
         assert_eq!(status.models.len(), KNOWN_MODELS.len());
         assert!(status.models.iter().all(|model| !model.downloaded));
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn status_uses_the_selected_shared_models_directory() {
+        let scratch = std::env::temp_dir().join(format!(
+            "concat-whisper-shared-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let selected = scratch.join("shared").join("whisper-models");
+        std::fs::create_dir_all(&selected).expect("shared model folder");
+        std::fs::write(selected.join("ggml-base.bin"), b"model").expect("model file");
+        let dirs = AppDirs {
+            whisper_models: Some(selected.clone()),
+            ..AppDirs::under(&scratch)
+        };
+        let status = Transcriber::status(&dirs).expect("status");
+        assert_eq!(status.models_dir, selected.to_string_lossy().into_owned());
+        assert!(status.models.iter().any(|model| model.id == "base" && model.downloaded));
         let _ = std::fs::remove_dir_all(&scratch);
     }
 }

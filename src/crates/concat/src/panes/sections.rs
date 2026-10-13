@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 
-//! The Sections sheet (Phase 4b-2): what a clip is made of, as a list.
+//! The Sections sheet: what a clip is made of, as an aligned timeline and a
+//! scrollable card list.
 //!
 //! Opens on the selected clip with sound (or the first such clip), runs
 //! `concat_media::silence::detect` over its file on a worker, and tiles
@@ -177,6 +178,12 @@ impl SectionsPane {
         let kept = kept_ranges(&self.rows, &ticks);
         let kept_seconds: f64 = kept.iter().map(|(start, end)| end - start).sum();
         let total_seconds: f64 = self.rows.iter().map(|row| row.section.duration()).sum();
+        let timeline_start = self.rows.first().map_or(0.0, |row| row.timeline_start);
+        let timeline_end = self
+            .rows
+            .last()
+            .map_or(timeline_start, |row| row.timeline_end);
+        let timeline_span = (timeline_end - timeline_start).max(f64::EPSILON);
         let rows: Vec<SectionRowData> = self
             .rows
             .iter()
@@ -189,11 +196,20 @@ impl SectionsPane {
                 },
                 range: format!(
                     "{} – {}",
-                    clock(row.timeline_start),
-                    clock(row.timeline_end)
+                    precise_clock(row.timeline_start),
+                    precise_clock(row.timeline_end)
                 )
                 .into(),
                 keep: row.keep,
+                kind_code: match row.section.kind {
+                    Kind::Caption => 0,
+                    Kind::Silence => 1,
+                    Kind::Other => 2,
+                },
+                start_ratio: ((row.timeline_start - timeline_start) / timeline_span)
+                    .clamp(0.0, 1.0) as f32,
+                end_ratio: ((row.timeline_end - timeline_start) / timeline_span)
+                    .clamp(0.0, 1.0) as f32,
             })
             .collect();
         SectionsSheetData {
@@ -234,6 +250,8 @@ impl SectionsPane {
                 )
                 .into()
             },
+            timeline_start: clock(timeline_start).into(),
+            timeline_end: clock(timeline_end).into(),
             can_apply: !self.running && !self.rows.is_empty(),
             message: self.message.clone().into(),
             rows: std::rc::Rc::new(slint::VecModel::from(rows)).into(),
@@ -261,9 +279,30 @@ fn clock(seconds: f64) -> String {
     }
 }
 
+/// A section boundary with millisecond precision. Whole-second boundaries
+/// stay compact; fractional boundaries cannot both look like `0:00` anymore.
+fn precise_clock(seconds: f64) -> String {
+    let milliseconds = (seconds.max(0.0) * 1000.0).round() as u64;
+    let whole_seconds = milliseconds / 1000;
+    let fraction = milliseconds % 1000;
+    if fraction == 0 {
+        return clock(whole_seconds as f64);
+    }
+    let (hours, minutes, seconds) = (
+        whole_seconds / 3600,
+        whole_seconds / 60 % 60,
+        whole_seconds % 60,
+    );
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}.{fraction:03}")
+    } else {
+        format!("{minutes}:{seconds:02}.{fraction:03}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::clock;
+    use super::{clock, precise_clock};
 
     #[test]
     fn a_clock_reads_like_the_sheets_tell_time() {
@@ -271,5 +310,13 @@ mod tests {
         assert_eq!(clock(72.9), "1:12");
         assert_eq!(clock(3_725.0), "1:02:05");
         assert_eq!(clock(-1.0), "0:00");
+    }
+
+    #[test]
+    fn section_boundaries_keep_fractional_seconds_visible() {
+        assert_eq!(precise_clock(0.0), "0:00");
+        assert_eq!(precise_clock(0.25), "0:00.250");
+        assert_eq!(precise_clock(72.9), "1:12.900");
+        assert_eq!(precise_clock(3_725.125), "1:02:05.125");
     }
 }

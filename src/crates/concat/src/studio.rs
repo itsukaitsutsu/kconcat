@@ -1963,8 +1963,10 @@ fn label_of(id: &str) -> String {
 impl Studio {
     /// A window with nothing open: the launch screen, with the recents list
     /// read off disk.
-    pub fn new(host: Host) -> Self {
+    pub fn new(mut host: Host) -> Self {
         let prefs = Preferences::load(&host.dirs);
+        let whisper_models_dir = prefs.effective_whisper_models_dir(&host.dirs);
+        host.dirs.whisper_models = Some(whisper_models_dir);
         // The remembered log level, unless this run's environment named
         // one: CONCAT_LOG is the louder ask.
         if concat_host::logs::environment_level().is_none()
