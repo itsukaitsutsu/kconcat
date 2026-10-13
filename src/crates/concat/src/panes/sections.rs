@@ -12,10 +12,11 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use concat_project::Command;
+use concat_project::commands::ClipPatch;
 use concat_project::sectionlist::{Row, clip_sections_with_cues, kept_ranges};
 use concat_project::sections::Kind;
 use concat_project::subtitle::Cue;
-use concat_project::{ClipPatch, Command};
 use slint::VecModel;
 
 use crate::host::spawn_in_project;
@@ -423,10 +424,8 @@ impl SectionsPane {
             .timeline()
             .tracks
             .iter()
-            .find(|tr| tr.id == clip.track_id)
-            .map(|tr| tr.name.clone())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "V1".to_owned());
+            .position(|tr| tr.id == clip.track_id)
+            .map_or_else(|| "V1".to_owned(), |idx| format!("V{}", idx + 1));
         let clip_label = format!("{} · {}", media.name, clock(clip.start));
         *self = SectionsPane {
             open: true,
@@ -498,7 +497,7 @@ impl SectionsPane {
             return;
         };
         let path = PathBuf::from(&media.path);
-        let stream = clip.audio_stream;
+        let stream = clip.audio_stream.and_then(|s| usize::try_from(s).ok());
         let noise_db = self.noise_db;
         let min_duration = (self.min_silence_ms / 1000.0).max(0.01);
         self.running = true;

@@ -84,14 +84,14 @@ impl ImportCaptionsPane {
         match msg {
             ImportCaptionsMsg::FilesPicked(paths) => self.picked(paths, studio),
             ImportCaptionsMsg::ProjectStart => {
-                self.begin(Timebase::ProjectStart, None, studio);
+                self.begin(Timebase::ProjectStart, None);
             }
             ImportCaptionsMsg::SelectedClip => {
                 let Some(target) = self.selected_clip.clone() else {
                     self.message = t("captionImport.selectClipFirst");
                     return;
                 };
-                self.begin(Timebase::SelectedClip, Some(target), studio);
+                self.begin(Timebase::SelectedClip, Some(target));
             }
             ImportCaptionsMsg::Cancel => *self = Self::default(),
             ImportCaptionsMsg::Parsed {
@@ -158,7 +158,7 @@ impl ImportCaptionsPane {
     }
 
     /// Reads the subtitle files on a worker; importing remains one undo step.
-    fn begin(&mut self, timebase: Timebase, target: Option<ClipTarget>, studio: &Studio) {
+    fn begin(&mut self, timebase: Timebase, target: Option<ClipTarget>) {
         if self.loading || self.files.is_empty() {
             return;
         }
