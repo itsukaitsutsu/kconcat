@@ -3460,6 +3460,7 @@ impl Studio {
             offset_y,
             above: true,
             caption_of: None,
+            words: None,
         };
         match font {
             Some((family, path)) => self.apply(Command::Batch {
@@ -6876,6 +6877,7 @@ impl Studio {
                     // it sits over the same voice, so it keeps the link
                     // and will follow the clip alongside the original.
                     caption_of: source.caption_of.clone(),
+                    words: None,
                 },
             );
         }

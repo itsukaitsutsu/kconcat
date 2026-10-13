@@ -2931,6 +2931,7 @@ mod tests {
                 duration: Some(2.5),
                 offset_y: Some(0.38),
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -2953,6 +2954,7 @@ mod tests {
                 duration: None,
                 offset_y: None,
                 caption_of: None,
+                words: None,
                 ..
             }
         ));
@@ -2983,6 +2985,7 @@ mod tests {
                 duration: Some(2.0),
                 offset_y: Some(0.38),
                 caption_of: None,
+                words: None,
             })
             .expect("adds the caption")
             .created_id
@@ -3083,6 +3086,7 @@ mod tests {
                         duration: Some(2.0),
                         offset_y: Some(0.38),
                         caption_of: None,
+                        words: None,
                     })
                     .expect("adds")
                     .created_id
@@ -3101,6 +3105,7 @@ mod tests {
                 duration: Some(2.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -3176,6 +3181,7 @@ mod tests {
                 // Phase 4a: the link is set at creation, the way the app's
                 // caption run now does it - no after-the-fact mutation.
                 caption_of: Some(clip_id.to_owned()),
+                words: None,
             })
             .expect("adds the caption")
             .created_id
@@ -3531,6 +3537,88 @@ mod tests {
     }
 
     #[test]
+    fn word_timings_are_estimated_by_word_length() {
+        let words = crate::captionmap::estimate_words("aa bbbb", 0.0, 3.0);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "aa");
+        assert!((words[0].start - 0.0).abs() < 0.01 && (words[0].end - 1.0).abs() < 0.01);
+        assert!((words[1].start - 1.0).abs() < 0.01 && (words[1].end - 3.0).abs() < 0.01);
+        assert!(crate::captionmap::estimate_words("  ", 0.0, 3.0).is_empty());
+    }
+
+    #[test]
+    fn words_follow_a_move_and_split_at_an_autotrim_cut() {
+        let (mut editor, _, clip_id) = fixture();
+        let words_id = linked_caption(&mut editor, &clip_id, 2.0, 5.0); // [2, 7)
+        let word = |text: &str, start: f64, end: f64| crate::captionmap::Word {
+            text: text.to_owned(),
+            start,
+            end,
+        };
+        editor
+            .project_mut()
+            .active_mut()
+            .clip_mut(&words_id)
+            .expect("the caption exists")
+            .words = Some(vec![
+            word("alpha", 2.0, 4.0),
+            word("beta", 4.0, 6.0),
+            word("gamma", 6.0, 7.0),
+        ]);
+
+        // A move shifts the words by the same amount as the caption.
+        let track_id = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("clip")
+            .track_id
+            .clone();
+        editor
+            .apply(move_to(&clip_id, 1.0, &track_id))
+            .expect("moves");
+        let caption = editor.project().active().clip(&words_id).expect("caption");
+        assert_eq!(caption.words.as_ref().expect("words")[0].start, 3.0);
+        assert!(editor.undo());
+
+        // An autotrim through the caption splits its words - and its
+        // text follows the words, not the old whole sentence.
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept: vec![(0.0, 3.0), (5.0, 8.0)],
+            })
+            .expect("autotrims");
+        let timeline = editor.project().active();
+        let pieces: Vec<(String, Vec<String>)> = timeline
+            .captions_of(&clip_id)
+            .iter()
+            .map(|id| {
+                let clip = timeline.clip(id).expect("a caption piece");
+                (
+                    clip.text.as_ref().expect("text").content.clone(),
+                    clip.words
+                        .as_ref()
+                        .expect("words")
+                        .iter()
+                        .map(|word| word.text.clone())
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                ("alpha".to_owned(), vec!["alpha".to_owned()]),
+                (
+                    "beta gamma".to_owned(),
+                    vec!["beta".to_owned(), "gamma".to_owned()]
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn a_caption_lands_above_the_highest_occupied_lane() {
         let mut editor = Editor::new();
         let media_id = editor
@@ -3560,6 +3648,7 @@ mod tests {
                 duration: Some(5.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -3596,6 +3685,7 @@ mod tests {
                 duration: Some(5.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -3643,6 +3733,7 @@ mod tests {
                 duration: Some(5.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -3698,6 +3789,7 @@ mod tests {
                 duration: Some(5.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -4254,6 +4346,7 @@ mod tests {
                 duration: None,
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("adds")
             .created_id
@@ -4323,6 +4416,7 @@ mod tests {
                 duration: Some(2.0),
                 offset_y: Some(0.4),
                 caption_of: None,
+                words: None,
             },
             Command::MoveClips {
                 moves: vec![ClipMove {

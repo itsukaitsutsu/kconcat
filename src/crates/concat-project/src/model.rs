@@ -1359,6 +1359,15 @@ pub struct Clip {
     /// older document as holding none. `DOCUMENT_VERSION` does not move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption_of: Option<String>,
+    /// Phase 6: on a caption clip, each word's timing, on the timeline
+    /// clock like [`crate::captionmap::Cue`]'s words - so a move shifts
+    /// them and a trim clips them, which `commands` does alongside the
+    /// clip itself. The karaoke highlight and the word-splitting of a
+    /// cut caption are both read off this. None on every clip that is
+    /// not a word-timed caption; absent from older documents, like
+    /// `caption_of`, so `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<crate::captionmap::Word>>,
     /// The transition on the cut into this clip, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
@@ -1471,6 +1480,7 @@ impl Clip {
             muted: None,
             detached_from: None,
             caption_of: None,
+            words: None,
             transition_in: None,
             enhanced: None,
             text: None,

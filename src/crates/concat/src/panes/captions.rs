@@ -427,6 +427,13 @@ fn caption_clip(
         duration: Some(duration),
         offset_y: Some(offset_y),
         caption_of: caption_of.map(str::to_owned),
+        // Phase 6a: estimated word timings for a transcribed caption -
+        // spread over the phrase by word length (captionmap says
+        // `Estimated`, and means it). A script's titles get none: they
+        // belong to no voice, and there is nothing to highlight.
+        words: caption_of.is_some().then(|| {
+            concat_project::captionmap::estimate_words(&style.content, start, start + duration)
+        }),
     }
 }
 

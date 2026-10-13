@@ -73,6 +73,7 @@ pub(super) fn apply(
             offset_y,
             above,
             caption_of,
+            words,
         } => {
             let style = style.unwrap_or_default();
             let duration = duration
@@ -105,6 +106,7 @@ pub(super) fn apply(
             // that later dangles (its clip deleted) is Phase 1's
             // `captions_with_no_clip` case, not an error here.
             clip.caption_of = caption_of;
+            clip.words = words;
             clip.text = Some(style);
             timeline.clips.push(Arc::new(clip));
             Ok(Outcome {
@@ -790,6 +792,37 @@ pub(super) fn apply(
                         piece.speed_curve = None;
                     }
                     piece.rewindow_keys(old_duration, rel, rel + piece.duration);
+                    // Phase 6: the piece keeps the words it covers,
+                    // moved to where the piece landed, and - when the
+                    // caption has words - its text becomes exactly
+                    // those words, so a caption cut at a silence no
+                    // longer repeats its whole sentence on both sides
+                    // (the Phase 5 limit, lifted where words exist).
+                    if let Some(words) = &original.words {
+                        let kept: Vec<crate::captionmap::Word> = words
+                            .iter()
+                            .filter(|word| word.end > start && word.start < end)
+                            .map(|word| crate::captionmap::Word {
+                                text: word.text.clone(),
+                                start: piece.start + (word.start.max(start) - start),
+                                end: piece.start + (word.end.min(end) - start),
+                            })
+                            .collect();
+                        if !kept.is_empty() {
+                            if piece.kind == ClipKind::Text
+                                && let Some(style) = &mut piece.text
+                            {
+                                style.content = kept
+                                    .iter()
+                                    .map(|word| word.text.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                            }
+                            piece.words = Some(kept);
+                        } else {
+                            piece.words = None;
+                        }
+                    }
                     pieces.push(piece);
                 }
                 timeline.clips.remove(index);
@@ -908,6 +941,13 @@ fn follow_captions(
         if let Some(caption) = timeline.clip_mut(&caption_id) {
             let start = (caption.start + delta).max(0.0);
             applied |= assign(&mut caption.start, start);
+            // The words ride the same shift: their clock is the timeline.
+            if let Some(words) = &mut caption.words {
+                for word in words.iter_mut() {
+                    word.start = (word.start + delta).max(0.0);
+                    word.end = (word.end + delta).max(0.0);
+                }
+            }
         }
     }
     applied
@@ -943,6 +983,19 @@ fn rewindow_captions(
         }
         applied |= assign(&mut caption.start, start);
         applied |= assign(&mut caption.duration, end - start);
+        // The words are clipped at the same edges: shifted with the
+        // content, kept only where they still fall inside the caption,
+        // and a word straddling the edge is heard on the kept side.
+        if let Some(words) = &mut caption.words {
+            words.retain(|word| word.end + shift > start && word.start + shift < end);
+            for word in words.iter_mut() {
+                word.start = (word.start + shift).max(start);
+                word.end = (word.end + shift).min(end);
+            }
+            if words.is_empty() {
+                caption.words = None;
+            }
+        }
     }
     if !doomed.is_empty() {
         timeline.clips.retain(|clip| !doomed.contains(&clip.id));

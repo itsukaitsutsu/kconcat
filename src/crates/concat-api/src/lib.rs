@@ -1096,6 +1096,7 @@ mod tests {
                     duration: None,
                     offset_y: None,
                     caption_of: None,
+                    words: None,
                 }),
             }
         );
@@ -1250,6 +1251,7 @@ mod tests {
                 duration: Some(3.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             }),
         }));
         let undone = view(ok(api.dispatch(Request::EditUndo { path: path.clone() })));

@@ -637,6 +637,7 @@ mod tests {
                 duration: Some(3.0),
                 offset_y: None,
                 caption_of: None,
+                words: None,
             })
             .expect("a title is added")
             .created_id
@@ -683,6 +684,7 @@ mod tests {
                 duration: Some(3.0),
                 offset_y: Some(0.3),
                 caption_of: None,
+                words: None,
             })
             .expect("a title is added")
             .created_id

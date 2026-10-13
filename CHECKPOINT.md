@@ -107,13 +107,29 @@ and continue. User handles all git commands themselves — deliverables are
    button wired (panes/sections.rs Apply, sections.slint, app.slint,
    lib.rs, en.json). App side NOT compiled in sandbox as usual.
    >>> USER: expect "225 passed", then cargo check -p concat. <<<
-5. NEXT Phase 6 — word-level captions / karaoke: whisper token
-   timestamps (concat-speech transcribe Segment - check what timing it
-   carries) into caption data, split a cut caption's WORDS with
-   captionmap::remap/clean_words (not just its span - the known limit
-   Phase 5 states), then karaoke highlight in the stage/text rendering.
-   Scout first: concat-speech Segment fields, model::TextStyle and
-   concat-text title painting for per-word highlight feasibility.
+5. Phase 6 SPLIT IN THREE:
+   - 6a DELIVERED 2026-10-13 as `phase-6a-word-timings.zip`: Clip.words
+     (model.rs), captionmap::estimate_words, AddTextClip.words,
+     move/trim/autotrim carry+split words (autotrim rebuilds piece
+     text from its words), captions.rs creates estimated words.
+     Verified: 227 passed, clippy/fmt clean.
+   - 6b NEXT: heard timings. Scout result: concat-speech Segment has
+     ONLY start/end/text (no words); whisper-rs FullParams supports
+     token_timestamps - enable it, read segment tokens -> Segment.words
+     {text,start,end} (window clock), captions.rs prefers Segment.words
+     over estimate_words. Touches concat-speech (whisper.cpp native;
+     user check-builds, likely `cargo check -p concat-speech` first).
+   - 6c: karaoke highlight - stage/text painting colours the word whose
+     [s,e] contains the playhead (words are timeline-clock). Scout
+     concat-text title painting + studio stage publish for where a
+     per-word accent can enter.
+6. Phase 7 LAST: full build+smoke with a real video, docs
+   (README/ARCHITECTURE), optional upstream-tidy commits. After Phase
+   7 the original VTS feature list is complete: linked captions,
+   follow edits, silence detection, sections list, autotrim,
+   word-level/karaoke (+ SRT/VTT modules already in from Tranche A).
+   Estimate given to user: 3 phases/sessions after 6a, 2-4 part-time
+   days, dominated by user's app builds (30-90 min each).
 
 ## Rules established with the user
 - Deliverable = one .zip per phase, paths mirroring repo root, plus a

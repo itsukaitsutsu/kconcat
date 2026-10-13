@@ -330,6 +330,12 @@ pub enum Command {
         /// field existed parsing as an unlinked title.
         #[serde(default)]
         caption_of: Option<String>,
+        /// Phase 6: the caption's word timings, on the timeline clock,
+        /// stored on the new clip as [`crate::model::Clip::words`]. Here
+        /// for the same reason `caption_of` is: a caption run lands as
+        /// one batch and cannot know the minted ids afterwards.
+        #[serde(default)]
+        words: Option<Vec<crate::captionmap::Word>>,
     },
     /// Places a shape: a clip with no media behind it that draws one
     /// figure over the picture, minting a "c" id. Lands the way a title

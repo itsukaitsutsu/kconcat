@@ -157,6 +157,43 @@ fn is_alphanumeric(character: char) -> bool {
     character.is_alphanumeric()
 }
 
+/// Word timings estimated from the words themselves, spread across
+/// `[start, end]` in proportion to their length in characters.
+///
+/// What a cue with no heard timings gets (a subtitle file, and - until
+/// the transcriber's token timestamps land - a whisper segment, which
+/// is timed as a phrase and no finer). Longer words take longer to say;
+/// that is the whole of the model, and [`WordSource::Estimated`] is how
+/// a caller says these times are this and not heard ones. The result
+/// goes through [`clean_words`], so it obeys the same rules as heard
+/// timings: sorted, inside the cue, never overlapping.
+pub fn estimate_words(text: &str, start: f64, end: f64) -> Vec<Word> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() || end <= start {
+        return Vec::new();
+    }
+    let total: f64 = words.iter().map(|word| word.chars().count() as f64).sum();
+    if total <= 0.0 {
+        return Vec::new();
+    }
+    let span = end - start;
+    let mut at = start;
+    let raw: Vec<Word> = words
+        .iter()
+        .map(|word| {
+            let duration = span * (word.chars().count() as f64) / total;
+            let word = Word {
+                text: (*word).to_owned(),
+                start: at,
+                end: at + duration,
+            };
+            at += duration;
+            word
+        })
+        .collect();
+    clean_words(&raw, Some(start), Some(end)).0
+}
+
 /// Puts words into the shape everything downstream assumes.
 ///
 /// Accepts either spelling a recogniser uses, drops the empties, pads the
