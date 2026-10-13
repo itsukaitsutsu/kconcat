@@ -2959,6 +2959,199 @@ mod tests {
         assert_eq!(restored.project(), editor.project());
     }
 
+    /// A caption keeps the clip it was transcribed from through a save and
+    /// an open, and a document written before the field existed reads as a
+    /// caption linked to nothing rather than failing to load. The field is
+    /// the sibling of `detached_from`, and like it stays optional: an older
+    /// build reads the clip and ignores the key, a newer one defaults it,
+    /// so `DOCUMENT_VERSION` does not move.
+    #[test]
+    fn a_caption_keeps_its_link_to_the_clip_it_came_from() {
+        let (mut editor, _, clip_id) = fixture();
+        let caption_id = editor
+            .apply(Command::AddTextClip {
+                above: true,
+                track_id: None,
+                start: 1.0,
+                style: Some(TextStyle {
+                    content: "Captioned words".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(2.0),
+                offset_y: Some(0.38),
+            })
+            .expect("adds the caption")
+            .created_id
+            .expect("id");
+
+        // A hand-typed title is linked to nothing, and says so by leaving
+        // the key out of the document entirely.
+        let document = editor.to_document(&settings());
+        let written = document["timelines"][0]["clips"].as_array().expect("clips");
+        let caption = written
+            .iter()
+            .find(|clip| clip["id"] == json!(caption_id))
+            .expect("the caption is in the document");
+        assert!(
+            caption.get("captionOf").is_none(),
+            "an unlinked caption writes no captionOf"
+        );
+
+        // What a caption run will write once it is wired: the id of the
+        // clip whose voice was transcribed.
+        let mut linked = document.clone();
+        {
+            let clips = linked["timelines"][0]["clips"]
+                .as_array_mut()
+                .expect("clips");
+            let caption = clips
+                .iter_mut()
+                .find(|clip| clip["id"] == json!(caption_id))
+                .expect("the caption is in the document");
+            caption["captionOf"] = json!(clip_id);
+        }
+
+        let restored = Editor::from_document(&linked).expect("loads");
+        let caption = restored
+            .project()
+            .active()
+            .clip(&caption_id)
+            .expect("the caption survived");
+        assert_eq!(caption.kind, ClipKind::Text);
+        assert_eq!(
+            caption.caption_of.as_deref(),
+            Some(clip_id.as_str()),
+            "the link came back"
+        );
+
+        // Written out again, so a second open does not lose it.
+        let saved_again = crate::doc::to_document(&settings(), restored.project());
+        let reopened = Editor::from_document(&saved_again).expect("loads again");
+        assert_eq!(
+            reopened
+                .project()
+                .active()
+                .clip(&caption_id)
+                .expect("the caption survived")
+                .caption_of
+                .as_deref(),
+            Some(clip_id.as_str()),
+            "the link survives a second round trip"
+        );
+
+        // The document with no captionOf anywhere still loads, and reads as
+        // clips linked to nothing - which is every project saved before this
+        // field existed.
+        let older = Editor::from_document(&document).expect("an older document loads");
+        assert!(
+            older
+                .project()
+                .active()
+                .clips
+                .iter()
+                .all(|clip| clip.caption_of.is_none())
+        );
+    }
+
+    /// `captions_of` is what a drag, a trim and a ripple delete each call
+    /// to take a clip's captions with it, and `captions_with_no_clip` is
+    /// what a delete calls to drop the links it orphaned.
+    #[test]
+    fn captions_are_found_by_the_clip_they_came_from() {
+        let (mut editor, _, clip_id) = fixture();
+
+        // Nothing is captioned yet.
+        assert!(editor.project().active().captions_of(&clip_id).is_empty());
+
+        // Two captions off the same clip, and one title typed by hand.
+        let mut ids = Vec::new();
+        for (start, content) in [(1.0, "First"), (4.0, "Second")] {
+            ids.push(
+                editor
+                    .apply(Command::AddTextClip {
+                        above: true,
+                        track_id: None,
+                        start,
+                        style: Some(TextStyle {
+                            content: content.to_owned(),
+                            ..TextStyle::default()
+                        }),
+                        duration: Some(2.0),
+                        offset_y: Some(0.38),
+                    })
+                    .expect("adds")
+                    .created_id
+                    .expect("id"),
+            );
+        }
+        let unlinked = editor
+            .apply(Command::AddTextClip {
+                above: true,
+                track_id: None,
+                start: 7.0,
+                style: Some(TextStyle {
+                    content: "Typed by hand".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(2.0),
+                offset_y: None,
+            })
+            .expect("adds")
+            .created_id
+            .expect("id");
+
+        // Link the two, by hand, the way a caption run will.
+        {
+            let project = editor.project_mut();
+            let timeline = project.active_mut();
+            for id in &ids {
+                let clip = timeline.clip_mut(id).expect("exists");
+                clip.caption_of = Some(clip_id.clone());
+            }
+        }
+
+        let timeline = editor.project().active();
+        assert_eq!(
+            timeline.captions_of(&clip_id),
+            ids,
+            "both, in timeline order"
+        );
+        assert!(
+            timeline.captions_of(&unlinked).is_empty(),
+            "a title nobody was captioned from has none"
+        );
+        assert!(
+            timeline.captions_with_no_clip().is_empty(),
+            "both links resolve"
+        );
+
+        // Deleting the clip does NOT rewrite the captions - a command that
+        // removes one clip has no business editing others, and a Batch that
+        // did would not be one undo step. The links go dangling, and the
+        // caller clears them through captions_with_no_clip. That is what
+        // this asserts, because it is the contract the delete path relies on.
+        editor
+            .apply(Command::RemoveClips {
+                clip_ids: vec![clip_id.clone()],
+                ripple: false,
+            })
+            .expect("removes");
+        let timeline = editor.project().active();
+        assert_eq!(timeline.clip(&clip_id), None, "the clip itself is gone");
+        assert_eq!(
+            timeline.captions_of(&clip_id),
+            ids,
+            "the captions still name it: a delete does not rewrite them"
+        );
+        let orphaned = timeline.captions_with_no_clip();
+        assert_eq!(orphaned.len(), 2, "both captions are now dangling");
+        assert!(orphaned.contains(&ids[0]) && orphaned.contains(&ids[1]));
+        assert!(
+            !orphaned.contains(&unlinked),
+            "the hand-typed title was never linked, so it is not an orphan"
+        );
+    }
+
     #[test]
     fn a_caption_lands_above_the_highest_occupied_lane() {
         let mut editor = Editor::new();

@@ -1346,6 +1346,19 @@ pub struct Clip {
     /// On a detached audio clip: the video clip the sound came from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached_from: Option<String>,
+    /// On a text clip made by a caption run: the clip whose voice was
+    /// transcribed to produce it. The sibling of `detached_from` for words
+    /// rather than sound, and what makes a caption travel with the picture
+    /// it belongs to - a move, a trim and a ripple delete all take the
+    /// captions with them, and `captionmap::remap` moves their timings
+    /// through a cut. None for a title typed by hand, which belongs to the
+    /// timeline rather than to one clip.
+    ///
+    /// Absent from every document written before it existed, so an older
+    /// build reads a caption as an unlinked title and a newer one reads an
+    /// older document as holding none. `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption_of: Option<String>,
     /// The transition on the cut into this clip, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
@@ -1457,6 +1470,7 @@ impl Clip {
             audio_stream: None,
             muted: None,
             detached_from: None,
+            caption_of: None,
             transition_in: None,
             enhanced: None,
             text: None,
@@ -2126,6 +2140,45 @@ impl Timeline {
             .iter()
             .find(|clip| clip.id == clip_id)
             .map(Arc::as_ref)
+    }
+
+    /// The ids of the captions transcribed from one clip, in timeline order.
+    ///
+    /// What a drag, a trim and a ripple delete each need in order to take a
+    /// clip's captions with it: the caller collects these beside the clip it
+    /// was given and puts the whole set in one [`crate::commands::Command::Batch`],
+    /// so the move is one undo step and the words never drift off the
+    /// picture they belong to. The sibling of the filter that gathers a
+    /// video clip's detached sound.
+    ///
+    /// Empty for a clip nothing was captioned from, and for a text clip -
+    /// captions link to the clip whose voice they carry, not to each other.
+    pub fn captions_of(&self, clip_id: &str) -> Vec<String> {
+        self.clips
+            .iter()
+            .filter(|clip| clip.caption_of.as_deref() == Some(clip_id))
+            .map(|clip| clip.id.clone())
+            .collect()
+    }
+
+    /// Every caption on this timeline whose clip is gone.
+    ///
+    /// A link left pointing at a deleted clip is a caption that no longer
+    /// travels with anything, which is harmless but is also a clip the
+    /// reader should not be carrying: [`crate::doc`] drops a clip whose
+    /// track vanished and a clip whose media did, and a dangling link is
+    /// the same kind of leftover. What deletes a clip calls this and clears
+    /// what comes back.
+    pub fn captions_with_no_clip(&self) -> Vec<String> {
+        self.clips
+            .iter()
+            .filter(|clip| {
+                clip.caption_of
+                    .as_deref()
+                    .is_some_and(|id| self.clip(id).is_none())
+            })
+            .map(|clip| clip.id.clone())
+            .collect()
     }
 
     /// Mutable twin of [`Timeline::clip`]. The clip is copied out of any
