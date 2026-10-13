@@ -20,6 +20,7 @@ pub mod media_bin;
 pub mod monitor;
 pub mod project;
 pub mod relink;
+pub mod sections;
 pub mod settings;
 pub mod speech;
 pub mod start;
@@ -35,6 +36,8 @@ pub enum Msg {
     Settings(settings::SettingsMsg),
     /// To the captions sheet.
     Captions(captions::CaptionsMsg),
+    /// To the sections sheet.
+    Sections(sections::SectionsMsg),
     /// To the speech sheet.
     Speech(speech::SpeechMsg),
     /// To the missing media dialog.
@@ -106,6 +109,15 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
             return Some(Activity::once(
                 Info,
                 format!("captions: finished, {} segments", segments.len()),
+            ));
+        }
+        Msg::Sections(sections::SectionsMsg::Finished(result)) => {
+            return Some(Activity::once(
+                Info,
+                match result {
+                    Ok(spans) => format!("sections: finished, {} silence(s)", spans.len()),
+                    Err(error) => format!("sections: failed, {error}"),
+                },
             ));
         }
         Msg::Captions(CaptionsMsg::Finished(Err(error))) => {

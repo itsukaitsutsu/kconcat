@@ -1568,6 +1568,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_captions(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Open));
     }));
+    editor.on_sections(on_window!(|state| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Open));
+    }));
     editor.on_record_voiceover(on_window!(|state| {
         state.handle(Msg::Voiceover(
             crate::panes::voiceover::VoiceoverMsg::Toggle,
@@ -1600,6 +1603,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_captions_begin(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Begin));
+    }));
+    app.on_sections_closed(on_window!(|state| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Close));
+    }));
+    app.on_sections_apply(on_window!(|state| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Apply));
+    }));
+    app.on_sections_row_toggled(on_window!(|state, index: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowToggled(index),
+        ));
     }));
     app.on_captions_cancel(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Cancel));

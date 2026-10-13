@@ -682,6 +682,135 @@ pub(super) fn apply(
             })
         }
 
+        Command::AutotrimClip { clip_id, kept } => {
+            let timeline = project.active_mut();
+            let Some(clip) = timeline.clip(&clip_id).cloned() else {
+                return Ok(Outcome::default());
+            };
+            let (clip_start, clip_end) = (clip.start, clip.start + clip.duration);
+
+            // The kept ranges, made sane: inside the clip, sorted,
+            // overlaps merged, slivers dropped.
+            let mut kept: Vec<(f64, f64)> = kept
+                .iter()
+                .map(|(start, end)| (start.max(clip_start), end.min(clip_end)))
+                .filter(|(start, end)| end - start >= MIN_CLIP_DURATION)
+                .collect();
+            kept.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut merged: Vec<(f64, f64)> = Vec::new();
+            for range in kept {
+                match merged.last_mut() {
+                    Some(last) if range.0 <= last.1 + JOIN_EPSILON => {
+                        last.1 = last.1.max(range.1);
+                    }
+                    _ => merged.push(range),
+                }
+            }
+            let kept_total: f64 = merged.iter().map(|(a, b)| b - a).sum();
+            // Keeping everything (or, with nothing sane, nothing) is not
+            // an edit: a "trim" that deletes a whole clip is RemoveClips'
+            // job, and says so by doing nothing here.
+            if merged.is_empty() || (clip.duration - kept_total).abs() < JOIN_EPSILON {
+                return Ok(Outcome::default());
+            }
+            let removed_total = clip.duration - kept_total;
+
+            // Who is rebuilt through the ranges: the clip, the captions
+            // linked to it, and the sound detached from it. Everything
+            // else either sits before the edit or shifts behind it.
+            let mut participants: Vec<String> = vec![clip_id.clone()];
+            participants.extend(timeline.captions_of(&clip_id));
+            participants.extend(
+                timeline
+                    .clips
+                    .iter()
+                    .filter(|other| other.detached_from.as_deref() == Some(clip_id.as_str()))
+                    .map(|other| other.id.clone()),
+            );
+
+            // Where each kept range lands: the pieces pack back to back
+            // from where the clip started.
+            let mut landings: Vec<f64> = Vec::with_capacity(merged.len());
+            let mut cursor = clip_start;
+            for (start, end) in &merged {
+                landings.push(cursor);
+                cursor += end - start;
+            }
+
+            for participant_id in &participants {
+                let Some(index) = timeline
+                    .clips
+                    .iter()
+                    .position(|other| &other.id == participant_id)
+                else {
+                    continue;
+                };
+                let original = (*timeline.clips[index]).clone();
+                let old_duration = original.duration;
+                // This participant's pieces: its span through each kept
+                // range, in order. A caption clipped by a range keeps
+                // its words on every piece it survives as - a text clip
+                // holds one string, and word timings are Phase 6's.
+                let mut pieces: Vec<Clip> = Vec::new();
+                for ((range_start, range_end), lands_at) in merged.iter().zip(&landings) {
+                    let start = range_start.max(original.start);
+                    let end = range_end.min(original.start + original.duration);
+                    if end - start < MIN_CLIP_DURATION {
+                        continue;
+                    }
+                    // The first piece produced keeps the original's id -
+                    // whatever links to this clip (a caption's
+                    // `caption_of`, a sound's `detached_from`) must still
+                    // find it after the rebuild.
+                    let first = pieces.is_empty();
+                    let mut piece = original.clone();
+                    piece.id = if first {
+                        original.id.clone()
+                    } else {
+                        mint.next("c")
+                    };
+                    let rel = start - original.start;
+                    piece.start = lands_at + (start - range_start);
+                    piece.duration = end - start;
+                    if piece.kind != ClipKind::Text {
+                        piece.source_start = original.source_start + rel * original.speed;
+                    }
+                    if !first {
+                        // The way in belongs to the first piece only, as
+                        // a split's tail has none.
+                        piece.transition_in = None;
+                        piece.fade_in = 0.0;
+                    }
+                    if end < original.start + original.duration - JOIN_EPSILON {
+                        piece.fade_out = 0.0;
+                    }
+                    // A curve does not survive being cut into pieces, as
+                    // a split's halves go to the constant mean.
+                    if merged.len() > 1 {
+                        piece.speed_curve = None;
+                    }
+                    piece.rewindow_keys(old_duration, rel, rel + piece.duration);
+                    pieces.push(piece);
+                }
+                timeline.clips.remove(index);
+                for (offset, piece) in pieces.into_iter().enumerate() {
+                    timeline.clips.insert(index + offset, Arc::new(piece));
+                }
+            }
+
+            // The timeline closes up: whatever began at or after the
+            // clip's old end moves left by what came out of it.
+            for other in timeline.clips_where(|other| {
+                !participants.contains(&other.id) && other.start >= clip_end - JOIN_EPSILON
+            }) {
+                other.start = (other.start - removed_total).max(0.0);
+            }
+            Ok(Outcome {
+                created_id: None,
+                applied: true,
+            })
+        }
+
         Command::RemoveClips { clip_ids, ripple } => {
             let timeline = project.active_mut();
             // Phase 2: starts before the delete, so captions of clips the

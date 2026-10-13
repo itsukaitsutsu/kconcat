@@ -1021,5 +1021,20 @@
   "tray.undo": "Undo ({0})",
   "tray.zoomToFit": "Zoom to fit",
   "voiceover.added": "Voiceover added to the timeline",
-  "voiceover.failed": "Couldn't record: {0}"
+  "voiceover.failed": "Couldn't record: {0}",
+  "sections.sections": "Sections",
+  "sections.caption": "Caption",
+  "sections.silence": "Silence",
+  "sections.other": "Other",
+  "sections.captions": "captions",
+  "sections.silences": "silences",
+  "sections.keeping": "Keeping",
+  "sections.listening": "Listening for silences…",
+  "sections.noVoiceOnTimeline": "No clip with sound is on the timeline",
+  "sections.clipHasNoFile": "This clip has no file to measure",
+  "sections.clipGone": "The clip is no longer on the timeline",
+  "sections.nothingFound": "Nothing was found in this clip",
+  "tray.sections": "Sections: what this clip is made of",
+  "sections.apply": "Apply trim",
+  "sections.trimmed": "Trimmed — the captions and sound followed"
 }

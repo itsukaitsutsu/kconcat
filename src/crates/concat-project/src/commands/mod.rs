@@ -569,6 +569,23 @@ pub enum Command {
         /// The pieces to rejoin, any order.
         clip_ids: Vec<String>,
     },
+    /// Phase 5 (autotrim): rebuilds one clip from the timeline ranges of
+    /// it worth keeping - the sections panel's ticked rows, as
+    /// [`crate::sectionlist::kept_ranges`] returns them - deleting the
+    /// rest and closing the timeline up behind it.
+    ///
+    /// The clip's linked captions (Phase 1's `caption_of`) and its
+    /// detached sound are rebuilt through the same ranges, so the words
+    /// and the sound stay on the picture; everything that started after
+    /// the clip shifts left by what was removed. Ranges are clamped
+    /// into the clip, sorted and merged; keeping everything or nothing
+    /// is a no-op rather than an edit. One command, so one undo step.
+    AutotrimClip {
+        /// The clip to trim by content.
+        clip_id: String,
+        /// Timeline `(start, end)` ranges to keep.
+        kept: Vec<(f64, f64)>,
+    },
     /// Deletes clips from the active timeline. Unknown ids are ignored.
     RemoveClips {
         /// The clips to delete.
@@ -970,6 +987,9 @@ impl Command {
             Command::MoveClips { moves } => bad(moves.iter().map(|wanted| wanted.start)),
             Command::TrimClip { delta, .. } => bad([*delta]),
             Command::SplitClips { time, .. } => bad([*time]),
+            Command::AutotrimClip { kept, .. } => {
+                bad(kept.iter().flat_map(|(start, end)| [*start, *end]))
+            }
             Command::FreezeFrame { time, duration, .. } => bad([*time]) || bad(*duration),
             Command::ReplaceClipMedia {
                 item, source_start, ..
@@ -1089,6 +1109,7 @@ pub fn apply(
         | Command::ReplaceClipMedia { .. }
         | Command::SetClipEnhanced { .. }
         | Command::MergeClips { .. }
+        | Command::AutotrimClip { .. }
         | Command::RemoveClips { .. }) => clips::apply(project, mint, command),
         command @ (Command::UpdateClip { .. }
         | Command::SetClipSpeed { .. }

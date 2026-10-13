@@ -74,7 +74,17 @@ and continue. User handles all git commands themselves — deliverables are
      sandbox: 223 passed (221 + 2), clippy/fmt clean. Rows carry
      section (source clock) + timeline_start/end + keep (default:
      everything except silence). >>> USER: apply, expect "223 passed". <<<
-   - 4b-2 NEXT (app crate, NOT compilable in sandbox — user must run
+   - 4b-2 DELIVERED 2026-10-13 as `phase-4b2-sections-panel.zip`:
+     new panes/sections.rs + ui/dialogs/sections.slint, tray button,
+     wiring in panes/mod.rs, studio.rs, lib.rs, app/editor/seat/
+     timeline-pane/tray .slint, en.json keys (sections.*, tray.sections).
+     Panel: opens on selected/first sounding clip, runs
+     silence::detect on worker (spawn_in_project), shows sectionlist
+     rows with keep switches + "Keeping X / Y". NO Apply yet (that is
+     Phase 5). NOT compiled in sandbox (app crate); Rust rustfmt-parsed;
+     concat-project still 223 green. >>> USER: cargo check -p concat,
+     paste first `error` block verbatim if any. <<<
+   - (old scouting notes for 4b-2, kept for reference:) NEXT (app crate, NOT compilable in sandbox — user must run
      `cargo check -p concat` and paste red text verbatim):
      Slint sheet modelled on crates/concat/ui/dialogs/captions.slint
      (data structs are declared in .slint, e.g. CaptionsSheetData at
@@ -86,11 +96,24 @@ and continue. User handles all git commands themselves — deliverables are
      worker via spawn_in_project/on_ui_in_project, build rows with
      sectionlist::clip_sections, Apply (Phase 5) uses kept_ranges.
      i18n strings go wherever captions.* keys live (check i18n.rs).
-4. Then Phase 5 Autotrim: kept_ranges -> actual cuts. Open design point
-   for that session: split clip at kept-range boundaries + RemoveClips
-   ripple in one Batch (captions follow via Phase 2), OR keep-ranges
-   export. Then word-level/karaoke: captionmap group_words + whisper
-   token timestamps (concat-speech Segment/whisper).
+4. Phase 5 — Autotrim: DELIVERED 2026-10-13 as `phase-5-autotrim.zip`.
+   Design chosen (better than the split+delete Batch the old note
+   imagined): a NEW command `Command::AutotrimClip { clip_id, kept }`
+   in concat-project (mod.rs + clips.rs), implemented as a rebuild —
+   clip/captions/detached-sound become their kept pieces packed
+   together, first piece keeps the id, later clips shift left, one
+   undo step; keep-all/keep-nothing are no-ops. Verified in sandbox:
+   225 passed (223 + 2 autotrim tests), clippy/fmt clean. Panel Apply
+   button wired (panes/sections.rs Apply, sections.slint, app.slint,
+   lib.rs, en.json). App side NOT compiled in sandbox as usual.
+   >>> USER: expect "225 passed", then cargo check -p concat. <<<
+5. NEXT Phase 6 — word-level captions / karaoke: whisper token
+   timestamps (concat-speech transcribe Segment - check what timing it
+   carries) into caption data, split a cut caption's WORDS with
+   captionmap::remap/clean_words (not just its span - the known limit
+   Phase 5 states), then karaoke highlight in the stage/text rendering.
+   Scout first: concat-speech Segment fields, model::TextStyle and
+   concat-text title painting for per-word highlight feasibility.
 
 ## Rules established with the user
 - Deliverable = one .zip per phase, paths mirroring repo root, plus a

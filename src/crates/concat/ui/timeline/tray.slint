@@ -202,6 +202,7 @@ export component TimelineTray inherits Rectangle {
     callback merge();
     callback delete-selected();
     callback captions();
+    callback sections();
     callback speak();
     callback record-voiceover();
     /// Add a lane: on top of the stack, or with `bottom` under it.
@@ -375,6 +376,12 @@ export component TimelineTray inherits Rectangle {
             label: I18n.t("tray.generateCaptions");
             icon-size: 16px;
             clicked => { root.captions(); }
+        }
+        TrayButton {
+            glyph: Glyph.rows;
+            label: I18n.t("tray.sections");
+            icon-size: 16px;
+            clicked => { root.sections(); }
         }
         TrayButton {
             glyph: Glyph.volume;

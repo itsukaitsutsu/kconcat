@@ -27,6 +27,7 @@ import { ProjectDialog, ProjectSheetData } from "dialogs/project.slint";
 import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
+import { SectionRowData, SectionsDialog, SectionsSheetData } from "dialogs/sections.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
@@ -62,7 +63,7 @@ export {
     SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData,
+    CaptionsSheetData, SpeechSheetData, SectionRowData, SectionsSheetData,
 }
 
 export component App inherits Window {
@@ -294,6 +295,11 @@ export component App inherits Window {
     callback captions-size-changed(index: int);
     callback captions-begin();
     callback captions-cancel();
+
+    in property <SectionsSheetData> sections;
+    callback sections-closed();
+    callback sections-row-toggled(index: int);
+    callback sections-apply();
 
     in property <SpeechSheetData> speech;
     in property <[string]> speech-models;
@@ -836,6 +842,18 @@ export component App inherits Window {
         size-changed(index) => { root.captions-size-changed(index); }
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
+    }
+
+    SectionsDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        data: root.sections;
+
+        closed => { root.sections-closed(); }
+        row-toggled(index) => { root.sections-row-toggled(index); }
+        apply => { root.sections-apply(); }
     }
 
     SpeechDialog {

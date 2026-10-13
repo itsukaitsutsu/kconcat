@@ -901,6 +901,7 @@ pub struct Studio {
     pub drop: Option<DropPlan>,
     pub project_sheet: crate::panes::project::ProjectPane,
     pub captions: crate::panes::captions::CaptionsPane,
+    pub sections: crate::panes::sections::SectionsPane,
     pub speech: crate::panes::speech::SpeechPane,
     /// A file from the library lent the monitor and the speakers; see
     /// `crate::source`.
@@ -2056,6 +2057,7 @@ impl Studio {
             drop: None,
             project_sheet: crate::panes::project::ProjectPane::default(),
             captions: crate::panes::captions::CaptionsPane::default(),
+            sections: crate::panes::sections::SectionsPane::default(),
             speech: crate::panes::speech::SpeechPane::default(),
             source: None,
             meters: crate::meters::MeterFeed::default(),
@@ -7253,6 +7255,7 @@ impl Studio {
         self.proxied.clear();
         self.captions.running = false;
         self.captions.progress = 0.0;
+        self.sections.running = false;
         self.speech.running = false;
         self.speech.progress = 0.0;
         self.source = None;
@@ -7332,6 +7335,11 @@ impl Studio {
                 let mut pane = std::mem::take(&mut self.captions);
                 pane.update(msg, self);
                 self.captions = pane;
+            }
+            crate::panes::Msg::Sections(msg) => {
+                let mut pane = std::mem::take(&mut self.sections);
+                pane.update(msg, self);
+                self.sections = pane;
             }
             crate::panes::Msg::Speech(msg) => {
                 let mut pane = std::mem::take(&mut self.speech);
@@ -9467,6 +9475,7 @@ impl Studio {
                 .collect(),
         );
         app.set_captions(self.captions.data(self));
+        app.set_sections(self.sections.data(self));
         let voices = installed(&self.settings.voices);
         sync(
             &models.speech_models,

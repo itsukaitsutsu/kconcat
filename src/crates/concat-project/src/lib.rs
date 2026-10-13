@@ -3427,6 +3427,110 @@ mod tests {
     }
 
     #[test]
+    fn an_autotrim_rebuilds_the_clip_and_its_captions_from_the_kept_ranges() {
+        let (mut editor, media_id, clip_id) = fixture(); // clip is [0, 10)
+        let first_words = linked_caption(&mut editor, &clip_id, 1.0, 2.0); // [1, 3)
+        let later_words = linked_caption(&mut editor, &clip_id, 6.0, 2.0); // [6, 8)
+        let track_id = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("clip")
+            .track_id
+            .clone();
+        let later = lane(&mut editor, &media_id, &track_id, &[20.0]); // [20, 30)
+
+        // Keep [0, 3) and [5, 8): 4 s come out, everything closes up.
+        let outcome = editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept: vec![(0.0, 3.0), (5.0, 8.0)],
+            })
+            .expect("autotrims");
+        assert!(outcome.applied);
+
+        let timeline = editor.project().active();
+        let pieces: Vec<(f64, f64, f64)> = timeline
+            .clips
+            .iter()
+            .filter(|clip| {
+                clip.media_id == timeline.clip(&clip_id).expect("head piece").media_id
+                    && clip.track_id == track_id
+                    && clip.start < 10.0
+            })
+            .map(|clip| (clip.start, clip.duration, clip.source_start))
+            .collect();
+        assert_eq!(pieces.len(), 2, "the clip is now its two kept pieces");
+        assert!(
+            timeline.clip(&clip_id).is_some(),
+            "the head keeps the clip's id"
+        );
+        assert_eq!(
+            range_of(&editor, &later[0]).0,
+            16.0,
+            "later clips close up by the 4 s removed"
+        );
+        assert_eq!(range_of(&editor, &first_words), (1.0, 3.0));
+        assert_eq!(
+            range_of(&editor, &later_words),
+            (4.0, 6.0),
+            "the second caption rides its piece"
+        );
+        assert_eq!(
+            editor.project().active().captions_of(&clip_id).len(),
+            2,
+            "both captions still link to the clip"
+        );
+
+        // One undo step restores clip, captions and the later clip.
+        assert!(editor.undo());
+        assert_eq!(range_of(&editor, &clip_id), (0.0, 10.0));
+        assert_eq!(range_of(&editor, &later_words), (6.0, 8.0));
+
+        // Keeping everything, and keeping nothing sane, are no-ops.
+        for kept in [vec![(0.0, 10.0)], vec![], vec![(50.0, 60.0)]] {
+            let outcome = editor
+                .apply(Command::AutotrimClip {
+                    clip_id: clip_id.clone(),
+                    kept,
+                })
+                .expect("applies");
+            assert!(!outcome.applied);
+        }
+    }
+
+    #[test]
+    fn an_autotrim_splits_a_caption_that_spans_a_cut() {
+        let (mut editor, _, clip_id) = fixture();
+        let words = linked_caption(&mut editor, &clip_id, 2.0, 5.0); // [2, 7)
+
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept: vec![(0.0, 3.0), (5.0, 8.0)],
+            })
+            .expect("autotrims");
+        let timeline = editor.project().active();
+        let pieces: Vec<(f64, f64)> = timeline
+            .captions_of(&clip_id)
+            .iter()
+            .map(|id| {
+                let clip = timeline.clip(id).expect("a caption piece");
+                (clip.start, clip.duration)
+            })
+            .collect();
+        assert_eq!(
+            pieces,
+            [(2.0, 1.0), (3.0, 2.0)],
+            "one caption, two pieces, packed"
+        );
+        assert!(
+            timeline.clip(&words).is_some(),
+            "the first piece keeps the caption's id"
+        );
+    }
+
+    #[test]
     fn a_caption_lands_above_the_highest_occupied_lane() {
         let mut editor = Editor::new();
         let media_id = editor

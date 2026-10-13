@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, Modal } from "../primitives/modal.slint";
+import { Switch } from "../inspector/controls.slint";
+
+// Sections (Phase 4b-2): what the selected clip is made of, as a list.
+//
+// The rows come from concat-project's sectionlist: caption, silence and
+// other pieces tiling the clip, each with where it sits on the timeline.
+// Silence starts unticked, everything else ticked; flipping a row's
+// switch is the reader saying "keep that pause" or "cut that speech".
+// The line at the bottom - "Keeping X / Y" - is recomputed from the
+// ticks on every publish. There is no Apply in this sheet yet: turning
+// ticks into cuts is the autotrim, and it gets its own step.
+
+export struct SectionRowData {
+    /// "Caption", "Silence" or "Other", in the interface's language.
+    kind: string,
+    /// The caption's words, or the kind again for a wordless row.
+    label: string,
+    /// Where the row sits on the timeline, "m:ss – m:ss".
+    range: string,
+    /// Ticked: this row survives the autotrim.
+    keep: bool,
+}
+
+export struct SectionsSheetData {
+    open: bool,
+    running: bool,
+    /// The clip being listed, by file and timeline start.
+    clip-label: string,
+    /// "2 captions · 3 silences · 1 other".
+    summary: string,
+    /// "Keeping 0:42 / 1:00".
+    kept-label: string,
+    /// Why the last run failed, when it did.
+    message: string,
+    /// The ticks can be applied as a trim.
+    can-apply: bool,
+    rows: [SectionRowData],
+}
+
+export component SectionsDialog inherits Modal {
+    in property <SectionsSheetData> data;
+
+    callback row-toggled(index: int);
+    callback apply();
+
+    open: root.data.open;
+    title: I18n.t("sections.sections");
+    glyph: Glyph.rows;
+    surface-width: 480px;
+    dismissable: !root.data.running;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        Text {
+            text: root.data.clip-label;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        if root.data.summary != "": Text {
+            text: root.data.summary;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.data.running: Text {
+            text: I18n.t("sections.listening");
+            color: Theme.fg;
+            font-size: Theme.fs;
+        }
+
+        if root.data.message != "": Text {
+            text: root.data.message;
+            color: Theme.danger;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        for row[index] in root.data.rows: HorizontalLayout {
+            spacing: 10px;
+
+            Text {
+                width: 72px;
+                text: row.kind;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: row.label;
+                color: row.keep ? Theme.fg : Theme.fg-dim;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                text: row.range;
+                color: Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Switch {
+                    checked: row.keep;
+                    toggled(on) => { root.row-toggled(index); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.kept-label;
+                color: Theme.fg;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+            }
+
+            Button {
+                label: I18n.t("sections.apply");
+                glyph: Glyph.razor;
+                primary: true;
+                enabled: root.data.can-apply;
+                clicked => { root.apply(); }
+            }
+
+            Button {
+                label: I18n.t("common.close");
+                glyph: Glyph.close;
+                ghost: true;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+}
