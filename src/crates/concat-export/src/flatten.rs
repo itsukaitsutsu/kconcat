@@ -322,6 +322,7 @@ mod tests {
                 style: None,
                 duration: None,
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds title");
         let flat = flatten_timeline(editor.project(), None);

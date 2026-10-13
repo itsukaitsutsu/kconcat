@@ -3457,6 +3457,7 @@ impl Studio {
             duration: Some(duration),
             offset_y,
             above: true,
+            caption_of: None,
         };
         match font {
             Some((family, path)) => self.apply(Command::Batch {
@@ -6869,6 +6870,10 @@ impl Studio {
                     style: source.text.clone(),
                     duration: Some(source.duration),
                     offset_y: Some(source.offset_y),
+                    // A copy of a caption is still that clip's caption:
+                    // it sits over the same voice, so it keeps the link
+                    // and will follow the clip alongside the original.
+                    caption_of: source.caption_of.clone(),
                 },
             );
         }

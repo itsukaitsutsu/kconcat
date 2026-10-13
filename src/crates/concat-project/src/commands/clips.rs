@@ -72,6 +72,7 @@ pub(super) fn apply(
             duration,
             offset_y,
             above,
+            caption_of,
         } => {
             let style = style.unwrap_or_default();
             let duration = duration
@@ -99,6 +100,11 @@ pub(super) fn apply(
                 duration,
             );
             clip.offset_y = offset_y.unwrap_or(0.0).clamp(-MAX_OFFSET, MAX_OFFSET);
+            // Phase 4a: the link the caption run asked for. Stored as
+            // given - the run names a clip on this timeline, and a link
+            // that later dangles (its clip deleted) is Phase 1's
+            // `captions_with_no_clip` case, not an error here.
+            clip.caption_of = caption_of;
             clip.text = Some(style);
             timeline.clips.push(Arc::new(clip));
             Ok(Outcome {
@@ -187,12 +193,29 @@ pub(super) fn apply(
             let Some(moves) = timeline.resolve_moves(&moves) else {
                 return Ok(Outcome::default());
             };
+            // Phase 2 (linked captions): remember where every moved clip
+            // started, so its captions can be shifted by the same amount
+            // below. A caption named in `moves` itself is excluded - it was
+            // dragged explicitly, and shifting it twice would double-move it.
+            let before: std::collections::HashMap<String, f64> = moves
+                .iter()
+                .filter_map(|wanted| {
+                    timeline
+                        .clip(&wanted.clip_id)
+                        .map(|clip| (clip.id.clone(), clip.start))
+                })
+                .collect();
+            let explicit: HashSet<String> =
+                moves.iter().map(|wanted| wanted.clip_id.clone()).collect();
             let mut applied = false;
             for wanted in moves {
                 if let Some(clip) = timeline.clip_mut(&wanted.clip_id) {
                     applied |= assign(&mut clip.start, wanted.start);
                     applied |= assign(&mut clip.track_id, wanted.track_id);
                 }
+            }
+            if applied {
+                applied |= follow_captions(timeline, &before, &HashSet::new(), &explicit);
             }
             Ok(Outcome {
                 created_id: None,
@@ -213,6 +236,16 @@ pub(super) fn apply(
             let track_id = clip.track_id.clone();
             let anchor = clip.start;
             let old_end = clip.start + clip.duration;
+            // Phase 2 (linked captions): the clip's range before the trim.
+            // Captions are re-windowed into the range after it below.
+            let old_range = (clip.start, old_end);
+            // Starts of everything, so a ripple's later clips can carry
+            // their captions with them (see `follow_captions`).
+            let starts_before: std::collections::HashMap<String, f64> = timeline
+                .clips
+                .iter()
+                .map(|clip| (clip.id.clone(), clip.start))
+                .collect();
             // A plain trim stops at the neighbours; a magnetic one moves
             // them instead, so it has the lane's whole length.
             let (floor, ceiling) = if ripple {
@@ -229,7 +262,11 @@ pub(super) fn apply(
             // What the trim did, and what the lane behind it does about
             // it when it is magnetic: `by` is how far the later clips
             // move, `behind` where "later" begins.
-            let (applied, by, behind) = match edge {
+            // `caption_shift` is how far this trim slides the *content*:
+            // 0 for an end trim and for a plain head trim (the remaining
+            // picture stays put), `-moved` for a ripple head trim (the
+            // lane closes, so everything left slides left with it).
+            let (applied, by, behind, caption_shift) = match edge {
                 TrimEdge::End => {
                     let duration = (clip.duration + delta)
                         .min(ceiling - clip.start)
@@ -239,7 +276,7 @@ pub(super) fn apply(
                     if applied {
                         clip.rewindow_keys(old, 0.0, duration);
                     }
-                    (applied, duration - old, old_end - JOIN_EPSILON)
+                    (applied, duration - old, old_end - JOIN_EPSILON, 0.0)
                 }
                 TrimEdge::Start => {
                     // Dragging the head moves the in-point too, so the pixels
@@ -272,7 +309,12 @@ pub(super) fn apply(
                         // lane behind it closes by what came off the head.
                         clip.start = anchor;
                     }
-                    (applied, -moved, anchor + JOIN_EPSILON)
+                    (
+                        applied,
+                        -moved,
+                        anchor + JOIN_EPSILON,
+                        if ripple { -moved } else { 0.0 },
+                    )
                 }
             };
             if ripple && applied && by != 0.0 {
@@ -281,6 +323,24 @@ pub(super) fn apply(
                 }) {
                     other.start = (other.start + by).max(0.0);
                 }
+            }
+            let mut applied = applied;
+            if applied {
+                // Phase 2: the trimmed clip's captions are re-windowed into
+                // its new range; captions of clips the ripple just moved
+                // follow those clips. The trimmed clip itself is excluded
+                // from the second step - the first already handled it.
+                if let Some(clip) = timeline.clip(&clip_id).cloned() {
+                    applied |= rewindow_captions(
+                        timeline,
+                        &clip_id,
+                        old_range,
+                        (clip.start, clip.start + clip.duration),
+                        caption_shift,
+                    );
+                }
+                let exclude: HashSet<String> = [clip_id.clone()].into_iter().collect();
+                applied |= follow_captions(timeline, &starts_before, &exclude, &exclude);
             }
             Ok(Outcome {
                 created_id: None,
@@ -334,6 +394,19 @@ pub(super) fn apply(
                 head.source_start = head_source;
                 head.fade_out = 0.0;
                 head.rewindow_keys(whole, 0.0, offset);
+                // Phase 2: a caption that starts at or after the cut now
+                // belongs to the tail piece - if the tail is later moved,
+                // the caption must go with the piece it sits on. A caption
+                // straddling the cut stays with the head.
+                if let Some(tail_id) = created.clone() {
+                    for caption_id in timeline.captions_of(&clip_id) {
+                        if let Some(caption) = timeline.clip_mut(&caption_id)
+                            && caption.start >= time - JOIN_EPSILON
+                        {
+                            caption.caption_of = Some(tail_id.clone());
+                        }
+                    }
+                }
                 timeline.clips.insert(index + 1, Arc::new(tail));
             }
             // A split always mints the tail, so "minted anything" and
@@ -611,6 +684,16 @@ pub(super) fn apply(
 
         Command::RemoveClips { clip_ids, ripple } => {
             let timeline = project.active_mut();
+            // Phase 2: starts before the delete, so captions of clips the
+            // ripple pulls left can follow them. The captions of a *removed*
+            // clip are NOT deleted or rewritten here - that contract is
+            // pinned by a Phase 1 test; their links simply dangle until the
+            // caller clears them via `captions_with_no_clip`.
+            let starts_before: std::collections::HashMap<String, f64> = timeline
+                .clips
+                .iter()
+                .map(|clip| (clip.id.clone(), clip.start))
+                .collect();
             let doomed: HashSet<&str> = clip_ids.iter().map(String::as_str).collect();
             // The spans going, per track, taken before they are gone: the
             // ripple closes exactly these.
@@ -633,6 +716,7 @@ pub(super) fn apply(
             let applied = timeline.clips.len() != clip_count;
             if ripple && applied {
                 close_gaps(timeline, &removed);
+                follow_captions(timeline, &starts_before, &HashSet::new(), &HashSet::new());
             }
             Ok(Outcome {
                 created_id: None,
@@ -646,6 +730,97 @@ pub(super) fn apply(
 
 /// How far apart two clips may sit and still count as touching, in seconds.
 const JOIN_EPSILON: f64 = 1e-6;
+
+/// Phase 2 (linked captions): shift every caption whose source clip moved.
+///
+/// `before` maps clip id -> start before the edit. For each clip that
+/// actually moved, its captions (see [`Timeline::captions_of`]) are shifted
+/// by the same delta - unless the caption itself already moved by that
+/// edit (it sits on a rippled track, say) or its id is in `exclude` (it was
+/// dragged explicitly, or already re-windowed by a trim). Returns whether
+/// any caption changed. One helper for move, ripple-trim and ripple-delete,
+/// because "the words stay over the picture they belong to" is one rule.
+fn follow_captions(
+    timeline: &mut Timeline,
+    before: &std::collections::HashMap<String, f64>,
+    skip_sources: &HashSet<String>,
+    skip_captions: &HashSet<String>,
+) -> bool {
+    // Collect first, mutate second: shifting while iterating `clips` would
+    // fight the borrow checker and double-count a caption whose source is
+    // itself a moved caption's neighbour.
+    let mut shifts: Vec<(String, f64)> = Vec::new();
+    for clip in timeline.clips.iter() {
+        let Some(was) = before.get(&clip.id) else {
+            continue;
+        };
+        let delta = clip.start - was;
+        if delta == 0.0 || skip_sources.contains(&clip.id) {
+            continue;
+        }
+        for caption_id in timeline.captions_of(&clip.id) {
+            if skip_captions.contains(&caption_id) {
+                continue;
+            }
+            // A caption the edit already moved (its own start differs from
+            // `before`) must not be shifted a second time.
+            let already_moved = timeline.clip(&caption_id).is_some_and(|caption| {
+                before
+                    .get(&caption_id)
+                    .is_some_and(|was| caption.start != *was)
+            });
+            if !already_moved {
+                shifts.push((caption_id, delta));
+            }
+        }
+    }
+    let mut applied = false;
+    for (caption_id, delta) in shifts {
+        if let Some(caption) = timeline.clip_mut(&caption_id) {
+            let start = (caption.start + delta).max(0.0);
+            applied |= assign(&mut caption.start, start);
+        }
+    }
+    applied
+}
+
+/// Phase 2 (linked captions): re-window one clip's captions after a trim.
+///
+/// Each caption is shifted by `shift` (how far the trim slid the content),
+/// then intersected with the clip's new range. A caption partly trimmed is
+/// clamped; a caption wholly trimmed away is removed - it captioned source
+/// that is no longer on the timeline, and leaving it behind would strand
+/// words over somebody else's picture. This runs inside the trim command,
+/// so the whole thing is still one undo step. Returns whether anything
+/// changed.
+fn rewindow_captions(
+    timeline: &mut Timeline,
+    clip_id: &str,
+    _old_range: (f64, f64),
+    new_range: (f64, f64),
+    shift: f64,
+) -> bool {
+    let mut applied = false;
+    let mut doomed: Vec<String> = Vec::new();
+    for caption_id in timeline.captions_of(clip_id) {
+        let Some(caption) = timeline.clip_mut(&caption_id) else {
+            continue;
+        };
+        let start = (caption.start + shift).max(new_range.0);
+        let end = (caption.start + caption.duration + shift).min(new_range.1);
+        if end - start < MIN_CLIP_DURATION {
+            doomed.push(caption_id);
+            continue;
+        }
+        applied |= assign(&mut caption.start, start);
+        applied |= assign(&mut caption.duration, end - start);
+    }
+    if !doomed.is_empty() {
+        timeline.clips.retain(|clip| !doomed.contains(&clip.id));
+        applied = true;
+    }
+    applied
+}
 
 /// The ripple of a delete: pulls every clip that sits after a removed
 /// span left by the length of the removed spans before it, on that clip's

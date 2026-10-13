@@ -63,12 +63,19 @@ pub enum CaptionsMsg {
 
 /// The clip a transcription is running over, as the finished segments
 /// need it: where it starts on the timeline and how fast it plays.
-#[derive(Clone, Copy, Debug)]
+// Clone but not Copy: Phase 4a gave it a `String`, and a clip id cannot
+// be copied bitwise. Nothing needed Copy - the subject is taken once.
+#[derive(Clone, Debug)]
 struct Subject {
     start: f64,
     speed: f64,
     /// The look chosen when the run began.
     look: (f64, f64),
+    /// Phase 4a: the clip whose voice this is. Kept from when the run
+    /// began (the sheet's selection could in principle change while the
+    /// worker runs), and written onto every caption it makes as
+    /// `caption_of`, so the words follow this clip's moves and trims.
+    clip_id: String,
 }
 
 /// The captions sheet's state.
@@ -173,6 +180,7 @@ impl CaptionsPane {
                                         ((segment.end - segment.start) / subject.speed).max(0.2),
                                         look,
                                         base.as_ref(),
+                                        Some(subject.clip_id.as_str()),
                                     )
                                 })
                             })
@@ -241,7 +249,9 @@ impl CaptionsPane {
         let commands: Vec<Command> = lines
             .into_iter()
             .map(|(text, seconds)| {
-                let command = caption_clip(text, at, seconds, look, base.as_ref());
+                // A script belongs to the timeline, not to one clip's
+                // voice, so its captions are unlinked titles.
+                let command = caption_clip(text, at, seconds, look, base.as_ref(), None);
                 at += seconds;
                 command
             })
@@ -283,6 +293,7 @@ impl CaptionsPane {
             start: clip.start,
             speed: clip.speed,
             look: self.look(),
+            clip_id: clip.id.clone(),
         });
         self.running = true;
         self.progress = 0.0;
@@ -386,6 +397,7 @@ fn caption_clip(
     duration: f64,
     look: (f64, f64),
     base: Option<&TextStyle>,
+    caption_of: Option<&str>,
 ) -> Command {
     let (offset_y, font_size) = look;
     // The kept look where there is one - family, weight, colours, stroke,
@@ -414,6 +426,7 @@ fn caption_clip(
         style: Some(style),
         duration: Some(duration),
         offset_y: Some(offset_y),
+        caption_of: caption_of.map(str::to_owned),
     }
 }
 

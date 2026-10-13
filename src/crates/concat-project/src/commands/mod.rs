@@ -321,6 +321,15 @@ pub enum Command {
         /// SetClipTransform. Lower thirds are made of this.
         #[serde(default)]
         offset_y: Option<f64>,
+        /// Phase 4a: on a caption made by transcribing a clip, the id of
+        /// that clip, stored on the new clip as [`crate::model::Clip::caption_of`].
+        /// Here for the same reason `duration` is: a caption run lands as
+        /// one batch, and a batch cannot set a field afterwards on a clip
+        /// whose id it cannot know yet. None for a title typed by hand.
+        /// `#[serde(default)]` keeps command JSON written before this
+        /// field existed parsing as an unlinked title.
+        #[serde(default)]
+        caption_of: Option<String>,
     },
     /// Places a shape: a clip with no media behind it that draws one
     /// figure over the picture, minting a "c" id. Lands the way a title

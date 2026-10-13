@@ -1577,6 +1577,7 @@ fn every_edit_still_exports() {
         }),
         duration: Some(2.0),
         offset_y: None,
+        caption_of: None,
     });
     let exported = studio.export("title");
     exported.expect_length(end);

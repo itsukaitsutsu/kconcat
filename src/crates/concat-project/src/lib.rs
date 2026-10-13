@@ -27,6 +27,7 @@ pub mod doc;
 pub mod editor;
 pub mod model;
 pub mod placement;
+pub mod sectionlist;
 pub mod sections;
 pub mod speed;
 pub mod subtitle;
@@ -2929,6 +2930,7 @@ mod tests {
                 }),
                 duration: Some(2.5),
                 offset_y: Some(0.38),
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -2950,6 +2952,7 @@ mod tests {
             Command::AddTextClip {
                 duration: None,
                 offset_y: None,
+                caption_of: None,
                 ..
             }
         ));
@@ -2979,6 +2982,7 @@ mod tests {
                 }),
                 duration: Some(2.0),
                 offset_y: Some(0.38),
+                caption_of: None,
             })
             .expect("adds the caption")
             .created_id
@@ -3078,6 +3082,7 @@ mod tests {
                         }),
                         duration: Some(2.0),
                         offset_y: Some(0.38),
+                        caption_of: None,
                     })
                     .expect("adds")
                     .created_id
@@ -3095,6 +3100,7 @@ mod tests {
                 }),
                 duration: Some(2.0),
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3152,6 +3158,274 @@ mod tests {
         );
     }
 
+    /// Phase 2 helper: add a caption over `clip_id` and link it to it,
+    /// the way a caption run will once the app wires Phase 1's field.
+    /// Returns the caption's id.
+    fn linked_caption(editor: &mut Editor, clip_id: &str, start: f64, duration: f64) -> String {
+        editor
+            .apply(Command::AddTextClip {
+                above: true,
+                track_id: None,
+                start,
+                style: Some(TextStyle {
+                    content: "Linked words".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(duration),
+                offset_y: Some(0.38),
+                // Phase 4a: the link is set at creation, the way the app's
+                // caption run now does it - no after-the-fact mutation.
+                caption_of: Some(clip_id.to_owned()),
+            })
+            .expect("adds the caption")
+            .created_id
+            .expect("id")
+    }
+
+    fn range_of(editor: &Editor, clip_id: &str) -> (f64, f64) {
+        let clip = editor
+            .project()
+            .active()
+            .clip(clip_id)
+            .expect("the clip is still there");
+        (clip.start, clip.start + clip.duration)
+    }
+
+    #[test]
+    fn captions_follow_their_clip_when_it_moves() {
+        let (mut editor, _, clip_id) = fixture();
+        let caption_id = linked_caption(&mut editor, &clip_id, 1.0, 2.0);
+        let track_id = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("clip")
+            .track_id
+            .clone();
+
+        editor
+            .apply(move_to(&clip_id, 5.0, &track_id))
+            .expect("moves");
+        assert_eq!(
+            range_of(&editor, &caption_id),
+            (6.0, 8.0),
+            "shifted by the same +5 s"
+        );
+
+        // One undo step undoes clip and caption together.
+        assert!(editor.undo(), "the move was one undo step");
+        assert_eq!(range_of(&editor, &caption_id), (1.0, 3.0));
+    }
+
+    #[test]
+    fn a_caption_dragged_explicitly_is_not_moved_twice() {
+        let (mut editor, _, clip_id) = fixture();
+        let caption_id = linked_caption(&mut editor, &clip_id, 1.0, 2.0);
+        let clip_track = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("clip")
+            .track_id
+            .clone();
+        let caption_track = editor
+            .project()
+            .active()
+            .clip(&caption_id)
+            .expect("caption")
+            .track_id
+            .clone();
+
+        editor
+            .apply(Command::Batch {
+                commands: vec![
+                    move_to(&clip_id, 5.0, &clip_track),
+                    move_to(&caption_id, 20.0, &caption_track),
+                ],
+            })
+            .expect("batch moves");
+        // The Batch applies two MoveClips; the caption's explicit move wins.
+        assert_eq!(range_of(&editor, &caption_id).0, 20.0);
+    }
+
+    #[test]
+    fn captions_are_clamped_and_dropped_by_a_trim() {
+        let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
+        let kept_id = linked_caption(&mut editor, &clip_id, 1.0, 2.0); // [1,3)
+        let cut_id = linked_caption(&mut editor, &clip_id, 8.0, 2.0); // [8,10)
+
+        // Trim the tail in by 3 s: clip becomes [0,7). [1,3) is untouched,
+        // [8,10) captioned source that is gone, so the caption goes too.
+        editor
+            .apply(Command::TrimClip {
+                clip_id: clip_id.clone(),
+                edge: TrimEdge::End,
+                delta: -3.0,
+                ripple: false,
+            })
+            .expect("trims");
+        assert_eq!(range_of(&editor, &kept_id), (1.0, 3.0));
+        assert!(
+            editor.project().active().clip(&cut_id).is_none(),
+            "trimmed-away caption removed"
+        );
+
+        // Trim the head by 2 s (plain): remaining picture stays put,
+        // the caption is clamped to the new head.
+        editor
+            .apply(Command::TrimClip {
+                clip_id: clip_id.clone(),
+                edge: TrimEdge::Start,
+                delta: 2.0,
+                ripple: false,
+            })
+            .expect("trims head");
+        assert_eq!(range_of(&editor, &kept_id), (2.0, 3.0));
+    }
+
+    #[test]
+    fn captions_follow_a_ripple_delete_and_relink_on_split() {
+        let (mut editor, media_id, clip_id) = fixture(); // clip A [0,10)
+        let track_id = editor.project().active().tracks[0].id.clone();
+        let later = lane(&mut editor, &media_id, &track_id, &[20.0]); // clip B [20,30)
+        let caption_b = linked_caption(&mut editor, &later[0], 21.0, 2.0);
+
+        // Ripple-delete A: B pulls left by 10 s, its caption with it.
+        editor
+            .apply(Command::RemoveClips {
+                clip_ids: vec![clip_id.clone()],
+                ripple: true,
+            })
+            .expect("ripple deletes");
+        assert_eq!(range_of(&editor, &later[0]).0, 10.0);
+        assert_eq!(range_of(&editor, &caption_b), (11.0, 13.0));
+
+        // Split B at 15: a caption starting after the cut belongs to the tail.
+        let caption_tail = linked_caption(&mut editor, &later[0], 16.0, 2.0);
+        editor
+            .apply(Command::SplitClips {
+                clip_ids: vec![later[0].clone()],
+                time: 15.0,
+            })
+            .expect("splits");
+        let caption = editor
+            .project()
+            .active()
+            .clip(&caption_tail)
+            .expect("caption");
+        assert_ne!(
+            caption.caption_of.as_deref(),
+            Some(later[0].as_str()),
+            "relinked to the tail piece"
+        );
+    }
+
+    #[test]
+    fn a_clips_sections_tile_it_and_tick_everything_but_silence() {
+        use crate::sectionlist::{clip_sections, kept_ranges};
+        use crate::sections::Kind;
+
+        let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
+        linked_caption(&mut editor, &clip_id, 1.0, 2.0); // words over [1, 3)
+
+        // Silences on the file clock: [3, 5) and one running off the end.
+        let view = clip_sections(
+            editor.project().active(),
+            &clip_id,
+            &[(3.0, 5.0), (8.0, 20.0)],
+            0.0,
+        )
+        .expect("the clip exists");
+        let kinds: Vec<Kind> = view.rows.iter().map(|row| row.section.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                Kind::Other,
+                Kind::Caption,
+                Kind::Silence,
+                Kind::Other,
+                Kind::Silence
+            ],
+            "caption, silence and other tile the clip with no gaps"
+        );
+        assert_eq!(view.rows[1].section.text, "Linked words");
+        assert_eq!(
+            (view.rows[1].timeline_start, view.rows[1].timeline_end),
+            (1.0, 3.0)
+        );
+        assert_eq!(view.summary.silences, 2);
+        assert_eq!(view.summary.silence_seconds, 4.0);
+
+        // The default ticks keep everything but the silences: 6 of 10 s.
+        let ticks: Vec<bool> = view.rows.iter().map(|row| row.keep).collect();
+        let kept = kept_ranges(&view.rows, &ticks);
+        let kept_seconds: f64 = kept.iter().map(|(start, end)| end - start).sum();
+        assert_eq!(kept_seconds, 6.0);
+        assert_eq!(kept, [(0.0, 3.0), (5.0, 8.0)]);
+
+        // Unticking the caption row removes exactly its range.
+        let mut ticks = ticks;
+        ticks[1] = false;
+        assert_eq!(kept_ranges(&view.rows, &ticks), [(0.0, 1.0), (5.0, 8.0)]);
+        // An unknown clip has no sections, not a panic.
+        assert!(clip_sections(editor.project().active(), "nope", &[], 0.0).is_none());
+    }
+
+    #[test]
+    fn sections_translate_between_file_timeline_and_speed_clocks() {
+        use crate::sectionlist::clip_sections;
+        use crate::sections::Kind;
+
+        let (mut editor, _, clip_id) = fixture();
+        linked_caption(&mut editor, &clip_id, 1.0, 2.0); // timeline [1, 3)
+        // The clip now plays at 2x from 2 s into its file: the caption
+        // covers source [2, 6) of the window, and a file-clock silence
+        // at [8, 12) is window [6, 10), played over timeline [3, 5).
+        {
+            let clip = editor
+                .project_mut()
+                .active_mut()
+                .clip_mut(&clip_id)
+                .expect("the clip exists");
+            clip.source_start = 2.0;
+            clip.speed = 2.0;
+        }
+        let view = clip_sections(editor.project().active(), &clip_id, &[(8.0, 12.0)], 0.0)
+            .expect("the clip exists");
+        let caption = view
+            .rows
+            .iter()
+            .find(|row| row.section.kind == Kind::Caption)
+            .expect("a caption row");
+        assert_eq!(
+            (caption.section.start, caption.section.end),
+            (2.0, 6.0),
+            "source clock"
+        );
+        assert_eq!(
+            (caption.timeline_start, caption.timeline_end),
+            (1.0, 3.0),
+            "timeline clock"
+        );
+        let silence = view
+            .rows
+            .iter()
+            .find(|row| row.section.kind == Kind::Silence)
+            .expect("a silence row");
+        assert_eq!((silence.timeline_start, silence.timeline_end), (3.0, 5.0));
+
+        // Half a second of pad keeps air at both ends of the silence:
+        // file [8, 12) is cut as [8.5, 11.5), over timeline [3.25, 4.75).
+        let view = clip_sections(editor.project().active(), &clip_id, &[(8.0, 12.0)], 0.5)
+            .expect("the clip exists");
+        let silence = view
+            .rows
+            .iter()
+            .find(|row| row.section.kind == Kind::Silence)
+            .expect("a silence row");
+        assert_eq!((silence.timeline_start, silence.timeline_end), (3.25, 4.75));
+    }
+
     #[test]
     fn a_caption_lands_above_the_highest_occupied_lane() {
         let mut editor = Editor::new();
@@ -3181,6 +3455,7 @@ mod tests {
                 }),
                 duration: Some(5.0),
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3216,6 +3491,7 @@ mod tests {
                 }),
                 duration: Some(5.0),
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3262,6 +3538,7 @@ mod tests {
                 }),
                 duration: Some(5.0),
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3316,6 +3593,7 @@ mod tests {
                 }),
                 duration: Some(5.0),
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3871,6 +4149,7 @@ mod tests {
                 }),
                 duration: None,
                 offset_y: None,
+                caption_of: None,
             })
             .expect("adds")
             .created_id
@@ -3939,6 +4218,7 @@ mod tests {
                 style: Some(TextStyle::default()),
                 duration: Some(2.0),
                 offset_y: Some(0.4),
+                caption_of: None,
             },
             Command::MoveClips {
                 moves: vec![ClipMove {
