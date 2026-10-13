@@ -448,7 +448,7 @@ fn caption_clip(
     // Phase 6c: a word-timed caption lights the word being spoken in an
     // accent. The default is this; the caption's own colour overrides it.
     if words.is_some() && style.highlight_color.is_empty() {
-        style.highlight_color = CAPTION_HIGHLIGHT.to_owned();
+        style.highlight_color = concat_project::model::DEFAULT_HIGHLIGHT.to_owned();
     }
     Command::AddTextClip {
         track_id: None,
@@ -465,10 +465,6 @@ fn caption_clip(
         words,
     }
 }
-
-/// The accent a word-timed caption lights its spoken word in, until the
-/// caption's own highlight colour is set (`TextStyle::highlight_color`).
-const CAPTION_HIGHLIGHT: &str = "#ffd21f";
 
 /// Longest a caption line gets before it is wrapped: about what two lines
 /// of broadcast subtitle hold, and what a reader takes in at a glance.

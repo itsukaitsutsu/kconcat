@@ -21,10 +21,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use concat_core::animate::{Ease, Key, Track};
 use concat_core::frame::Frame;
 use concat_core::shader::RevealMap;
 
-use concat_export::{ClipKind, ExportClip};
+use concat_export::{ClipKind, ExportClip, ExportKey};
 use concat_project::captionmap::{Word, layout_words_of, locate_words};
 use concat_project::model::{
     ClipKind as ModelClipKind, Project, ShapeKind, ShapeStyle, TextAlign, TextStyle,
@@ -349,10 +350,10 @@ impl Titles {
     /// Each overlay copies the caption's clip, so its place, opacity and
     /// track are the caption's. What does not carry over is what is timed
     /// against the clip's own window: fades, a transition into the clip, and
-    /// the reveal map, none of which belongs to a word's moment. A caption
-    /// with keyframed animation gets no highlight yet: the keys are read
-    /// against the clip's window, which an overlay does not share, so the
-    /// overlay would move out of step with the caption it lights.
+    /// the reveal map, none of which belongs to a word's moment. Keyframed
+    /// animation is carried over as the caption's own motion on the word's
+    /// window - see [`window_animation`] - so the overlay moves with the
+    /// caption it lights.
     #[allow(clippy::too_many_arguments)]
     fn highlights(
         &self,
@@ -365,8 +366,8 @@ impl Titles {
         live: bool,
     ) -> Vec<TitleClip> {
         let base = &title.clip;
-        if !base.animation.is_empty() {
-            log::info!("title {}: animated, so no highlight", title.clip_id);
+        // No length, no moment to read the caption's motion against.
+        if base.duration.is_nan() || base.duration <= 0.0 {
             return Vec::new();
         }
         let content = style.content.as_str();
@@ -412,6 +413,13 @@ impl Titles {
             clip.transition = None;
             clip.transition_shapes.clear();
             clip.reveal_map = None;
+            // The caption's motion over this word, read on the word's own
+            // 0..=1, so the picture moves as the caption moves.
+            clip.animation = window_animation(
+                &base.animation,
+                (from - window_start) / base.duration,
+                (to - window_start) / base.duration,
+            );
             out.push(TitleClip {
                 clip_id: title.clip_id.clone(),
                 clip,
@@ -628,6 +636,49 @@ fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) ->
     // for a per-word reveal effect to read back.
     bytes.extend_from_slice(&4u32.to_le_bytes());
     crate::media::fnv1a(&bytes)
+}
+
+/// The caption's keyframes over one word's window, as keys on that window's
+/// own `0..=1`, for the word's overlay. `x0` and `x1` are the window's ends on
+/// the caption's own `0..=1`. The engine reads a clip's keys against its own
+/// window, so these are the same values at the same moments; see
+/// `concat_core::animate::Track::window` for how the window is cut.
+fn window_animation(keys: &[ExportKey], x0: f64, x1: f64) -> Vec<ExportKey> {
+    // The properties a key can move: the engine's own list (`animation_of`).
+    const PROPERTIES: [&str; 6] = [
+        "scale", "offsetX", "offsetY", "rotation", "opacity", "volume",
+    ];
+    // Points between the window's ends at which the caption's curve is read.
+    const SAMPLES: usize = 16;
+    let mut out = Vec::new();
+    for property in PROPERTIES {
+        let track = Track::new(
+            keys.iter()
+                .filter(|key| key.property == property)
+                .map(|key| Key {
+                    at: key.at,
+                    value: key.value,
+                    ease: Ease::new(key.ease[0], key.ease[1], key.ease[2], key.ease[3]),
+                })
+                .collect(),
+        );
+        if track.is_empty() {
+            continue;
+        }
+        out.extend(
+            track
+                .window(x0, x1, SAMPLES)
+                .keys()
+                .iter()
+                .map(|key| ExportKey {
+                    property: property.to_owned(),
+                    at: key.at,
+                    value: key.value,
+                    ease: [key.ease.x1, key.ease.y1, key.ease.x2, key.ease.y2],
+                }),
+        );
+    }
+    out
 }
 
 /// How many painted titles the directory keeps. Each is a frame-sized PNG,

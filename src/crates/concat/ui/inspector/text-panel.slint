@@ -357,6 +357,16 @@ export component TextPanel inherits VerticalLayout {
             changed(colour) => { root.set-colour(ClipTextField.color, colour); root.commit(); }
         }
 
+        // The karaoke accent: a caption's spoken word is painted in it while
+        // the voice says it. Only a caption has word timings, so only a
+        // caption shows the swatch.
+        if root.selected.highlightable: ColourField {
+            label: I18n.t("textPanel.highlight");
+            value: root.selected.highlight;
+            alpha: false;
+            changed(colour) => { root.set-colour(ClipTextField.highlight-color, colour); root.commit(); }
+        }
+
         Param {
             label: I18n.t("common.opacity");
             value <=> root.alpha;

@@ -186,6 +186,61 @@ impl Track {
         self.keys[self.keys.len() - 1].value
     }
 
+    /// The track as it reads on the window `[x0, x1]` of the clip, re-timed
+    /// so the window's own `0..=1` is what the track's keys are read against.
+    ///
+    /// Both ends are pinned to what the whole track is worth there, and the
+    /// keys inside the window keep their own values and eases. Between those
+    /// points `samples` evenly spaced points are added, each at the track's
+    /// exact value, so a stretch with no key in it - an eased ramp across a
+    /// short window, say - is followed by straight lines between close
+    /// samples rather than one straight line across the whole window.
+    ///
+    /// A window with no width is the single value at its start. An empty
+    /// track stays empty: the property is the clip's own.
+    pub fn window(&self, x0: f64, x1: f64, samples: usize) -> Track {
+        if self.is_empty() {
+            return Track::default();
+        }
+        let span = x1 - x0;
+        if span.is_nan() || span <= 0.0 {
+            return Track::new(vec![Key {
+                at: 0.0,
+                value: self.value_at(x0, 1.0),
+                ease: Ease::LINEAR,
+            }]);
+        }
+        let mut keys = vec![Key {
+            at: 0.0,
+            value: self.value_at(x0, 1.0),
+            ease: Ease::LINEAR,
+        }];
+        keys.extend(
+            self.keys
+                .iter()
+                .filter(|key| key.at > x0 && key.at < x1)
+                .map(|key| Key {
+                    at: (key.at - x0) / span,
+                    value: key.value,
+                    ease: key.ease,
+                }),
+        );
+        for step in 1..=samples {
+            let u = step as f64 / (samples + 1) as f64;
+            keys.push(Key {
+                at: u,
+                value: self.value_at(x0 + u * span, 1.0),
+                ease: Ease::LINEAR,
+            });
+        }
+        keys.push(Key {
+            at: 1.0,
+            value: self.value_at(x1, 1.0),
+            ease: Ease::LINEAR,
+        });
+        Track::new(keys)
+    }
+
     /// The same ride, with every eased segment replaced by `steps` straight
     /// ones through the same points.
     ///
@@ -397,5 +452,101 @@ mod tests {
             key(1.0, 1.0, Ease::LINEAR),
         ]);
         assert_eq!(straight.resample(12), straight);
+    }
+
+    /// A window of a straight ride is the same ride, re-timed: its ends are
+    /// the ride's values at the window's ends.
+    #[test]
+    fn a_window_of_a_straight_ride_is_the_same_ride_re_timed() {
+        let ride = Track::new(vec![
+            Key {
+                at: 0.0,
+                value: 0.0,
+                ease: Ease::LINEAR,
+            },
+            Key {
+                at: 1.0,
+                value: 1.0,
+                ease: Ease::LINEAR,
+            },
+        ]);
+        let window = ride.window(0.25, 0.75, 8);
+        assert!((window.value_at(0.0, 9.0) - 0.25).abs() < 1e-9);
+        assert!((window.value_at(0.5, 9.0) - 0.5).abs() < 1e-9);
+        assert!((window.value_at(1.0, 9.0) - 0.75).abs() < 1e-9);
+        // The whole clip is the identity.
+        let whole = ride.window(0.0, 1.0, 8);
+        for step in 0..=10 {
+            let x = f64::from(step) / 10.0;
+            assert!((whole.value_at(x, 9.0) - x).abs() < 1e-9);
+        }
+    }
+
+    /// A key inside the window stays where it was, and keeps its ease.
+    #[test]
+    fn a_key_inside_the_window_keeps_its_place_and_value() {
+        let track = Track::new(vec![
+            Key {
+                at: 0.0,
+                value: 0.0,
+                ease: Ease::LINEAR,
+            },
+            Key {
+                at: 0.5,
+                value: 1.0,
+                ease: Ease::LINEAR,
+            },
+            Key {
+                at: 1.0,
+                value: 0.0,
+                ease: Ease::LINEAR,
+            },
+        ]);
+        let window = track.window(0.25, 0.75, 4);
+        // 0.5 in the clip is 0.5 in the window, where it was.
+        assert!((window.value_at(0.5, 9.0) - 1.0).abs() < 1e-9);
+        assert!((window.value_at(0.0, 9.0) - 0.5).abs() < 1e-9);
+        assert!((window.value_at(1.0, 9.0) - 0.5).abs() < 1e-9);
+    }
+
+    /// An eased ramp across a short window is followed closely by the
+    /// samples, so the window reads the same curve the clip does.
+    #[test]
+    fn an_eased_ramp_is_followed_across_a_short_window() {
+        let track = Track::new(vec![
+            Key {
+                at: 0.0,
+                value: 0.0,
+                ease: Ease::LINEAR,
+            },
+            Key {
+                at: 1.0,
+                value: 1.0,
+                ease: Ease::IN_OUT,
+            },
+        ]);
+        let window = track.window(0.2, 0.4, 16);
+        for step in 0..=10 {
+            let u = f64::from(step) / 10.0;
+            let clip_x = 0.2 + u * 0.2;
+            let want = track.value_at(clip_x, 9.0);
+            let got = window.value_at(u, 9.0);
+            assert!((got - want).abs() < 0.005, "at {u}: {got} is not {want}");
+        }
+    }
+
+    /// Nothing to window: an empty track stays empty, and a window with no
+    /// width is one value.
+    #[test]
+    fn an_empty_track_and_a_window_of_no_width_are_plain() {
+        assert!(Track::default().window(0.1, 0.3, 4).is_empty());
+        let ride = Track::new(vec![Key {
+            at: 0.0,
+            value: 2.0,
+            ease: Ease::LINEAR,
+        }]);
+        let point = ride.window(0.5, 0.5, 4);
+        assert_eq!(point.keys().len(), 1);
+        assert!((point.value_at(0.0, 9.0) - 2.0).abs() < 1e-9);
     }
 }

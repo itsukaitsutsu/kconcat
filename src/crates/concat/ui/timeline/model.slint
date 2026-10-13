@@ -253,7 +253,7 @@ export global Keyframes {
 
 /// The same again for the properties that are text rather than numbers.
 export enum ClipTextField {
-    content, font-family, color, stroke-color, background,
+    content, font-family, color, stroke-color, background, highlight-color,
 }
 
 /// The selected clip, flattened for the inspector.
@@ -376,6 +376,12 @@ export struct SelectedClipData {
     stroke-hex: string,
     /// the stroke colour's alpha, 0..1, as its own dial
     stroke-opacity: float,
+    /// the karaoke accent the spoken word is painted in; the default when
+    /// the title has none of its own
+    highlight: color,
+    highlight-hex: string,
+    /// whether the title has word timings to light: only a caption does
+    highlightable: bool,
     shadow: bool,
     /// the background behind the words - the plate, to the painter; fully
     /// transparent means none

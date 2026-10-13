@@ -70,7 +70,8 @@ and continue. User handles all git commands themselves — deliverables are
    "232 passed" after 6b (227 after 6a) and "237 passed" after 6c.
    If it does not, fix that first - do not stack phases.
 2. Confirm Phase 4a `cargo check -p concat` result if the user ran it.
-2a. Confirm Phase 6c: `cargo test -p concat-text` expects "30 passed";
+2a. Confirm Phase 6c, 6c-2 (`phase-6c2-colour-control.zip`) and 6c-3
+   (`phase-6c3-animated-highlight.zip`, expects concat-core 53 passed): `cargo test -p concat-text` expects "30 passed";
    `cargo test -p concat-project` expects "237 passed"; then
    `cargo check -p concat-host` and `cargo check -p concat`. Do NOT treat
    6c as verified until the user reports these numbers.
@@ -163,11 +164,29 @@ and continue. User handles all git commands themselves — deliverables are
      >>> USER: cargo check -p concat-host, then -p concat; paste the first
          `error` verbatim. Then eyeball a voice caption for the yellow word.
          <<<
-   - 6c-2 NOT STARTED (decided, not in the zip): the highlight colour
-     control in the text inspector (swatch beside the text colour, via
-     ClipTextField like StrokeColor, plus en.json keys). App-crate only.
-     Known open items: live-monitor cost per word (measure first);
-     animated captions get no highlight.
+   - 6c-2 DELIVERED 2026-10-13 as `phase-6c2-colour-control.zip` (see
+     README-PHASE-6C2.txt). "Spoken word" swatch in the text inspector's
+     colour section, shown only for clips with word timings. Writes
+     ClipTextField::HighlightColor -> TextStyle.highlight_color. The
+     default yellow is concat-project model::DEFAULT_HIGHLIGHT.
+     Verified in sandbox: concat-project 237 passed, clippy clean, fmt
+     clean. NOT compiled: the concat app and its .slint files.
+     >>> USER: cargo check -p concat; paste the first `error` verbatim.
+         Then check the swatch by eye. <<<
+     Known open items: no clear-to-none for the colour; older captions
+     (no accent set) show yellow but do not light until a colour is
+     picked; live-monitor cost per word (measure first).
+   - 6c-3 DELIVERED 2026-10-13 as `phase-6c3-animated-highlight.zip` (see
+     README-PHASE-6C3.txt). Highlights now follow keyframed captions:
+     concat-core `Track::window` re-times the caption's keys onto each
+     word's window; concat-host titles.rs `window_animation` applies it to
+     each overlay. The old "animated -> no highlight" skip is gone.
+     Verified in sandbox: concat-core 53 passed (4 new), concat-project
+     237 passed, clippy -D warnings clean, rustfmt clean. NOT compiled:
+     concat-host (titles.rs).
+     >>> USER: cargo test -p concat-core (53), cargo check -p concat-host;
+         paste the first `error` verbatim. Then check a moving caption by
+         eye. <<<
 6. Phase 7 LAST: full build+smoke with a real video, docs
    (README/ARCHITECTURE), optional upstream-tidy commits. After Phase
    7 the original VTS feature list is complete: linked captions,

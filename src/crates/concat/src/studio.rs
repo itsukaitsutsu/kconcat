@@ -4840,6 +4840,7 @@ impl Studio {
                 ClipTextField::Color => text.color = hex_of(value),
                 ClipTextField::StrokeColor => text.stroke_color = hex_rgba(value),
                 ClipTextField::Background => text.background = hex_with_alpha(value),
+                ClipTextField::HighlightColor => text.highlight_color = hex_of(value),
                 _ => {}
             }
         }
@@ -8978,6 +8979,11 @@ impl Studio {
             .position(|family| family.eq_ignore_ascii_case(text.font_family.trim_matches('"')));
         let fill = colour_of(&text.color);
         let stroke = colour_of(&text.stroke_color);
+        let highlight = colour_of(if text.highlight_color.is_empty() {
+            concat_project::model::DEFAULT_HIGHLIGHT
+        } else {
+            text.highlight_color.as_str()
+        });
         let plate = colour_of(&text.background);
         let analysis = clip.cutout.as_ref().and_then(|cutout| {
             self.cutout_jobs
@@ -9056,6 +9062,9 @@ impl Studio {
             stroke,
             stroke_hex: hex_of(stroke).into(),
             stroke_opacity: f32::from(stroke.alpha()) / 255.0,
+            highlight,
+            highlight_hex: hex_of(highlight).into(),
+            highlightable: clip.words.is_some(),
             shadow: text.shadow,
             plate,
             plate_hex: hex_of(plate).into(),

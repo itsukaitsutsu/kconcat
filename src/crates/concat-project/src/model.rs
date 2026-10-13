@@ -965,6 +965,11 @@ impl Default for ShapeStyle {
     }
 }
 
+/// The accent a word-timed caption lights its spoken word in when it is made,
+/// and the colour the inspector shows while a caption has none set yet. The
+/// caption's own `TextStyle::highlight_color` overrides it.
+pub const DEFAULT_HIGHLIGHT: &str = "#ffd21f";
+
 /// A title's styling. Sizes are fractions of the frame, so a title composed
 /// against 1080p lands correctly exported at 4K. A style arriving in a
 /// command needs only the fields it changes; the rest are the default's, so
