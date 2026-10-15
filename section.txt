@@ -1,0 +1,28 @@
+<div class="ws-body" id="tab-list">
+          <div class="list-card">
+      <div class="list-tools">
+        <button class="chip on" data-kind="caption">caption</button>
+        <button class="chip on" data-kind="silence">silence</button>
+        <button class="chip on" data-kind="other">other</button>
+        <label class="mini-label">min section
+          <input id="minDur" type="number" value="0.4" min="0" step="0.1" style="width:64px"> s
+        </label>
+        <input id="searchBox" type="search" placeholder="search caption text…">
+        <span class="spacer"></span>
+        <button class="mini" id="selVisible">select visible</button>
+        <button class="mini" id="selNone">clear</button>
+        <button class="mini" id="selRemove" title="Remove selected timeline items and close the gaps">remove selected</button>
+        <button class="mini" id="selInvert">invert</button>
+        <button class="mini" id="selAllSilence">all silence</button>
+        <button class="mini" id="selAllCaptions">all captions</button>
+      </div>
+      <div class="dim small selection-hint">V1 sections and caption cues from every lane (T1, T2, …) are listed here. The list follows the playhead and blue edges mark active items. Click a non-text cell to select and seek; tick boxes, Shift-click, or hold-drag to select several; click text to edit it.</div>
+      <div class="list-scroll">
+        <table id="secTable">
+          <thead><tr><th></th><th>track</th><th>start</th><th>end</th><th>dur</th><th>kind</th><th>text</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="listEmpty" class="empty">No timeline items yet — open a video or add captions.</div>
+      </div>
+          </div>
+          </div>

@@ -373,7 +373,7 @@ impl CaptionsPane {
                     if !clip_id.is_empty() {
                         studio.selection = vec![clip_id];
                     }
-                    studio.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Open));
+                    studio.open_sections_panel_or_sheet();
                 }
             }
             CaptionsMsg::Begin => {

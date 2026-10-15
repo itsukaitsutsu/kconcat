@@ -547,6 +547,7 @@ pub struct Models {
     pub tabs: Rc<VecModel<TimelineTabData>>,
     pub tracks: Rc<VecModel<TrackData>>,
     pub clips: Rc<VecModel<ClipData>>,
+    pub timeline_sections: Rc<VecModel<TimelineSectionData>>,
     pub stage: Rc<VecModel<StageItemData>>,
     pub guides: Rc<VecModel<StageGuideData>>,
     pub media: Rc<VecModel<MediaItemData>>,
@@ -630,6 +631,7 @@ impl Models {
             tabs: Rc::new(VecModel::default()),
             tracks: Rc::new(VecModel::default()),
             clips: Rc::new(VecModel::default()),
+            timeline_sections: Rc::new(VecModel::default()),
             stage: Rc::new(VecModel::default()),
             guides: Rc::new(VecModel::default()),
             media: Rc::new(VecModel::default()),
@@ -2450,6 +2452,11 @@ impl Studio {
             .map(|clip| clip.id.clone())
             .collect();
         self.selection.retain(|id| survivors.contains(id));
+        if !self.sections.is_empty() || self.sections.open {
+            let mut pane = std::mem::take(&mut self.sections);
+            pane.refresh_from_timeline(self);
+            self.sections = pane;
+        }
         self.schedule_autosave();
         self.sync_audio();
         self.request_media_art();
@@ -7793,6 +7800,44 @@ impl Studio {
         out
     }
 
+    /// Opens `Sections` as a dockable workspace panel on desktop (splitting a
+    /// seat if no `PaneKind::Sections` panel is currently docked), or as a
+    /// sheet on compact/phone layouts.
+    pub fn open_sections_panel_or_sheet(&mut self) {
+        if self.compact || crate::platform::phone() {
+            self.handle(crate::panes::Msg::Sections(
+                crate::panes::sections::SectionsMsg::Open,
+            ));
+            return;
+        }
+        let seats = self.dock_layout().seats;
+        if !seats.iter().any(|s| s.kind == PaneKind::Sections) {
+            let target = seats
+                .iter()
+                .find(|s| s.kind == PaneKind::Inspector)
+                .or_else(|| {
+                    seats
+                        .iter()
+                        .max_by(|a, b| (a.width * a.height).total_cmp(&(b.width * b.height)))
+                });
+            if let Some(seat) = target {
+                let across = seat.width >= crate::dock::SEAT_MIN_W * 1.6;
+                let down = seat.height >= crate::dock::SEAT_MIN_H * 1.6;
+                let side = if seat.width >= seat.height && (across || !down) {
+                    DockSide::Right
+                } else {
+                    DockSide::Bottom
+                };
+                if let Some(path) = self.dock.leaf_path(seat.index.max(0) as usize) {
+                    self.dock.split_leaf(&path, PaneKind::Sections, side);
+                }
+            }
+        }
+        self.handle(crate::panes::Msg::Sections(
+            crate::panes::sections::SectionsMsg::OpenPanel,
+        ));
+    }
+
     pub fn split_extent(&self, index: usize) -> Option<f32> {
         self.dock_layout().extents.get(index).copied()
     }
@@ -9592,7 +9637,17 @@ impl Studio {
         );
         app.set_captions(self.captions.data(self));
         app.set_caption_import(self.caption_import.data());
-        app.set_sections(self.sections.data(self));
+        let sections_data = self.sections.data(self);
+        app.global::<SectionsView>().set_data(sections_data.clone());
+        app.set_sections(sections_data);
+        sync(
+            &models.timeline_sections,
+            self.sections.timeline_sections(),
+        );
+        editor.set_section_filter_caption(self.sections.show_caption);
+        editor.set_section_filter_silence(self.sections.show_silence);
+        editor.set_section_filter_other(self.sections.show_other);
+        editor.set_can_remove_selected_sections(self.sections.can_remove_selected());
         let voices = installed(&self.settings.voices);
         sync(
             &models.speech_models,

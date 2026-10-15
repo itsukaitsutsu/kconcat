@@ -49,6 +49,8 @@ pub fn pane_glyph(slug: &str) -> &'static str {
         "meters" => "M5 21v-6 M12 21V3 M19 21V9",
         // lucide/diamond
         "keyframes" => "M12 2.5l9.5 9.5-9.5 9.5-9.5-9.5z",
+        // lucide/scissors / split
+        "sections" => "M12 3v18 M3 12h6 M15 12h6",
         // lucide/sliders-horizontal
         "inspector" => {
             "M10 5H3 M12 19H3 M14 3v4 M16 17v4 M21 12h-9 M21 19h-5 M21 5h-7 \

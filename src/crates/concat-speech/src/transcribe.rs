@@ -503,50 +503,47 @@ impl Transcriber {
             return Err("transcription cancelled".to_owned());
         }
 
-        // Compact long silent stretches when VAD is enabled (`cVad` in autocaption.txt)
-        // and keep the piecewise offset map so output timestamps map back to the
-        // original clip window clock accurately.
-        let (work_samples, vad_map) = if request.vad_filter {
-            compact_silence_vad(&samples)
-        } else {
-            (samples, Vec::new())
-        };
-        if work_samples.is_empty() {
+        if samples.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut progress = progress;
 
         // 1. If the user selected `faster-whisper` and Python `faster_whisper` is
-        //    available, run it and stream progress.
+        //    available, run it and stream progress (faster-whisper runs its own
+        //    timestamp-preserving Silero VAD when `request.vad_filter` is true).
         if request.engine == "faster-whisper"
             && let Some(py) = find_faster_whisper_python(dirs)
             && let Ok(mut segs) = transcribe_via_faster_whisper(
                 &py,
                 dirs,
                 request,
-                &work_samples,
+                &samples,
                 &cancel,
                 &mut progress,
             )
         {
-            remap_segments_from_vad(&mut segs, &vad_map);
+            if request.vad_filter {
+                refine_segments_with_vad(&samples, &mut segs);
+            }
             return Ok(segs);
         }
 
         // 2. If `whisper-cli` (e.g. VTS's Vulkan GPU `tools\whisper-cli.exe`) is
-        //    present, run it for hardware-accelerated Vulkan GPU / native speed.
+        //    present, run it on the true continuous audio clock for exact sync.
         if let Some(cli) = find_whisper_cli(dirs)
             && let Ok(mut segs) = transcribe_via_whisper_cli(
                 &cli,
                 &model_path,
                 request,
-                &work_samples,
+                &samples,
                 &cancel,
                 &mut progress,
             )
         {
-            remap_segments_from_vad(&mut segs, &vad_map);
+            if request.vad_filter {
+                refine_segments_with_vad(&samples, &mut segs);
+            }
             return Ok(segs);
         }
 
@@ -641,7 +638,7 @@ impl Transcriber {
         params.set_progress_callback_safe(progress);
 
         state
-            .full(params, &work_samples)
+            .full(params, &samples)
             .map_err(|error| format!("transcription failed: {error}"))?;
         if cancel.load(Ordering::Relaxed) {
             return Err("transcription cancelled".to_owned());
@@ -666,6 +663,11 @@ impl Transcriber {
                     let tokens: Vec<(Vec<u8>, f64, f64)> = (0..segment.n_tokens())
                         .filter_map(|index| segment.get_token(index))
                         .filter(|token| token.token_id() < end_of_text)
+                        .filter(|token| {
+                            token
+                                .to_str_lossy()
+                                .is_ok_and(|s| !s.starts_with("[_") && !s.starts_with("<|"))
+                        })
                         .filter_map(|token| {
                             let data = token.token_data();
                             Some((
@@ -686,7 +688,9 @@ impl Transcriber {
                 keep_segment(start, end, text, words)
             })
             .collect();
-        remap_segments_from_vad(&mut segs, &vad_map);
+        if request.vad_filter {
+            refine_segments_with_vad(&samples, &mut segs);
+        }
         Ok(segs)
     }
 
@@ -1058,109 +1062,55 @@ pub fn engine_status_note(dirs: &AppDirs, engine: &str) -> String {
     }
 }
 
-/// Compacts silent spans longer than 0.6s in 16 kHz mono PCM down to 0.2s padding,
-/// returning `(compacted_samples, piecewise_map_of_(compacted_start, compacted_end, orig_start))`.
-fn compact_silence_vad(samples: &[f32]) -> (Vec<f32>, Vec<(f64, f64, f64)>) {
-    const RATE: usize = 16_000;
-    const CHUNK: usize = 800; // 50 ms
-    const SILENCE_RMS: f32 = 0.0028; // ~ -51 dBFS
-    const MIN_SILENCE_CHUNKS: usize = 12; // 600 ms
-    const PAD_CHUNKS: usize = 2; // 100 ms each side
+/// Post-processes transcribed segments using 16 kHz mono PCM voice activity so
+/// silent hallucinations are dropped and segment start/end times do not bleed
+/// into surrounding silences while preserving the exact media clock.
+fn refine_segments_with_vad(samples: &[f32], segments: &mut Vec<Segment>) {
+    const RATE: f64 = 16_000.0;
+    const CHUNK: usize = 320; // 20 ms
+    const VOICE_RMS: f32 = 0.0040; // ~ -48 dBFS
+    const PAD_SEC: f64 = 0.08;
 
-    let num_chunks = samples.len().div_ceil(CHUNK);
-    if num_chunks <= MIN_SILENCE_CHUNKS * 2 {
-        return (samples.to_vec(), Vec::new());
-    }
-    let mut voiced = vec![false; num_chunks];
-    for (idx, chunk) in samples.chunks(CHUNK).enumerate() {
-        let sum_sq: f32 = chunk.iter().map(|&s| s * s).sum();
-        let rms = (sum_sq / chunk.len() as f32).sqrt();
-        voiced[idx] = rms >= SILENCE_RMS;
-    }
-    // Dilate voiced chunks by PAD_CHUNKS on both sides, and bridge short unvoiced gaps < MIN_SILENCE_CHUNKS.
-    let mut keep = vec![false; num_chunks];
-    for (i, &is_v) in voiced.iter().enumerate() {
-        if is_v {
-            let start = i.saturating_sub(PAD_CHUNKS);
-            let end = (i + PAD_CHUNKS + 1).min(num_chunks);
-            for k in &mut keep[start..end] {
-                *k = true;
-            }
-        }
-    }
-    // Bridge unkept runs shorter than MIN_SILENCE_CHUNKS.
-    let mut i = 0;
-    while i < num_chunks {
-        if !keep[i] {
-            let start = i;
-            while i < num_chunks && !keep[i] {
-                i += 1;
-            }
-            if i - start < MIN_SILENCE_CHUNKS {
-                for k in &mut keep[start..i] {
-                    *k = true;
-                }
-            }
-        } else {
-            i += 1;
-        }
-    }
-    if keep.iter().all(|&k| k) {
-        return (samples.to_vec(), Vec::new());
-    }
-    let mut out = Vec::with_capacity(samples.len());
-    let mut map: Vec<(f64, f64, f64)> = Vec::new();
-    let mut c = 0;
-    while c < num_chunks {
-        if keep[c] {
-            let start_chunk = c;
-            while c < num_chunks && keep[c] {
-                c += 1;
-            }
-            let sample_start = start_chunk * CHUNK;
-            let sample_end = (c * CHUNK).min(samples.len());
-            let comp_start = out.len() as f64 / RATE as f64;
-            out.extend_from_slice(&samples[sample_start..sample_end]);
-            let comp_end = out.len() as f64 / RATE as f64;
-            let orig_start = sample_start as f64 / RATE as f64;
-            map.push((comp_start, comp_end, orig_start));
-        } else {
-            c += 1;
-        }
-    }
-    (out, map)
-}
-
-fn remap_time_from_vad(t: f64, map: &[(f64, f64, f64)]) -> f64 {
-    if map.is_empty() {
-        return t;
-    }
-    for &(comp_start, comp_end, orig_start) in map {
-        if t >= comp_start && t <= comp_end + 1e-4 {
-            return orig_start + (t - comp_start).max(0.0);
-        }
-        if t < comp_start {
-            return orig_start;
-        }
-    }
-    if let Some(&(comp_start, comp_end, orig_start)) = map.last() {
-        return orig_start + (t - comp_start).min(comp_end - comp_start).max(0.0);
-    }
-    t
-}
-
-fn remap_segments_from_vad(segments: &mut [Segment], map: &[(f64, f64, f64)]) {
-    if map.is_empty() {
+    if samples.is_empty() || segments.is_empty() {
         return;
     }
-    for seg in segments {
-        seg.start = remap_time_from_vad(seg.start, map);
-        seg.end = remap_time_from_vad(seg.end, map).max(seg.start + 0.05);
-        for word in &mut seg.words {
-            word.start = remap_time_from_vad(word.start, map);
-            word.end = remap_time_from_vad(word.end, map).max(word.start + 0.02);
+    let total_sec = samples.len() as f64 / RATE;
+    segments.retain_mut(|seg| {
+        let s_idx = ((seg.start.max(0.0) * RATE) as usize).min(samples.len());
+        let e_idx = ((seg.end.min(total_sec) * RATE) as usize).min(samples.len());
+        if e_idx <= s_idx {
+            return false;
         }
-    }
+        let slice = &samples[s_idx..e_idx];
+        let mut first_voiced: Option<usize> = None;
+        let mut last_voiced: Option<usize> = None;
+        for (c_idx, chunk) in slice.chunks(CHUNK).enumerate() {
+            let sum_sq: f32 = chunk.iter().map(|&x| x * x).sum();
+            let rms = (sum_sq / chunk.len().max(1) as f32).sqrt();
+            if rms >= VOICE_RMS {
+                if first_voiced.is_none() {
+                    first_voiced = Some(c_idx);
+                }
+                last_voiced = Some(c_idx);
+            }
+        }
+        let (Some(first_c), Some(last_c)) = (first_voiced, last_voiced) else {
+            return false;
+        };
+        let voiced_start = seg.start + (first_c * CHUNK) as f64 / RATE;
+        let voiced_end = seg.start + ((last_c + 1) * CHUNK) as f64 / RATE;
+        if voiced_start - seg.start > 0.22 {
+            seg.start = (voiced_start - PAD_SEC).max(seg.start);
+        }
+        if seg.end - voiced_end > 0.25 {
+            seg.end = (voiced_end + PAD_SEC).min(seg.end).max(seg.start + 0.10);
+        }
+        for word in &mut seg.words {
+            word.start = word.start.clamp(seg.start, seg.end);
+            word.end = word.end.clamp(word.start + 0.02, seg.end.max(word.start + 0.02));
+        }
+        true
+    });
 }
 
 fn transcribe_via_whisper_cli(
@@ -1709,33 +1659,37 @@ mod tests {
     }
 
     #[test]
-    fn vad_compaction_removes_long_silence_and_remaps_segment_times() {
+    fn vad_refinement_drops_silent_hallucinations_and_trims_leading_trailing_silence() {
         let mut samples = Vec::new();
-        // 1.0 s voiced (0.0 .. 1.0)
+        // 0.5 s silence (0.0 .. 0.5)
+        samples.extend(std::iter::repeat_n(0.0f32, 8_000));
+        // 1.0 s voiced (0.5 .. 1.5)
         samples.extend(std::iter::repeat_n(0.15f32, 16_000));
-        // 2.0 s silence (1.0 .. 3.0)
-        samples.extend(std::iter::repeat_n(0.0f32, 32_000));
-        // 1.0 s voiced (3.0 .. 4.0)
-        samples.extend(std::iter::repeat_n(0.15f32, 16_000));
+        // 1.5 s silence (1.5 .. 3.0)
+        samples.extend(std::iter::repeat_n(0.0f32, 24_000));
 
-        let (compacted, map) = compact_silence_vad(&samples);
-        assert!(compacted.len() < samples.len());
-        assert_eq!(map.len(), 2);
-
-        let second_comp_start = map[1].0;
-        let mut segs = vec![Segment {
-            start: second_comp_start + 0.2,
-            end: second_comp_start + 0.7,
-            text: "After silence".to_owned(),
-            words: vec![HeardWord {
-                text: "After".to_owned(),
-                start: second_comp_start + 0.2,
-                end: second_comp_start + 0.5,
-            }],
-        }];
-        remap_segments_from_vad(&mut segs, &map);
-        assert!((segs[0].start - (map[1].2 + 0.2)).abs() < 1e-4);
-        assert!((segs[0].end - (map[1].2 + 0.7)).abs() < 1e-4);
+        let mut segs = vec![
+            Segment {
+                start: 0.0,
+                end: 2.0,
+                text: "Hello world".to_owned(),
+                words: vec![HeardWord {
+                    text: "Hello".to_owned(),
+                    start: 0.5,
+                    end: 1.5,
+                }],
+            },
+            Segment {
+                start: 2.0,
+                end: 2.9,
+                text: "Thank you for watching".to_owned(),
+                words: Vec::new(),
+            },
+        ];
+        refine_segments_with_vad(&samples, &mut segs);
+        assert_eq!(segs.len(), 1, "pure silence hallucination dropped");
+        assert!(segs[0].start >= 0.40 && segs[0].start <= 0.52);
+        assert!(segs[0].end >= 1.48 && segs[0].end <= 1.62);
     }
 }
 

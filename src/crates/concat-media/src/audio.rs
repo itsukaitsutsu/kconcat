@@ -788,6 +788,298 @@ pub fn mux(video: &Path, audio: &Path, output: &Path) -> Result<()> {
         .map_err(|error| ffi::fail("write trailer", output, error))
 }
 
+/// Lossless stream-copy export (`Same as copy` / `-c copy`) across one or more
+/// timeline segments `(source_path, source_start_seconds, duration_seconds)`.
+///
+/// First tries the `ffmpeg` CLI (`-f concat -safe 0 -c copy`, plus `-c:s mov_text`
+/// when `subtitle_srt` is provided) for fast keyframe-aligned container muxing,
+/// and falls back to in-process `libavformat` packet remuxing if the `ffmpeg`
+/// binary is not on `PATH`.
+pub fn remux_segments_stream_copy(
+    segments: &[(std::path::PathBuf, f64, f64)],
+    subtitle_srt: Option<&Path>,
+    output: &Path,
+) -> Result<()> {
+    if segments.is_empty() {
+        return Err(Error::Probe {
+            path: output.to_path_buf(),
+            detail: "no video/audio segments on timeline to stream-copy".to_owned(),
+        });
+    }
+
+    if try_ffmpeg_cli_stream_copy(segments, subtitle_srt, output).is_ok() {
+        return Ok(());
+    }
+
+    remux_segments_libavformat(segments, output)
+}
+
+fn try_ffmpeg_cli_stream_copy(
+    segments: &[(std::path::PathBuf, f64, f64)],
+    subtitle_srt: Option<&Path>,
+    output: &Path,
+) -> std::result::Result<(), String> {
+    let mut cmd = std::process::Command::new("ffmpeg");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.arg("-y").arg("-hide_banner").arg("-loglevel").arg("error");
+
+    let list_path = output.with_extension("concat_list.txt");
+    let use_concat_list = segments.len() > 1 || segments[0].1 > 0.005;
+    if use_concat_list {
+        let mut body = String::new();
+        for (path, start, duration) in segments {
+            let escaped = path.to_string_lossy().replace('\'', "'\\''");
+            body.push_str(&format!("file '{}'\n", escaped));
+            if *start > 0.0005 {
+                body.push_str(&format!("inpoint {:.6}\n", start.max(0.0)));
+            }
+            if *duration > 0.0005 {
+                body.push_str(&format!("outpoint {:.6}\n", (start + duration).max(0.0)));
+            }
+        }
+        std::fs::write(&list_path, body).map_err(|e| e.to_string())?;
+        cmd.arg("-f")
+            .arg("concat")
+            .arg("-safe")
+            .arg("0")
+            .arg("-i")
+            .arg(&list_path);
+    } else {
+        cmd.arg("-i").arg(&segments[0].0);
+        if segments[0].2 > 0.0005 {
+            cmd.arg("-t").arg(format!("{:.6}", segments[0].2));
+        }
+    }
+
+    let is_mp4 = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| {
+            e.eq_ignore_ascii_case("mp4")
+                || e.eq_ignore_ascii_case("mov")
+                || e.eq_ignore_ascii_case("m4v")
+        });
+
+    if let Some(srt) = subtitle_srt.filter(|p| p.exists() && is_mp4) {
+        cmd.arg("-i").arg(srt);
+        cmd.arg("-map")
+            .arg("0:v?")
+            .arg("-map")
+            .arg("0:a?")
+            .arg("-map")
+            .arg("1:0");
+        cmd.arg("-c:v")
+            .arg("copy")
+            .arg("-c:a")
+            .arg("copy")
+            .arg("-c:s")
+            .arg("mov_text");
+    } else {
+        cmd.arg("-c").arg("copy");
+    }
+    if is_mp4 {
+        cmd.arg("-movflags").arg("+faststart");
+    }
+    cmd.arg(output);
+
+    let status = cmd.status();
+    if use_concat_list {
+        let _ = std::fs::remove_file(&list_path);
+    }
+    match status {
+        Ok(st) if st.success() => Ok(()),
+        Ok(st) => Err(format!("ffmpeg exited with {st}")),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn remux_segments_libavformat(
+    segments: &[(std::path::PathBuf, f64, f64)],
+    output: &Path,
+) -> Result<()> {
+    ffi::init();
+    let first_path = &segments[0].0;
+    let first_in = ffmpeg::format::input(first_path)
+        .map_err(|error| ffi::fail("open input", first_path, error))?;
+    let mut out = ffmpeg::format::output(output)
+        .map_err(|error| ffi::fail("open output", output, error))?;
+
+    let v_in_idx = first_in
+        .streams()
+        .best(ffmpeg::media::Type::Video)
+        .map(|s| s.index());
+    let a_in_idx = first_in
+        .streams()
+        .best(ffmpeg::media::Type::Audio)
+        .map(|s| s.index());
+
+    let mut v_out_idx = None;
+    let mut a_out_idx = None;
+
+    if let Some(vi) = v_in_idx
+        && let Some(in_stream) = first_in.stream(vi)
+    {
+        let mut ost = out
+            .add_stream(encoder::find(ffmpeg::codec::Id::None))
+            .map_err(|error| ffi::fail("add video stream", output, error))?;
+        ost.set_parameters(in_stream.parameters());
+        ost.set_time_base(in_stream.time_base());
+        v_out_idx = Some(ost.index());
+    }
+    if let Some(ai) = a_in_idx
+        && let Some(in_stream) = first_in.stream(ai)
+    {
+        let mut ost = out
+            .add_stream(encoder::find(ffmpeg::codec::Id::None))
+            .map_err(|error| ffi::fail("add audio stream", output, error))?;
+        ost.set_parameters(in_stream.parameters());
+        ost.set_time_base(in_stream.time_base());
+        a_out_idx = Some(ost.index());
+    }
+    drop(first_in);
+
+    out.write_header_with(ffmpeg::dict! { "movflags" => "+faststart" })
+        .map_err(|error| ffi::fail("write header", output, error))?;
+
+    let v_out_tb = v_out_idx
+        .and_then(|i| out.stream(i))
+        .map(|s| s.time_base())
+        .unwrap_or(ffmpeg::Rational::new(1, 90_000));
+    let a_out_tb = a_out_idx
+        .and_then(|i| out.stream(i))
+        .map(|s| s.time_base())
+        .unwrap_or(ffmpeg::Rational::new(1, 48_000));
+
+    let mut v_offset_tb: i64 = 0;
+    let mut a_offset_tb: i64 = 0;
+    let mut last_v_dts: Option<i64> = None;
+    let mut last_a_dts: Option<i64> = None;
+
+    for (seg_path, seg_start, seg_dur) in segments {
+        let mut input = ffmpeg::format::input(seg_path)
+            .map_err(|error| ffi::fail("open segment", seg_path, error))?;
+        let seg_v_idx = input
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .map(|s| s.index());
+        let seg_a_idx = input
+            .streams()
+            .best(ffmpeg::media::Type::Audio)
+            .map(|s| s.index());
+        let v_in_tb = seg_v_idx
+            .and_then(|i| input.stream(i))
+            .map(|s| s.time_base())
+            .unwrap_or(v_out_tb);
+        let a_in_tb = seg_a_idx
+            .and_then(|i| input.stream(i))
+            .map(|s| s.time_base())
+            .unwrap_or(a_out_tb);
+
+        if *seg_start > 0.005 {
+            let target_us = (*seg_start * f64::from(ffmpeg::sys::AV_TIME_BASE)) as i64;
+            let _ = input.seek(target_us, ..=target_us);
+        }
+
+        let seg_end = *seg_start + *seg_dur;
+        let mut v_first_pts: Option<i64> = None;
+        let mut a_first_pts: Option<i64> = None;
+        let mut v_max_end: i64 = 0;
+        let mut a_max_end: i64 = 0;
+
+        loop {
+            let mut packet = ffmpeg::Packet::empty();
+            match packet.read(&mut input) {
+                Ok(()) => {}
+                Err(ffmpeg::Error::Eof) => break,
+                Err(error) => return Err(ffi::fail("read", seg_path, error)),
+            }
+            let s_idx = packet.stream();
+            if Some(s_idx) == seg_v_idx
+                && let Some(out_idx) = v_out_idx
+            {
+                let pts = packet.pts().or_else(|| packet.dts()).unwrap_or(0);
+                let sec = pts as f64 * f64::from(v_in_tb.numerator())
+                    / f64::from(v_in_tb.denominator().max(1));
+                if *seg_dur > 0.0 && sec > seg_end + 0.05 {
+                    continue;
+                }
+                if sec + 0.05 < *seg_start {
+                    continue;
+                }
+                packet.rescale_ts(v_in_tb, v_out_tb);
+                let p_dts = packet.dts().or_else(|| packet.pts()).unwrap_or(0);
+                let base = *v_first_pts.get_or_insert(p_dts);
+                let mut new_dts = p_dts - base + v_offset_tb;
+                if let Some(prev) = last_v_dts
+                    && new_dts <= prev
+                {
+                    new_dts = prev + 1;
+                }
+                let pts_delta = packet
+                    .pts()
+                    .map(|p| (p - p_dts).max(0))
+                    .unwrap_or(0);
+                let new_pts = new_dts + pts_delta;
+                packet.set_dts(Some(new_dts));
+                packet.set_pts(Some(new_pts));
+                packet.set_position(-1);
+                packet.set_stream(out_idx);
+                last_v_dts = Some(new_dts);
+                let dur = packet.duration().max(1);
+                v_max_end = v_max_end.max(new_pts + dur);
+                packet
+                    .write_interleaved(&mut out)
+                    .map_err(|error| ffi::fail("write video packet", output, error))?;
+            } else if Some(s_idx) == seg_a_idx
+                && let Some(out_idx) = a_out_idx
+            {
+                let pts = packet.pts().or_else(|| packet.dts()).unwrap_or(0);
+                let sec = pts as f64 * f64::from(a_in_tb.numerator())
+                    / f64::from(a_in_tb.denominator().max(1));
+                if *seg_dur > 0.0 && sec > seg_end + 0.05 {
+                    continue;
+                }
+                if sec + 0.05 < *seg_start {
+                    continue;
+                }
+                packet.rescale_ts(a_in_tb, a_out_tb);
+                let p_dts = packet.dts().or_else(|| packet.pts()).unwrap_or(0);
+                let base = *a_first_pts.get_or_insert(p_dts);
+                let mut new_dts = p_dts - base + a_offset_tb;
+                if let Some(prev) = last_a_dts
+                    && new_dts <= prev
+                {
+                    new_dts = prev + 1;
+                }
+                let pts_delta = packet
+                    .pts()
+                    .map(|p| (p - p_dts).max(0))
+                    .unwrap_or(0);
+                let new_pts = new_dts + pts_delta;
+                packet.set_dts(Some(new_dts));
+                packet.set_pts(Some(new_pts));
+                packet.set_position(-1);
+                packet.set_stream(out_idx);
+                last_a_dts = Some(new_dts);
+                let dur = packet.duration().max(1);
+                a_max_end = a_max_end.max(new_pts + dur);
+                packet
+                    .write_interleaved(&mut out)
+                    .map_err(|error| ffi::fail("write audio packet", output, error))?;
+            }
+        }
+        v_offset_tb = v_max_end.max(v_offset_tb);
+        a_offset_tb = a_max_end.max(a_offset_tb);
+    }
+
+    out.write_trailer()
+        .map_err(|error| ffi::fail("write trailer", output, error))
+}
+
 /// One input of the mux: its demuxer, which of its streams is wanted, and
 /// the packet of that stream waiting to be written.
 struct Feed<'a> {

@@ -723,17 +723,35 @@ pub(super) fn apply(
             let removed_total = clip.duration - kept_total;
 
             // Who is rebuilt through the ranges: the clip, the captions
-            // linked to it, and the sound detached from it. Everything
-            // else either sits before the edit or shifts behind it.
+            // overlapping its span (linked to it, unlinked, or linked to a
+            // sibling piece of the same media), and the sound detached from
+            // it. Everything else either sits before the edit or shifts
+            // behind it.
+            let linked_captions: HashSet<String> =
+                timeline.captions_of(&clip_id).into_iter().collect();
             let mut participants: Vec<String> = vec![clip_id.clone()];
-            participants.extend(timeline.captions_of(&clip_id));
-            participants.extend(
-                timeline
-                    .clips
-                    .iter()
-                    .filter(|other| other.detached_from.as_deref() == Some(clip_id.as_str()))
-                    .map(|other| other.id.clone()),
-            );
+            for other in &timeline.clips {
+                if other.id == clip_id {
+                    continue;
+                }
+                let overlaps_window = other.start < clip_end - JOIN_EPSILON
+                    && other.start + other.duration > clip_start + JOIN_EPSILON;
+                if !overlaps_window {
+                    continue;
+                }
+                let is_caption_participant = linked_captions.contains(&other.id)
+                    || (other.kind == ClipKind::Text
+                        && (other.caption_of.is_none()
+                            || other
+                                .caption_of
+                                .as_deref()
+                                .and_then(|cid| timeline.clip(cid))
+                                .is_some_and(|parent| parent.media_id == clip.media_id)));
+                let is_detached = other.detached_from.as_deref() == Some(clip_id.as_str());
+                if is_caption_participant || is_detached {
+                    participants.push(other.id.clone());
+                }
+            }
 
             // Where each kept range lands: the pieces pack back to back
             // from where the clip started.
@@ -754,6 +772,21 @@ pub(super) fn apply(
                 };
                 let original = (*timeline.clips[index]).clone();
                 let old_duration = original.duration;
+                let surviving_ranges = merged
+                    .iter()
+                    .filter(|&&(rs, re)| {
+                        re.min(original.start + original.duration) - rs.max(original.start)
+                            >= MIN_CLIP_DURATION
+                    })
+                    .count();
+                let any_range_has_words = original.words.as_ref().is_some_and(|words| {
+                    merged.iter().any(|&(rs, re)| {
+                        let s = rs.max(original.start);
+                        let e = re.min(original.start + original.duration);
+                        e - s >= MIN_CLIP_DURATION
+                            && words.iter().any(|w| w.end > s && w.start < e)
+                    })
+                });
                 // This participant's pieces: its span through each kept
                 // range, in order. A caption clipped by a range keeps
                 // its words on every piece it survives as - a text clip
@@ -799,10 +832,10 @@ pub(super) fn apply(
                     piece.rewindow_keys(old_duration, rel, rel + piece.duration);
                     // Phase 6: the piece keeps the words it covers,
                     // moved to where the piece landed, and - when the
-                    // caption has words - its text becomes exactly
-                    // those words, so a caption cut at a silence no
-                    // longer repeats its whole sentence on both sides
-                    // (the Phase 5 limit, lifted where words exist).
+                    // caption is split across multiple kept ranges - its
+                    // text becomes those words, so a caption cut at a
+                    // silence no longer repeats its whole sentence on both
+                    // sides.
                     if let Some(words) = &original.words {
                         let kept: Vec<crate::captionmap::Word> = words
                             .iter()
@@ -813,8 +846,14 @@ pub(super) fn apply(
                                 end: piece.start + (word.end.min(end) - start),
                             })
                             .collect();
+                        if surviving_ranges > 1 && any_range_has_words && kept.is_empty() {
+                            // A silent edge sliver of a word-timed caption that
+                            // spilled into an adjacent range with zero spoken words.
+                            continue;
+                        }
                         if !kept.is_empty() {
-                            if piece.kind == ClipKind::Text
+                            if surviving_ranges > 1
+                                && piece.kind == ClipKind::Text
                                 && let Some(style) = &mut piece.text
                             {
                                 style.content = kept
@@ -837,11 +876,17 @@ pub(super) fn apply(
             }
 
             // The timeline closes up: whatever began at or after the
-            // clip's old end moves left by what came out of it.
+            // clip's old end moves left by what came out of it (words included).
             for other in timeline.clips_where(|other| {
                 !participants.contains(&other.id) && other.start >= clip_end - JOIN_EPSILON
             }) {
                 other.start = (other.start - removed_total).max(0.0);
+                if let Some(words) = &mut other.words {
+                    for word in words.iter_mut() {
+                        word.start = (word.start - removed_total).max(0.0);
+                        word.end = (word.end - removed_total).max(0.0);
+                    }
+                }
             }
             Ok(Outcome {
                 created_id: None,

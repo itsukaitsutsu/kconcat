@@ -1,0 +1,19 @@
+<div class="card" data-project-card="detect">
+          <h3>1 · Detect sections</h3>
+      <label class="chk"><input type="checkbox" id="dSilence" checked=""> Detect silence (ffmpeg silencedetect)</label>
+      <div class="row"><label>Threshold (dB)</label><input id="dThresh" type="number" value="-45" step="1"></div>
+      <div class="row"><label>Min silence (ms)</label><input id="dMinSilence" type="number" value="800" step="50"></div>
+      <label class="chk"><input type="checkbox" id="dCues" checked=""> Use captions (.srt / .vtt)</label>
+      <div class="row"><label>Subtitle file</label>
+        <span class="grow"><input id="dSubPath" type="text" placeholder="path to .srt / .vtt (optional)"></span>
+      </div>
+      <div class="row"><label></label>
+        <span class="grow">
+          <label class="ghost filebtn sm">Upload .srt/.vtt<input id="dSubFile" type="file" accept=".srt,.vtt"></label>
+          <span id="subInfo" class="dim"></span>
+        </span>
+      </div>
+      <div class="row"><label>Min section (ms)</label><input id="dMinSection" type="number" value="120" step="10"></div>
+      <button id="detectBtn" class="primary block">Detect sections</button>
+      <div id="detectInfo" class="dim small"></div>
+        </div>

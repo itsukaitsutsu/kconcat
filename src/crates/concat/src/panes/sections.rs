@@ -23,7 +23,7 @@ use crate::host::spawn_in_project;
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::studio::{Studio, sync};
-use crate::ui::{SectionRowData, SectionsSheetData};
+use crate::ui::{SectionRowData, SectionsSheetData, TimelineSectionData};
 
 /// Seconds of air kept at each end of a detected silence, so a cut does
 /// not take the start off a word or the end off a sentence.
@@ -35,8 +35,10 @@ pub const DEFAULT_MIN_SILENCE_MS: f64 = 800.0;
 /// Everything that can happen to the Sections sheet.
 #[derive(Clone, Debug)]
 pub enum SectionsMsg {
-    /// The tray's Sections tool.
+    /// The tray's Sections tool (modal).
     Open,
+    /// Populate the dockable Sections workspace panel without opening the modal.
+    OpenPanel,
     Close,
     /// A row's keep switch flipped.
     RowToggled(i32),
@@ -92,6 +94,8 @@ pub struct SectionsPane {
     track_label: String,
     /// The rows, once measured; their `keep` is the reader's tick.
     rows: Vec<Row>,
+    /// The video/audio clip ID on the timeline that each row belongs to (for multi-clip tracks).
+    row_clip_ids: Vec<String>,
     /// Cached silence spans from the last FFmpeg pass so caption deletions can re-tile immediately.
     silences_cache: Vec<(f64, f64)>,
     /// Last source row index clicked in the table, used for Shift+click range selection.
@@ -112,9 +116,9 @@ pub struct SectionsPane {
     sub_info: String,
     search: String,
     min_duration: f64,
-    show_caption: bool,
-    show_silence: bool,
-    show_other: bool,
+    pub show_caption: bool,
+    pub show_silence: bool,
+    pub show_other: bool,
     rows_model: Rc<VecModel<SectionRowData>>,
 }
 
@@ -127,6 +131,7 @@ impl Default for SectionsPane {
             clip_label: String::new(),
             track_label: "V1".to_owned(),
             rows: Vec::new(),
+            row_clip_ids: Vec::new(),
             silences_cache: Vec::new(),
             last_clicked_row: None,
             drag_anchor_visible: None,
@@ -155,7 +160,8 @@ impl SectionsPane {
     /// studio's copy of this pane is a blank while this runs.
     pub fn update(&mut self, msg: SectionsMsg, studio: &mut Studio) {
         match msg {
-            SectionsMsg::Open => self.open_on(studio),
+            SectionsMsg::Open => self.open_on(studio, true),
+            SectionsMsg::OpenPanel => self.open_on(studio, false),
             SectionsMsg::Detect => self.detect(studio),
             SectionsMsg::DetectSilenceChanged(on) => {
                 self.detect_silence = on;
@@ -198,8 +204,13 @@ impl SectionsPane {
                     self.min_duration = f64::from(value).clamp(0.0, 3600.0);
                 }
             }
-            SectionsMsg::KindToggled(kind) => self.toggle_kind(kind),
+            SectionsMsg::KindToggled(kind) => {
+                self.toggle_kind(kind);
+                self.ensure_populated(studio);
+                self.sync_timeline_selection(studio);
+            }
             SectionsMsg::SelectVisible => {
+                self.ensure_populated(studio);
                 self.set_visible(false);
                 self.sync_timeline_selection(studio);
             }
@@ -208,14 +219,17 @@ impl SectionsPane {
                 self.sync_timeline_selection(studio);
             }
             SectionsMsg::SelectInvert => {
+                self.ensure_populated(studio);
                 self.select_invert();
                 self.sync_timeline_selection(studio);
             }
             SectionsMsg::SelectAllSilence => {
+                self.ensure_populated(studio);
                 self.select_all_silence();
                 self.sync_timeline_selection(studio);
             }
             SectionsMsg::SelectAllCaptions => {
+                self.ensure_populated(studio);
                 self.select_all_captions();
                 self.sync_timeline_selection(studio);
             }
@@ -224,31 +238,7 @@ impl SectionsPane {
             SectionsMsg::DeleteSelectedCaptions => self.delete_selected_captions(studio),
             SectionsMsg::Close => self.open = false,
             SectionsMsg::Apply => {
-                let (Some(clip_id), false) = (self.clip.clone(), self.rows.is_empty()) else {
-                    return;
-                };
-                let ticks: Vec<bool> = self.rows.iter().map(|row| row.keep).collect();
-                let kept = kept_ranges(&self.rows, &ticks);
-                if kept.is_empty() || self.rows.iter().all(|row| row.keep) {
-                    return;
-                }
-                let mut commands = Vec::new();
-                if self.use_captions
-                    && (!self.external_cues.is_empty()
-                        || studio.timeline().captions_of(&clip_id).is_empty())
-                {
-                    let caption_cmds = self.build_caption_commands(studio, &clip_id, false);
-                    if !caption_cmds.is_empty() {
-                        commands.push(Command::AddTrack { bottom: false });
-                        commands.extend(caption_cmds);
-                    }
-                }
-                commands.push(Command::AutotrimClip { clip_id, kept });
-                studio.apply(Command::Batch { commands });
-                self.external_cues.clear();
-                self.open = false;
-                self.rows.clear();
-                studio.notify(&t("sections.trimmed"), false);
+                self.apply_trim(studio);
             }
             SectionsMsg::RowToggled(index) => {
                 self.toggle_row(index);
@@ -320,34 +310,304 @@ impl SectionsPane {
     }
 
     fn populate_sections(&mut self, studio: &Studio, clip_id: &str, silences: &[(f64, f64)]) {
-        let linked_count = studio.timeline().captions_of(clip_id).len();
+        let Some(anchor) = studio.timeline().clip(clip_id) else {
+            self.rows.clear();
+            self.row_clip_ids.clear();
+            self.message = t("sections.clipGone");
+            return;
+        };
+        let track_id = anchor.track_id.clone();
+        let media_id = anchor.media_id.clone();
+        let mut track_clips: Vec<String> = studio
+            .timeline()
+            .clips
+            .iter()
+            .filter(|c| c.track_id == track_id && c.media_id == media_id)
+            .map(|c| c.id.clone())
+            .collect();
+        track_clips.sort_by(|a, b| {
+            let sa = studio.timeline().clip(a).map_or(0.0, |c| c.start);
+            let sb = studio.timeline().clip(b).map_or(0.0, |c| c.start);
+            sa.total_cmp(&sb)
+        });
+        if track_clips.is_empty() {
+            track_clips.push(clip_id.to_owned());
+        }
+
+        let total_captions = studio
+            .timeline()
+            .clips
+            .iter()
+            .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+            .count();
         if self.external_cues.is_empty() && self.subtitle_path.trim().is_empty() {
-            if linked_count > 0 {
-                self.sub_info = format!("{linked_count} {}", t("sections.captions"));
+            if total_captions > 0 {
+                self.sub_info = format!("{total_captions} {}", t("sections.captions"));
             } else {
                 self.sub_info.clear();
             }
         }
+
+        // Carve silences around active caption cues on the source clock so no
+        // detected silence span ever overlaps or chops into a spoken caption.
+        let carved_silences: Vec<(f64, f64)> = if self.use_captions {
+            let mut cue_spans: Vec<(f64, f64)> = if !self.external_cues.is_empty() {
+                self.external_cues
+                    .iter()
+                    .map(|c| (c.start, c.end))
+                    .collect()
+            } else {
+                let mut spans = Vec::new();
+                for cid in &track_clips {
+                    if let Some(c) = studio.timeline().clip(cid) {
+                        for cap in studio.timeline().clips.iter().filter(|cap| {
+                            cap.kind == concat_project::model::ClipKind::Text
+                                && cap.start < c.start + c.duration - 1e-3
+                                && cap.start + cap.duration > c.start + 1e-3
+                        }) {
+                            let rel_s = (cap.start - c.start).max(0.0) * c.speed;
+                            let rel_e = ((cap.start + cap.duration - c.start)
+                                .min(c.duration))
+                                * c.speed;
+                            if rel_e > rel_s {
+                                spans.push((c.source_start + rel_s, c.source_start + rel_e));
+                            }
+                        }
+                    }
+                }
+                spans
+            };
+            carve_silences_around_cues(silences, &mut cue_spans)
+        } else {
+            silences.to_vec()
+        };
+
         let ext = (!self.external_cues.is_empty()).then_some(self.external_cues.as_slice());
-        match clip_sections_with_cues(
-            studio.timeline(),
-            clip_id,
-            silences,
-            PAD_SECONDS,
-            self.use_captions,
-            self.min_section_ms,
-            ext,
-        ) {
-            Some(view) => {
-                self.rows = view.rows;
-                if self.rows.is_empty() {
-                    self.message = t("sections.nothingFound");
-                } else {
-                    self.message.clear();
+        let mut all_rows = Vec::new();
+        let mut all_clip_ids = Vec::new();
+        for cid in &track_clips {
+            if let Some(view) = clip_sections_with_cues(
+                studio.timeline(),
+                cid,
+                &carved_silences,
+                PAD_SECONDS,
+                self.use_captions,
+                self.min_section_ms,
+                ext,
+            ) {
+                for row in view.rows {
+                    all_rows.push(row);
+                    all_clip_ids.push(cid.clone());
                 }
             }
-            None => self.message = t("sections.clipGone"),
         }
+        self.rows = all_rows;
+        self.row_clip_ids = all_clip_ids;
+        if self.rows.is_empty() {
+            self.message = t("sections.nothingFound");
+        } else {
+            self.message.clear();
+        }
+    }
+
+    /// Ensures `self.rows` is populated from the current timeline and cached
+    /// silences (and kicks off background silence detection if needed) when the
+    /// user interacts with the synchronized Timeline Filter bar.
+    pub fn ensure_populated(&mut self, studio: &mut Studio) {
+        if self.clip.is_none() || self.clip.as_deref().is_some_and(|id| studio.timeline().clip(id).is_none()) {
+            let candidate = studio
+                .selection
+                .iter()
+                .find_map(|id| studio.timeline().clip(id))
+                .filter(|c| c.kind.is_visual() || studio.clip_has_sound(c))
+                .or_else(|| {
+                    studio
+                        .timeline()
+                        .clips
+                        .iter()
+                        .filter(|c| c.kind.is_visual() || studio.clip_has_sound(c))
+                        .min_by(|a, b| a.start.total_cmp(&b.start))
+                        .map(|v| &**v)
+                });
+            if let Some(clip) = candidate {
+                self.clip = Some(clip.id.clone());
+                self.clip_label = clip.name.clone();
+            }
+        }
+        if self.rows.is_empty()
+            && let Some(clip_id) = self.clip.clone()
+        {
+            let silences = self.silences_cache.clone();
+            self.populate_sections(studio, &clip_id, &silences);
+            if self.detect_silence && self.silences_cache.is_empty() && !self.running {
+                self.detect(studio);
+            }
+        }
+    }
+
+    /// Re-tiles `self.rows` against the current timeline after an edit or caption
+    /// generation/import so the Timeline Section Strip and Sections sheet stay
+    /// continuously in sync.
+    pub fn refresh_from_timeline(&mut self, studio: &Studio) {
+        let resolved_clip = self
+            .clip
+            .as_deref()
+            .filter(|id| studio.timeline().clip(id).is_some())
+            .map(str::to_owned)
+            .or_else(|| {
+                studio
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|c| c.kind.is_visual() || studio.clip_has_sound(c))
+                    .min_by(|a, b| a.start.total_cmp(&b.start))
+                    .map(|c| c.id.clone())
+            });
+        let Some(clip_id) = resolved_clip else {
+            self.rows.clear();
+            self.row_clip_ids.clear();
+            return;
+        };
+        self.clip = Some(clip_id.clone());
+        let silences = self.silences_cache.clone();
+        self.populate_sections(studio, &clip_id, &silences);
+    }
+
+    pub fn can_remove_selected(&self) -> bool {
+        !self.running
+            && !self.rows.is_empty()
+            && self.rows.iter().any(|row| row.keep)
+            && self.rows.iter().any(|row| !row.keep)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub fn timeline_sections(&self) -> Vec<TimelineSectionData> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| self.row_visible(row))
+            .map(|(index, row)| TimelineSectionData {
+                source_index: index as i32,
+                start: row.timeline_start as f32,
+                duration: row.section.duration().max(0.02) as f32,
+                kind_code: match row.section.kind {
+                    Kind::Caption => 0,
+                    Kind::Silence => 1,
+                    Kind::Other => 2,
+                },
+                selected: !row.keep,
+                label: if row.section.kind == Kind::Caption && !row.section.text.is_empty() {
+                    row.section.text.clone().into()
+                } else {
+                    kind_label(row.section.kind).into()
+                },
+            })
+            .collect()
+    }
+
+    fn apply_trim(&mut self, studio: &mut Studio) {
+        let (Some(clip_id), false) = (self.clip.clone(), self.rows.is_empty()) else {
+            return;
+        };
+        let all_ticks: Vec<bool> = self.rows.iter().map(|row| row.keep).collect();
+        if kept_ranges(&self.rows, &all_ticks).is_empty() || self.rows.iter().all(|row| row.keep) {
+            return;
+        }
+        let mut commands = Vec::new();
+        let has_timeline_captions = studio
+            .timeline()
+            .clips
+            .iter()
+            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+        if self.use_captions && (!self.external_cues.is_empty() || !has_timeline_captions) {
+            let caption_cmds = self.build_caption_commands(studio, &clip_id, false);
+            if !caption_cmds.is_empty() {
+                commands.push(Command::AddTrack { bottom: false });
+                commands.extend(caption_cmds);
+            }
+        }
+
+        // Group rows by their owning video/audio clip on the track and apply
+        // trims from right to left (descending clip start time) so earlier
+        // ripple shifts never invalidate later clip ranges.
+        let mut groups: Vec<(String, Vec<Row>)> = Vec::new();
+        for (idx, row) in self.rows.iter().enumerate() {
+            let owner = self
+                .row_clip_ids
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| clip_id.clone());
+            if let Some(last) = groups.last_mut().filter(|(id, _)| id == &owner) {
+                last.1.push(row.clone());
+            } else {
+                groups.push((owner, vec![row.clone()]));
+            }
+        }
+        groups.sort_by(|(id_a, rows_a), (id_b, rows_b)| {
+            let start_a = studio
+                .timeline()
+                .clip(id_a)
+                .map(|c| c.start)
+                .or_else(|| rows_a.first().map(|r| r.timeline_start))
+                .unwrap_or(0.0);
+            let start_b = studio
+                .timeline()
+                .clip(id_b)
+                .map(|c| c.start)
+                .or_else(|| rows_b.first().map(|r| r.timeline_start))
+                .unwrap_or(0.0);
+            start_b.total_cmp(&start_a)
+        });
+
+        for (owner_id, group_rows) in groups {
+            if group_rows.iter().all(|r| r.keep) {
+                continue;
+            }
+            let ticks: Vec<bool> = group_rows.iter().map(|r| r.keep).collect();
+            let kept = kept_ranges(&group_rows, &ticks);
+            if kept.is_empty() {
+                // Entire clip piece was checked for removal: remove any
+                // overlapping captions and ripple-delete the clip piece.
+                if let Some(c) = studio.timeline().clip(&owner_id) {
+                    let c_start = c.start;
+                    let c_end = c.start + c.duration;
+                    let overlapping_caps: Vec<String> = studio
+                        .timeline()
+                        .clips
+                        .iter()
+                        .filter(|other| {
+                            other.kind == concat_project::model::ClipKind::Text
+                                && other.start < c_end - 1e-3
+                                && other.start + other.duration > c_start + 1e-3
+                        })
+                        .map(|other| other.id.clone())
+                        .collect();
+                    if !overlapping_caps.is_empty() {
+                        commands.push(Command::RemoveClips {
+                            clip_ids: overlapping_caps,
+                            ripple: false,
+                        });
+                    }
+                }
+                commands.push(Command::RemoveClips {
+                    clip_ids: vec![owner_id],
+                    ripple: true,
+                });
+            } else {
+                commands.push(Command::AutotrimClip {
+                    clip_id: owner_id,
+                    kept,
+                });
+            }
+        }
+
+        studio.apply(Command::Batch { commands });
+        self.external_cues.clear();
+        self.refresh_from_timeline(studio);
+        studio.notify(&t("sections.trimmed"), false);
     }
 
     fn edit_row_text(&mut self, index: usize, text: String, studio: &mut Studio) {
@@ -369,15 +629,15 @@ impl SectionsPane {
             }
         }
 
-        let Some(clip_id) = self.clip.clone() else {
-            return;
-        };
         let matching_captions: Vec<(String, concat_project::model::TextStyle)> = studio
             .timeline()
-            .captions_of(&clip_id)
-            .into_iter()
-            .filter_map(|cap_id| studio.timeline().clip(&cap_id))
-            .filter(|cap| cap.start < tl_end - 1e-3 && cap.start + cap.duration > tl_start + 1e-3)
+            .clips
+            .iter()
+            .filter(|cap| {
+                cap.kind == concat_project::model::ClipKind::Text
+                    && cap.start < tl_end - 1e-3
+                    && cap.start + cap.duration > tl_start + 1e-3
+            })
             .filter_map(|cap| cap.text.clone().map(|style| (cap.id.clone(), style)))
             .collect();
 
@@ -478,12 +738,8 @@ impl SectionsPane {
         }
     }
 
-    /// Returns timeline caption clip IDs linked to `self.clip` that overlap any
-    /// checked (`!row.keep`) section row.
+    /// Returns timeline caption clip IDs overlapping any checked (`!row.keep`) section row.
     fn matching_selected_caption_ids(&self, studio: &Studio) -> Vec<String> {
-        let Some(clip_id) = self.clip.as_deref() else {
-            return Vec::new();
-        };
         let checked_ranges: Vec<(f64, f64)> = self
             .rows
             .iter()
@@ -495,17 +751,18 @@ impl SectionsPane {
         }
         studio
             .timeline()
-            .captions_of(clip_id)
-            .into_iter()
-            .filter(|cap_id| {
-                studio.timeline().clip(cap_id).is_some_and(|cap| {
+            .clips
+            .iter()
+            .filter(|cap| {
+                cap.kind == concat_project::model::ClipKind::Text && {
                     let c_start = cap.start;
                     let c_end = cap.start + cap.duration;
                     checked_ranges
                         .iter()
                         .any(|&(s, e)| c_start < e - 1e-3 && c_end > s + 1e-3)
-                })
+                }
             })
+            .map(|cap| cap.id.clone())
             .collect()
     }
 
@@ -745,7 +1002,7 @@ impl SectionsPane {
 
     /// The sheet opened on the selected clip with sound, else the first
     /// such clip, else an empty sheet saying there is nothing to list.
-    fn open_on(&mut self, studio: &mut Studio) {
+    fn open_on(&mut self, studio: &mut Studio, modal: bool) {
         let selected = studio.sole_selection().filter(|id| {
             studio
                 .clip(id)
@@ -762,7 +1019,7 @@ impl SectionsPane {
         });
         let Some(clip_id) = clip_id else {
             *self = SectionsPane {
-                open: true,
+                open: modal,
                 message: t("sections.noVoiceOnTimeline"),
                 detect_silence: self.detect_silence,
                 noise_db: self.noise_db,
@@ -782,7 +1039,7 @@ impl SectionsPane {
         };
         let Some(media) = studio.project().media_by_id(&clip.media_id).cloned() else {
             *self = SectionsPane {
-                open: true,
+                open: modal,
                 message: t("sections.clipHasNoFile"),
                 detect_silence: self.detect_silence,
                 noise_db: self.noise_db,
@@ -805,7 +1062,7 @@ impl SectionsPane {
             .map_or_else(|| "V1".to_owned(), |idx| format!("V{}", idx + 1));
         let clip_label = format!("{} · {}", media.name, clock(clip.start));
         *self = SectionsPane {
-            open: true,
+            open: modal,
             running: self.detect_silence,
             clip: Some(clip_id),
             clip_label,
@@ -859,9 +1116,9 @@ impl SectionsPane {
     }
 
     /// Run silence detection using the editable VTS-compatible controls.
-    fn detect(&mut self, studio: &Studio) {
+    fn detect(&mut self, studio: &mut Studio) {
         let Some(clip) = self.clip.as_ref().and_then(|id| studio.clip(id)).cloned() else {
-            self.message = t("sections.clipGone");
+            self.open_on(studio, self.open);
             return;
         };
         if !self.detect_silence {
@@ -998,6 +1255,49 @@ impl SectionsPane {
             rows: slint::ModelRc::from(Rc::clone(&self.rows_model)),
         }
     }
+}
+
+/// Carves silence intervals `(s_start, s_end)` around caption spans `(c_start, c_end)`
+/// so that no detected silence span ever overlaps or cuts inside an active caption cue.
+fn carve_silences_around_cues(
+    silences: &[(f64, f64)],
+    cues: &mut [(f64, f64)],
+) -> Vec<(f64, f64)> {
+    if cues.is_empty() || silences.is_empty() {
+        return silences.to_vec();
+    }
+    cues.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut carved = Vec::new();
+    for &(s_start, s_end) in silences {
+        if s_end <= s_start {
+            continue;
+        }
+        let mut fragments = vec![(s_start, s_end)];
+        for &(c_start, c_end) in cues.iter() {
+            if c_end <= c_start {
+                continue;
+            }
+            let mut next_fragments = Vec::new();
+            for (f_start, f_end) in fragments {
+                if c_end <= f_start || c_start >= f_end {
+                    next_fragments.push((f_start, f_end));
+                } else {
+                    if c_start > f_start + 0.02 {
+                        next_fragments.push((f_start, c_start));
+                    }
+                    if c_end < f_end - 0.02 {
+                        next_fragments.push((c_end, f_end));
+                    }
+                }
+            }
+            fragments = next_fragments;
+            if fragments.is_empty() {
+                break;
+            }
+        }
+        carved.extend(fragments);
+    }
+    carved
 }
 
 /// A section kind as the row's first word.
@@ -1187,5 +1487,11 @@ mod tests {
             pane.rows.iter().map(|r| r.keep).collect::<Vec<_>>(),
             vec![true, true, true]
         );
+
+        // Carve silences around active caption cues so no silence overlaps a caption.
+        let silences = vec![(0.0, 5.0)];
+        let mut cues = vec![(1.0, 2.0), (3.0, 4.0)];
+        let carved = super::carve_silences_around_cues(&silences, &mut cues);
+        assert_eq!(carved, vec![(0.0, 1.0), (2.0, 3.0), (4.0, 5.0)]);
     }
 }

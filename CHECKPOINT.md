@@ -1,33 +1,25 @@
-# CHECKPOINT — kconcat (VTS → Concat port) — updated 2026-10-13 (Asia/Bangkok), after 6c
+# CHECKPOINT — kconcat (VTS → Concat port) — updated 2026-10-15 (Asia/Bangkok), after Phase 8 (Dockable Sections Panel + Stream-Copy + Caption/Silence Trim Sync)
 
 ## How to resume in a NEW Arena session (user: read this)
 1. Start a new Arena Agent session.
 2. Paste this exact first message:
-   "Continue the kconcat project. Read CHECKPOINT.md and the newest
-   README-PHASE-*.txt in the zip I attach, verify the state, then do the
-   NEXT STEP listed in the checkpoint. Give me only a .zip of files to
-   replace, like before."
-3. Attach: (a) this CHECKPOINT.md, (b) the newest phase zip you received,
-   (c) if you already applied a zip, say "applied, tests passed/failed"
-   and paste any red error text verbatim.
-The assistant in the new session should clone
-https://github.com/itsukaitsutsu/kconcat , apply/rebuild the state below,
-and continue. User handles all git commands themselves — deliverables are
-.zip files whose paths mirror the repo, extracted over the repo root.
+   "Continue the kconcat project. Read CHECKPOINT.md and CHECKPOINT-VTS-INTEGRATION.md in the zip I attach, verify the state, and help me with the next step."
+3. Attach: (a) `CHECKPOINT.md` and `CHECKPOINT-VTS-INTEGRATION.md`, (b) `kconcat-sections-panel-and-fixes-overlay.zip` (or `kconcat-phase-8.zip`), and (c) tell the assistant whether `cargo check -p concat` / `cargo run -p concat` succeeded or paste any red compiler error text verbatim.
+The assistant in the new session should clone `https://github.com/itsukaitsutsu/kconcat`, extract the attached overlay `.zip` over `/home/user/kconcat`, verify the state, and continue. Deliverables are `.zip` files whose paths mirror the repo root (`src/...`), built with `TZ=Asia/Bangkok` so Windows `Expand-Archive` preserves file modification timestamps.
 
 ## Repo / environment facts
 - Repo: https://github.com/itsukaitsutsu/kconcat (Concat is under `src/`,
-  Rust workspace, pinned toolchain Rust 1.93.1 via src/rust-toolchain.toml)
-- User: newbie, Windows, VSCode; one-command-at-a-time style; stale
-  terminal is the #1 past failure (close VSCode fully and reopen).
-- Sandbox (Arena) facts, learned 2026-10-13: rustup 1.93.1 installs in
-  ~15 s (`curl https://sh.rustup.rs`, `--default-toolchain 1.93.1 -c rustfmt
-  -c clippy`); `cargo test -p concat-project` ~35 s cold on 2 cores / 2 GB.
-  No sudo, no FFmpeg dev libs, no cmake -> concat-media, concat-speech and
-  the concat app cannot compile there. Those are always the user's `cargo check`.
-- Verify cheap first: `cd C:\dev\Concat\src` then
-  `cargo test -p concat-project` (18 crates). The full app `concat` crate
-  is 724 crates / 30–90 min — build it only when a phase says so.
+  Rust workspace, pinned toolchain Rust 1.93.1 via `src/rust-toolchain.toml`).
+- User environment: Windows (`Asia/Bangkok`, `UTC+7`), `C:\dev\kconcat`, VSCode.
+  Always build `.zip` overlays with `TZ=Asia/Bangkok` (`touch` + `zip -X`) and
+  instruct the user to run `(Get-Item src\crates\concat\build.rs).LastWriteTime = Get-Date`
+  after `Expand-Archive` so Cargo always re-runs `slint-build`.
+- Sandbox (Arena) facts:
+  - `/tmp` is a 992 MB `tmpfs` and fills up during Rust builds; always set:
+    `RUSTUP_HOME=/home/user/.cache/rustup CARGO_HOME=/home/user/.cache/cargo CARGO_TARGET_DIR=/home/user/.cache/target TMPDIR=/home/user/.cache/tmp PATH="/home/user/.cache/cargo/bin:$PATH"`
+  - Pass `-j 2` and `CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0` when running `cargo test`.
+  - `concat-project` (242 tests), `concat-render` (91 tests), `concat-effects` (72 tests), `concat-core` (53 tests + 2 doctests), `concat-text` (30 tests), `slint-build` (`app.slint`), and `python3 scripts/locales.py --check` (`1,126` keys across 24 locales) all run and pass in the sandbox (`490 / 490` tests).
+  - Native FFmpeg/whisper crates (`concat-media`, `concat-speech`, `concat-host`, `concat`) require the user's Windows FFmpeg/Vulkan environment (`cargo check -p concat` / `cargo run -p concat`).
 
 ## Phase status
 - Phase 1 — link field: DONE, in user's repo (commit "update3").
@@ -205,9 +197,13 @@ and continue. User handles all git commands themselves — deliverables are
    word-level/karaoke (+ SRT/VTT modules already in from Tranche A).
    Estimate given to user: 3 phases/sessions after 6a, 2-4 part-time
    days, dominated by user's app builds (30-90 min each).
-7. Phase 8 (Stages A-E + Stages 1-4 + Multi-GPU Vulkan + Live Caption Styling Perf + Multi-Caption Track Isolation) DELIVERED 2026-10-15:
-   - `kconcat-multi-caption-fix.zip` / `kconcat-vts-gpu-and-perf-fix.zip`
-   - Adding new captions via Auto-caption (`Generate` -> `Add to timeline` / `+ Add as new caption track` / `Add & detect sections`), `From script`, `Import captions` (`.srt`/`.vtt`), or `Sections` now always spawns a dedicated new track at the top (`Command::AddTrack { bottom: false }` + `Some("__top__")`), preserves existing caption tracks without deleting or colliding with them, and nudges `offset_y` by `-0.12` in Concat's normalized `[-1.0, 1.0]` frame-height coordinate space.
+7. Phase 8 (Stages A-E + Stages 1-4 + Multi-GPU Vulkan + Live Caption Styling Perf + Multi-Caption Track Isolation + Stream-Copy Export + Caption/Silence Trim Sync + Timeline Section Filter + Dockable Sections Workspace Panel) DELIVERED 2026-10-15:
+   - `kconcat-sections-panel-and-fixes-overlay.zip` / `kconcat-vts-integration-overlay.zip` / `kconcat-phase-8.zip`
+   - **Multi-Caption Track Isolation**: Adding new captions via Auto-caption (`Generate` -> `Add to timeline` / `+ Add as new caption track` / `Add & detect sections`), `From script`, `Import captions` (`.srt`/`.vtt`), or `Sections` always spawns a dedicated new track at the top (`Command::AddTrack { bottom: false }` + `Some("__top__")`), preserves existing caption tracks without deleting or colliding with them, and nudges `offset_y` by `-0.12` in Concat's normalized `[-1.0, 1.0]` frame-height coordinate space.
+   - **Stream-Copy Export (`Same as copy`)**: Added `"Same as copy"` (`codec == 3`) in Export (`export.slint`, `export.rs`, `concat_media::audio::remux_segments_stream_copy`) for lossless stream-copy remuxing of single or multi-segment trimmed clips without re-encoding, plus automatic `.srt` subtitle sidecar output (`concat_project::subtitle::to_srt`).
+   - **Caption-to-Timeline Synchronization on Silence Trim (`Remove selected`)**: Post-transcription VAD boundary refinement (`refine_segments_with_vad`), multi-track/unlinked caption remapping in `Command::AutotrimClip` and `clip_sections_with_cues`, silence carving around active captions (`carve_silences_around_cues`), and reverse-order multi-clip autotrim in `SectionsPane`.
+   - **Synchronized Timeline Section Filter & Ruler Section Strip**: Added `Caption`, `Silence`, `Other` filter pills, `All silence`, and `Remove selected` directly on the Timeline Tray (`tray.slint`, `timeline-pane.slint`) and an interactive color-coded Section Strip on the Timeline Ruler (`lanes.slint`).
+   - **Dockable `Sections` Workspace Panel (`PaneKind::Sections`)**: Converted `Sections` into a first-class dockable workspace panel (`SectionsWorkspacePane` in `ui/dialogs/sections.slint`, `PaneKind.sections` in `ui/workspace/pane-switcher.slint` and `ui/workspace/seat.slint`, `SectionsView` global synced in `studio.rs` and wired in `lib.rs`, `SectionsMsg::OpenPanel` in `sections.rs`). Users can dock `Sections` alongside `Media`, `Preview`, `Inspector`, `Timeline`, `Keyframes`, and `Meters` via any pane's header switcher, the `+` Add Pane button, or the Timeline Tray's `Sections` button, keeping `Sections` open while editing in other panels simultaneously.
 
 ## Rules established with the user
 - Deliverable = one .zip per phase, paths mirroring repo root, plus a

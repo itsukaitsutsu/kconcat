@@ -393,11 +393,12 @@ component OutputSection inherits DialogSection {
         label: I18n.t("export.codec");
         Select {
             current: root.data.codec;
-            options: ["H.264", "HEVC", "AV1"];
+            options: ["H.264", "HEVC", "AV1", I18n.t("export.sameAsCopy")];
             details: [
                 root.data.h264-encodable ? I18n.t("export.playsEverywhere") : I18n.t("export.notOnThisDevice"),
                 root.data.hevc-encodable ? I18n.t("export.halfTheSize") : I18n.t("export.notOnThisDevice"),
                 root.data.av1-encodable ? I18n.t("export.smallest") : I18n.t("export.notOnThisDevice"),
+                I18n.t("export.streamCopyDetail"),
             ];
             changed(index) => { root.codec-changed(index); }
         }
@@ -407,10 +408,11 @@ component OutputSection inherits DialogSection {
         label: I18n.t("export.codec");
         Select {
             current: root.data.codec - 1;
-            options: ["HEVC", "AV1"];
+            options: ["HEVC", "AV1", I18n.t("export.sameAsCopy")];
             details: [
                 root.data.hevc-encodable ? I18n.t("export.halfTheSize") : I18n.t("export.notOnThisDevice"),
                 root.data.av1-encodable ? I18n.t("export.smallest") : I18n.t("export.notOnThisDevice"),
+                I18n.t("export.streamCopyDetail"),
             ];
             changed(index) => { root.codec-changed(index + 1); }
         }

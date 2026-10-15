@@ -6,7 +6,8 @@ import { Theme } from "../theme/theme.slint";
 import { Button, DialogRow, DialogSection, Field, Modal } from "../primitives/modal.slint";
 import { Check, Switch } from "../inspector/controls.slint";
 import { NumberField } from "../primitives/number-field.slint";
-import { PaneScroll } from "../workspace/pane.slint";
+import { Pane, PaneHeader, PaneScroll } from "../workspace/pane.slint";
+import { PaneKind, PaneSwitcher } from "../workspace/pane-switcher.slint";
 
 // Sections: what the tray's Sections tool opens.
 //
@@ -111,8 +112,8 @@ component KindChip inherits Rectangle {
     }
 }
 
-export component SectionsDialog inherits Modal {
-    in property <SectionsSheetData> data;
+export global SectionsView {
+    in-out property <SectionsSheetData> data;
 
     callback row-toggled(index: int);
     callback row-shift-select(index: int);
@@ -140,10 +141,39 @@ export component SectionsDialog inherits Modal {
     callback add-captions-new-track();
     callback delete-selected-captions();
     callback apply();
+}
 
-    open: root.data.open;
-    title: I18n.t("sections.sections");
-    surface-width: 740px;
+component SectionsBody inherits VerticalLayout {
+    in property <SectionsSheetData> data;
+    in property <bool> in-panel: false;
+
+    callback closed();
+    callback row-toggled(index: int);
+    callback row-shift-select(index: int);
+    callback row-drag-begin(index: int);
+    callback row-drag-over(visible-index: int);
+    callback row-seek(index: int);
+    callback row-text-edited(index: int, text: string);
+    callback detect();
+    callback detect-silence-changed(on: bool);
+    callback threshold-changed(value: float);
+    callback min-silence-changed(value: float);
+    callback min-section-changed(value: float);
+    callback use-captions-changed(on: bool);
+    callback subtitle-path-edited(path: string);
+    callback browse-subtitle();
+    callback search-changed(text: string);
+    callback min-duration-changed(value: float);
+    callback kind-toggled(kind: int);
+    callback select-visible();
+    callback select-none();
+    callback select-invert();
+    callback select-all-silence();
+    callback select-all-captions();
+    callback add-captions-to-timeline();
+    callback add-captions-new-track();
+    callback delete-selected-captions();
+    callback apply();
 
     DialogSection {
         first: true;
@@ -771,7 +801,7 @@ export component SectionsDialog inherits Modal {
 
         Rectangle { horizontal-stretch: 1; }
 
-        Button {
+        if !root.in-panel: Button {
             label: I18n.t("common.cancel");
             clicked => { root.closed(); }
         }
@@ -800,6 +830,132 @@ export component SectionsDialog inherits Modal {
             primary: true;
             enabled: root.data.can-apply;
             clicked => { root.apply(); }
+        }
+    }
+}
+
+export component SectionsDialog inherits Modal {
+    in property <SectionsSheetData> data;
+
+    callback row-toggled(index: int);
+    callback row-shift-select(index: int);
+    callback row-drag-begin(index: int);
+    callback row-drag-over(visible-index: int);
+    callback row-seek(index: int);
+    callback row-text-edited(index: int, text: string);
+    callback detect();
+    callback detect-silence-changed(on: bool);
+    callback threshold-changed(value: float);
+    callback min-silence-changed(value: float);
+    callback min-section-changed(value: float);
+    callback use-captions-changed(on: bool);
+    callback subtitle-path-edited(path: string);
+    callback browse-subtitle();
+    callback search-changed(text: string);
+    callback min-duration-changed(value: float);
+    callback kind-toggled(kind: int);
+    callback select-visible();
+    callback select-none();
+    callback select-invert();
+    callback select-all-silence();
+    callback select-all-captions();
+    callback add-captions-to-timeline();
+    callback add-captions-new-track();
+    callback delete-selected-captions();
+    callback apply();
+
+    open: root.data.open;
+    title: I18n.t("sections.sections");
+    surface-width: 740px;
+
+    SectionsBody {
+        data: root.data;
+        in-panel: false;
+        closed => { root.closed(); }
+        row-toggled(index) => { root.row-toggled(index); }
+        row-shift-select(index) => { root.row-shift-select(index); }
+        row-drag-begin(index) => { root.row-drag-begin(index); }
+        row-drag-over(visible-index) => { root.row-drag-over(visible-index); }
+        row-seek(index) => { root.row-seek(index); }
+        row-text-edited(index, text) => { root.row-text-edited(index, text); }
+        detect => { root.detect(); }
+        detect-silence-changed(on) => { root.detect-silence-changed(on); }
+        threshold-changed(value) => { root.threshold-changed(value); }
+        min-silence-changed(value) => { root.min-silence-changed(value); }
+        min-section-changed(value) => { root.min-section-changed(value); }
+        use-captions-changed(on) => { root.use-captions-changed(on); }
+        subtitle-path-edited(path) => { root.subtitle-path-edited(path); }
+        browse-subtitle => { root.browse-subtitle(); }
+        search-changed(text) => { root.search-changed(text); }
+        min-duration-changed(value) => { root.min-duration-changed(value); }
+        kind-toggled(kind) => { root.kind-toggled(kind); }
+        select-visible => { root.select-visible(); }
+        select-none => { root.select-none(); }
+        select-invert => { root.select-invert(); }
+        select-all-silence => { root.select-all-silence(); }
+        select-all-captions => { root.select-all-captions(); }
+        add-captions-to-timeline => { root.add-captions-to-timeline(); }
+        add-captions-new-track => { root.add-captions-new-track(); }
+        delete-selected-captions => { root.delete-selected-captions(); }
+        apply => { root.apply(); }
+    }
+}
+
+export component SectionsWorkspacePane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    VerticalLayout {
+        PaneHeader {
+            title: I18n.t("sections.sections");
+
+            VerticalLayout {
+                alignment: center;
+                PaneSwitcher {
+                    kind: PaneKind.sections;
+                    seat: root.pane-seat;
+                    removable: root.pane-removable;
+                    picked(kind) => { root.pane-picked(kind); }
+                    removed => { root.pane-removed(); }
+                }
+            }
+        }
+
+        PaneScroll {
+            vertical-stretch: 1;
+
+            SectionsBody {
+                data: SectionsView.data;
+                in-panel: true;
+                row-toggled(index) => { SectionsView.row-toggled(index); }
+                row-shift-select(index) => { SectionsView.row-shift-select(index); }
+                row-drag-begin(index) => { SectionsView.row-drag-begin(index); }
+                row-drag-over(visible-index) => { SectionsView.row-drag-over(visible-index); }
+                row-seek(index) => { SectionsView.row-seek(index); }
+                row-text-edited(index, text) => { SectionsView.row-text-edited(index, text); }
+                detect => { SectionsView.detect(); }
+                detect-silence-changed(on) => { SectionsView.detect-silence-changed(on); }
+                threshold-changed(value) => { SectionsView.threshold-changed(value); }
+                min-silence-changed(value) => { SectionsView.min-silence-changed(value); }
+                min-section-changed(value) => { SectionsView.min-section-changed(value); }
+                use-captions-changed(on) => { SectionsView.use-captions-changed(on); }
+                subtitle-path-edited(path) => { SectionsView.subtitle-path-edited(path); }
+                browse-subtitle => { SectionsView.browse-subtitle(); }
+                search-changed(text) => { SectionsView.search-changed(text); }
+                min-duration-changed(value) => { SectionsView.min-duration-changed(value); }
+                kind-toggled(kind) => { SectionsView.kind-toggled(kind); }
+                select-visible => { SectionsView.select-visible(); }
+                select-none => { SectionsView.select-none(); }
+                select-invert => { SectionsView.select-invert(); }
+                select-all-silence => { SectionsView.select-all-silence(); }
+                select-all-captions => { SectionsView.select-all-captions(); }
+                add-captions-to-timeline => { SectionsView.add-captions-to-timeline(); }
+                add-captions-new-track => { SectionsView.add-captions-new-track(); }
+                delete-selected-captions => { SectionsView.delete-selected-captions(); }
+                apply => { SectionsView.apply(); }
+            }
         }
     }
 }

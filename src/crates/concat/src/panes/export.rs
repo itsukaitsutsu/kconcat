@@ -167,11 +167,17 @@ impl ExportPane {
             }
             ExportMsg::QualityChanged(index) => self.quality = (index.max(0) as usize).min(2),
             // A codec this device cannot encode is not taken: the picker
-            // says so under it, and the choice before stands.
+            // says so under it, and the choice before stands. Index 3 is
+            // "Same as copy" (fast stream copy without re-encoding).
             ExportMsg::CodecChanged(index) => {
-                let index = (index.max(0) as usize).min(concat_media::VideoCodec::ALL.len() - 1);
-                if concat_media::VideoCodec::ALL[index].encodable() {
-                    self.codec = index;
+                let index = index.max(0) as usize;
+                if index == 3 {
+                    self.codec = 3;
+                } else {
+                    let index = index.min(concat_media::VideoCodec::ALL.len() - 1);
+                    if concat_media::VideoCodec::ALL[index].encodable() {
+                        self.codec = index;
+                    }
                 }
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
@@ -385,11 +391,18 @@ impl ExportPane {
         }
     }
 
+    pub fn is_stream_copy(&self) -> bool {
+        self.codec == 3
+    }
+
     /// Whether the file is written HDR: the timeline is, the sheet was
     /// not told to tone-map it to SDR, and the codec an HDR file would be
     /// written in can be written at ten bits here - on a phone it cannot,
     /// and the file is tone-mapped rather than failing.
     pub fn hdr(&self, studio: &Studio) -> bool {
+        if self.is_stream_copy() {
+            return studio.timeline().video.color_space.is_hdr() && !self.sdr;
+        }
         let chosen =
             concat_media::VideoCodec::ALL[self.codec.min(concat_media::VideoCodec::ALL.len() - 1)];
         let deep = match chosen {
@@ -464,6 +477,90 @@ impl ExportPane {
         let Some(session) = studio.session.as_ref() else {
             return;
         };
+
+        if self.is_stream_copy() {
+            let project_dir = std::path::PathBuf::from(session.path());
+            let mut media_clips: Vec<_> = studio
+                .timeline()
+                .clips
+                .iter()
+                .filter(|c| c.kind.is_visual() || studio.clip_has_sound(c))
+                .cloned()
+                .collect();
+            media_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+            let mut segments: Vec<(std::path::PathBuf, f64, f64)> = Vec::new();
+            for clip in &media_clips {
+                if let Some(media) = studio.project().media.iter().find(|m| m.id == clip.media_id) {
+                    let raw = std::path::PathBuf::from(&media.path);
+                    let resolved = if raw.is_absolute() {
+                        raw
+                    } else {
+                        project_dir.join(raw)
+                    };
+                    segments.push((resolved, clip.source_start, clip.duration * clip.speed));
+                }
+            }
+
+            // Write synchronized .srt sidecar(s) for any timeline caption tracks.
+            let mut text_clips: Vec<_> = studio
+                .timeline()
+                .clips
+                .iter()
+                .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+                .cloned()
+                .collect();
+            text_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+            let srt_path = if !text_clips.is_empty() {
+                let cues: Vec<concat_project::subtitle::Cue> = text_clips
+                    .iter()
+                    .filter_map(|c| {
+                        let text = c.text.as_ref()?.content.trim().to_owned();
+                        if text.is_empty() {
+                            return None;
+                        }
+                        Some(concat_project::subtitle::Cue {
+                            start: c.start,
+                            end: c.start + c.duration,
+                            text,
+                        })
+                    })
+                    .collect();
+                if !cues.is_empty() {
+                    let sidecar = std::path::Path::new(&output).with_extension("srt");
+                    let _ = std::fs::write(&sidecar, concat_project::subtitle::to_srt(&cues));
+                    Some(sidecar)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            studio.pause();
+            self.phase = ExportPhase::Running;
+            self.progress = 0.25;
+            self.stage = t("export.finalisingFile");
+            self.message.clear();
+            self.written.clear();
+            self.started_at = Some(std::time::Instant::now());
+
+            let output_clone = output.clone();
+            spawn(
+                move || {
+                    let _job = job;
+                    concat_media::audio::remux_segments_stream_copy(
+                        &segments,
+                        srt_path.as_deref(),
+                        std::path::Path::new(&output_clone),
+                    )
+                    .map(|()| output_clone)
+                    .map_err(|e| e.to_string())
+                },
+                |studio, _, _, result| studio.handle(Msg::Export(ExportMsg::Finished(result))),
+            );
+            return;
+        }
+
         let spec = ExportSpec {
             output: output.clone(),
             crf: EXPORT_CRF[self.quality.min(2)],
@@ -623,10 +720,14 @@ impl ExportPane {
                 ModelRc::new(VecModel::from(details))
             },
             quality: self.quality as i32,
-            codec: concat_media::VideoCodec::ALL
-                .iter()
-                .position(|codec| *codec == self.codec(studio))
-                .unwrap_or(0) as i32,
+            codec: if self.is_stream_copy() {
+                3
+            } else {
+                concat_media::VideoCodec::ALL
+                    .iter()
+                    .position(|codec| *codec == self.codec(studio))
+                    .unwrap_or(0) as i32
+            },
             h264_encodable: concat_media::VideoCodec::H264.encodable(),
             hevc_encodable: concat_media::VideoCodec::Hevc.encodable(),
             av1_encodable: concat_media::VideoCodec::Av1.encodable(),
@@ -645,7 +746,9 @@ impl ExportPane {
             advanced: self.advanced,
             rate_mode: self.rate_mode as i32,
             bitrate: self.bitrate as i32,
-            encoding: {
+            encoding: if self.is_stream_copy() {
+                format!("{} · {}", t("export.sameAsCopy"), t("export.streamCopyDetail")).into()
+            } else {
                 // "HEVC 10-bit · hardware": the standard, the depth when it
                 // is the deeper one, and whether the platform's own encoder
                 // will be doing it.
@@ -669,9 +772,8 @@ impl ExportPane {
                 if codec.hardware_encoded(true, self.deep(studio)) {
                     words.push(format!("· {}", t("export.hardware")));
                 }
-                words.join(" ")
-            }
-            .into(),
+                words.join(" ").into()
+            },
             size_high: bytes(self.size_bytes(studio, 0)).into(),
             size_balanced: bytes(self.size_bytes(studio, 1)).into(),
             size_small: bytes(self.size_bytes(studio, 2)).into(),

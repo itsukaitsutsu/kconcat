@@ -28,7 +28,7 @@ import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { CaptionImportData, CaptionImportDialog } from "dialogs/caption-import.slint";
-import { SectionRowData, SectionsDialog, SectionsSheetData } from "dialogs/sections.slint";
+import { SectionRowData, SectionsDialog, SectionsSheetData, SectionsView } from "dialogs/sections.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
@@ -47,8 +47,8 @@ import { Meters } from "workspace/meters-pane.slint";
 import { Workspace } from "workspace/workspace.slint";
 import {
     ClipData, ClipField, ClipKeyData, ClipKind, ClipTextField, DropData, Keyframes,
-    SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
-    TimelineTool, TrackData, TrackSize,
+    SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment,
+    TimelineSectionData, TimelineTabData, TimelineTool, TrackData, TrackSize,
 } from "timeline/model.slint";
 
 // Re-exported so main.rs can reach the globals and the struct.
@@ -61,10 +61,10 @@ export {
     EffectData, FontSearch, Meters, MediaFilter, MediaItemData, MediaKind, SourcePreview, TextPresetData,
     ClipData, ClipField, ClipKeyData, ClipKind, ClipTextField, DropData, Keyframes,
     KeyEditor, KeyMarkData, KeyRowData,
-    SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
-    TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
+    SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment,
+    TimelineSectionData, TimelineTabData, TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData, CaptionImportData, SectionRowData, SectionsSheetData,
+    CaptionsSheetData, SpeechSheetData, CaptionImportData, SectionRowData, SectionsSheetData, SectionsView,
 }
 
 export component App inherits Window {

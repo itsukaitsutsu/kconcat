@@ -160,10 +160,20 @@ pub fn clip_sections_with_cues(
             .filter(|cue| cue.end > 0.0 && cue.start < window)
             .collect()
     } else {
+        let linked_ids: std::collections::HashSet<String> =
+            timeline.captions_of(clip_id).into_iter().collect();
         timeline
-            .captions_of(clip_id)
+            .clips
             .iter()
-            .filter_map(|caption_id| timeline.clip(caption_id))
+            .filter(|c| {
+                c.kind == crate::model::ClipKind::Text
+                    && (linked_ids.contains(&c.id)
+                        || c.caption_of.is_none()
+                        || c.caption_of
+                            .as_deref()
+                            .and_then(|cid| timeline.clip(cid))
+                            .is_some_and(|parent| parent.media_id == clip.media_id))
+            })
             .map(|caption| Cue {
                 // Timeline -> the clip's source window: how far into the
                 // clip the caption sits, at the clip's speed.

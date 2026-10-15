@@ -57,6 +57,55 @@ component TrayButton inherits IconButton {
     idle: Theme.fg;
 }
 
+component TrayFilterPill inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    in property <color> dot: Theme.accent;
+    in property <bool> has-dot: true;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 24px;
+    border-radius: Theme.r-sm;
+    border-width: 1px;
+    border-color: root.active ? root.dot : Theme.line;
+    background: !root.enabled ? Colors.transparent
+        : root.active ? root.dot.with-alpha(0.18)
+        : touch.has-hover ? Theme.field-hover : Theme.field;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    HorizontalLayout {
+        padding-left: 7px;
+        padding-right: 7px;
+        spacing: 5px;
+        alignment: center;
+
+        if root.has-dot: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: root.dot;
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            font-weight: root.active ? Theme.weight-title : Theme.weight-body;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
 // One row of the add menu and its submenu: a word, a mark at the end.
 component MenuItem inherits Rectangle {
     in property <string> text;
@@ -182,6 +231,11 @@ export component TimelineTray inherits Rectangle {
     /// with the take's level beside it.
     in property <bool> recording;
     in property <float> record-level;
+    /// Synchronized section filter state (`Caption` / `Silence` / `Other`).
+    in property <bool> section-filter-caption: true;
+    in property <bool> section-filter-silence: true;
+    in property <bool> section-filter-other: true;
+    in property <bool> can-remove-selected-sections: false;
 
     callback tool-changed(tool: TimelineTool);
     callback snap-changed(snap: bool);
@@ -205,6 +259,9 @@ export component TimelineTray inherits Rectangle {
     callback sections();
     callback speak();
     callback record-voiceover();
+    callback section-filter-toggled(kind: int);
+    callback section-select-all-silence();
+    callback section-remove-selected();
     /// Add a lane: on top of the stack, or with `bottom` under it.
     callback add-track(bottom: bool);
     callback fit();
@@ -402,6 +459,43 @@ export component TimelineTray inherits Rectangle {
             width: 56px;
             horizontal-stretch: 0;
             value: root.record-level;
+        }
+
+        Divider { }
+
+        // Synchronized Section Filter (`Caption`, `Silence`, `Other`) + quick
+        // `All Silence` & `Remove Selected` actions directly on the timeline.
+        TrayFilterPill {
+            label: I18n.t("sections.caption");
+            active: root.section-filter-caption;
+            dot: Theme.kind-text;
+            clicked => { root.section-filter-toggled(0); }
+        }
+        TrayFilterPill {
+            label: I18n.t("sections.silence");
+            active: root.section-filter-silence;
+            dot: #f97316;
+            clicked => { root.section-filter-toggled(1); }
+        }
+        TrayFilterPill {
+            label: I18n.t("sections.other");
+            active: root.section-filter-other;
+            dot: Theme.fg-muted;
+            clicked => { root.section-filter-toggled(2); }
+        }
+        TrayFilterPill {
+            label: I18n.t("sections.allSilence");
+            active: false;
+            has-dot: false;
+            dot: #f97316;
+            clicked => { root.section-select-all-silence(); }
+        }
+        if root.can-remove-selected-sections: TrayFilterPill {
+            label: I18n.t("sections.removeSelected");
+            active: true;
+            has-dot: false;
+            dot: Theme.danger;
+            clicked => { root.section-remove-selected(); }
         }
 
         Rectangle { horizontal-stretch: 1; }

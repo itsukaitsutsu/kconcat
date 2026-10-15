@@ -5,7 +5,7 @@ import { Wave } from "../primitives/wave.slint";
 import { Theme } from "../theme/theme.slint";
 import { Fmt, Payload } from "../util.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { ClipData, ClipKind, DropData, TimelineTool, TrackData } from "model.slint";
+import { ClipData, ClipKind, DropData, TimelineSectionData, TimelineTool, TrackData } from "model.slint";
 import { ContextMenu, MenuItemData } from "../primitives/context-menu.slint";
 
 // The lanes: the ruler, the banded track stack, the clips on it, the playhead
@@ -1159,6 +1159,9 @@ export component Lanes inherits Rectangle {
     /// The answer to the last hover. `active` is also the verdict — false is
     /// how the drag is refused, and the cursor says so.
     in property <DropData> drop;
+    /// Synchronized section spans rendered along the bottom of the ruler.
+    in property <[TimelineSectionData]> timeline-sections;
+    callback timeline-section-toggled(source-index: int);
 
     property <length> px-per-second: 1px / Math.max(root.seconds-per-pixel, 0.000001);
     property <length> lanes-h: Math.max(0px, root.height - root.ruler-height);
@@ -1738,6 +1741,34 @@ export component Lanes inherits Rectangle {
                         }
                         self.dragging = false;
                     }
+                }
+            }
+
+            // Synchronized Section Strip (`Caption`, `Silence`, `Other`) along the
+            // bottom of the ruler; clicking a bar toggles whether that section is
+            // marked for removal (`!keep` in Sections).
+            for sec in root.timeline-sections: TouchArea {
+                x: root.at(sec.start);
+                y: root.ruler-height - 6px;
+                width: Math.max(2px, sec.duration * root.px-per-second);
+                height: 6px;
+                mouse-cursor: pointer;
+                visible: self.x + self.width >= 0px && self.x <= root.width;
+
+                Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: 1px;
+                    background: sec.selected ? Theme.danger
+                        : sec.kind-code == 0 ? Theme.kind-text.with-alpha(0.75)
+                        : sec.kind-code == 1 ? #f97316.with-alpha(0.80)
+                        : Theme.fg-muted.with-alpha(0.55);
+                    border-width: sec.selected ? 1px : 0px;
+                    border-color: Theme.fg;
+                }
+
+                clicked => {
+                    root.timeline-section-toggled(sec.source-index);
                 }
             }
         }

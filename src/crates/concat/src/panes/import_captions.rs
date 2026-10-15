@@ -115,7 +115,19 @@ impl ImportCaptionsPane {
                             return;
                         }
                         let count = placed.len();
-                        let clip_id = target.as_ref().map_or("", |t| t.id.as_str());
+                        let fallback_clip_id = target
+                            .as_ref()
+                            .map(|t| t.id.clone())
+                            .or_else(|| {
+                                studio
+                                    .timeline()
+                                    .clips
+                                    .iter()
+                                    .filter(|c| c.kind.is_visual() || studio.clip_has_sound(c))
+                                    .min_by(|a, b| a.start.total_cmp(&b.start))
+                                    .map(|c| c.id.clone())
+                            });
+                        let clip_id = fallback_clip_id.as_deref().unwrap_or("");
                         let has_existing_text = studio
                             .timeline()
                             .clips
@@ -149,13 +161,30 @@ impl ImportCaptionsPane {
                                 cue.start,
                                 cue.start + duration,
                             );
+                            let resolved_link = cue
+                                .caption_of
+                                .as_deref()
+                                .or_else(|| {
+                                    let mid = cue.start + duration * 0.5;
+                                    studio
+                                        .timeline()
+                                        .clips
+                                        .iter()
+                                        .find(|c| {
+                                            (c.kind.is_visual() || studio.clip_has_sound(c))
+                                                && c.start <= mid
+                                                && c.start + c.duration >= mid
+                                        })
+                                        .map(|c| c.id.as_str())
+                                })
+                                .or(fallback_clip_id.as_deref());
                             commands.push(caption_clip_on_track(
                                 cue.text.clone(),
                                 cue.start,
                                 duration,
                                 look,
                                 base.as_ref(),
-                                cue.caption_of.as_deref(),
+                                resolved_link,
                                 Some(words),
                                 Some("__top__".to_owned()),
                             ));

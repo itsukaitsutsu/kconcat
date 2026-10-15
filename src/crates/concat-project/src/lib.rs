@@ -3705,6 +3705,85 @@ mod tests {
     }
 
     #[test]
+    fn autotrim_keeps_multi_track_and_unlinked_captions_synchronized() {
+        use crate::captionmap::Word;
+        use crate::sectionlist::{clip_sections, kept_ranges};
+
+        let (mut editor, _, clip_id) = fixture(); // video clip [0, 10)
+        // Track 2: linked caption over [1.0, 3.0)
+        let linked_id = linked_caption(&mut editor, &clip_id, 1.0, 2.0);
+        // Track 3: unlinked caption (as imported via ProjectStart) over [6.0, 8.0)
+        editor
+            .apply(Command::AddTrack { bottom: false })
+            .expect("adds second caption track");
+        let unlinked_id = editor
+            .apply(Command::AddTextClip {
+                above: false,
+                track_id: Some("__top__".into()),
+                start: 6.0,
+                duration: Some(2.0),
+                offset_y: Some(0.26),
+                style: Some(TextStyle {
+                    content: "Second line".into(),
+                    ..TextStyle::default()
+                }),
+                caption_of: None,
+                words: Some(vec![
+                    Word {
+                        text: "Second".into(),
+                        start: 6.0,
+                        end: 7.0,
+                    },
+                    Word {
+                        text: "line".into(),
+                        start: 7.0,
+                        end: 8.0,
+                    },
+                ]),
+            })
+            .expect("adds unlinked caption")
+            .created_id
+            .expect("id");
+
+        // clip_sections sees both the linked [1, 3) and unlinked [6, 8) captions.
+        // Silence over [3.0, 6.0) is unticked by default.
+        let view = clip_sections(
+            editor.project().active(),
+            &clip_id,
+            &[(3.0, 6.0)],
+            0.0,
+        )
+        .expect("sections");
+        let ticks: Vec<bool> = view.rows.iter().map(|r| r.keep).collect();
+        let kept = kept_ranges(&view.rows, &ticks);
+        assert_eq!(kept, [(0.0, 3.0), (6.0, 10.0)]);
+
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept,
+            })
+            .expect("autotrims");
+
+        // Linked caption [1, 3) stays at [1, 3); unlinked caption [6, 8) shifts
+        // left by the 3s removed silence to [3, 5) with its word timestamps shifted too!
+        assert_eq!(range_of(&editor, &linked_id), (1.0, 3.0));
+        assert_eq!(range_of(&editor, &unlinked_id), (3.0, 5.0));
+        let shifted = editor
+            .project()
+            .active()
+            .clip(&unlinked_id)
+            .expect("unlinked caption survives");
+        assert_eq!(
+            shifted.text.as_ref().expect("style").content,
+            "Second line"
+        );
+        let words = shifted.words.as_ref().expect("words");
+        assert_eq!((words[0].start, words[0].end), (3.0, 4.0));
+        assert_eq!((words[1].start, words[1].end), (4.0, 5.0));
+    }
+
+    #[test]
     fn a_caption_lands_above_the_highest_occupied_lane() {
         let mut editor = Editor::new();
         let media_id = editor

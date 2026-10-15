@@ -1,0 +1,94 @@
+<div class="card" data-project-card="caption">
+          <h3>2 · Auto-caption</h3>
+      <div class="dim small caption-lead">
+        Transcribe this video with faster-whisper, then feed the captions straight into detection.
+      </div>
+      <div id="capUnavailable" class="warn" hidden=""></div>
+      <button id="capRecheck" class="ghost block small" hidden="">Re-check for faster-whisper</button>
+      <div id="capSetup">
+        <div class="row"><label>Engine</label><select id="cEngine">
+          <option value="faster-whisper" selected="">faster-whisper — CPU / NVIDIA CUDA</option>
+          <option value="whispercpp">whisper.cpp — Vulkan GPU (AMD / Intel / NVIDIA) or CPU</option>
+        </select></div>
+        <div id="wcppPanel" hidden="">
+          <div id="wcppStatus" class="dim small">whisper-cli found: <code>D:\autotrim\workspace-01a11267-3c03-70c7-ba2b-746368a13969\video-trim-studio\tools\whisper-cli.exe</code><br>2 model(s) in <code>D:\autotrim\workspace-01a11267-3c03-70c7-ba2b-746368a13969\video-trim-studio\work\whisper-models</code></div>
+          <div class="row"><label>wcpp model</label><select id="wModel"><option value="large-v3-turbo">large-v3-turbo — transcription only (1549 MB on disk)</option><option value="large-v3">large-v3 (2952 MB on disk)</option></select></div>
+          <div class="row"><label>Get model</label>
+            <select id="wDlSelect"><option value="tiny">tiny (75 MB)</option><option value="base">base (142 MB)</option><option value="small">small (466 MB)</option><option value="medium">medium (1.5 GB)</option></select>
+            <button id="wDlBtn" class="ghost small">Download</button>
+          </div>
+          <div class="progress" id="wDlProg" hidden="">
+            <div class="bar"><div id="wDlBar"></div></div>
+            <div class="progtext"><span id="wDlPct">0%</span><span id="wDlNote" class="dim"></span></div>
+          </div>
+          <div id="wcppHint" class="dim small">AMD GPU (RX 6000-series etc.): build with <code>cmake -DGGML_VULKAN=ON</code> - Vulkan runs on Windows and Linux. Source: <a href="https://github.com/ggml-org/whisper.cpp" target="_blank" rel="noopener">ggml-org/whisper.cpp</a></div>
+        </div>
+        <div class="row" id="rowFwModel"><label>Model</label><select id="cModel"><option value="tiny" title="75 MB — fastest, roughest">tiny</option><option value="base" title="142 MB — quick">base</option><option value="small" title="466 MB — good balance for CPU">small</option><option value="medium" title="~1.5 GB — recommended default">medium</option><option value="large-v3-turbo" title="~1.5 GB — fast transcription; not trained for translation">large-v3-turbo — transcription only</option><option value="turbo" title="~1.5 GB — alias of large-v3-turbo; not trained for translation">turbo — transcription only</option><option value="large-v1" title="~2.9 GB — older">large-v1</option><option value="large-v2" title="~2.9 GB — older">large-v2</option><option value="large-v3" title="~2.9 GB — max accuracy, slow on CPU">large-v3</option></select></div>
+        <div class="row"><label>Language</label><select id="cLang"><option value="auto">auto — Auto-detect</option><option value="af">af — Afrikaans</option><option value="am">am — Amharic</option><option value="ar">ar — Arabic</option><option value="as">as — Assamese</option><option value="az">az — Azerbaijani</option><option value="ba">ba — Bashkir</option><option value="be">be — Belarusian</option><option value="bg">bg — Bulgarian</option><option value="bn">bn — Bengali</option><option value="bo">bo — Tibetan</option><option value="br">br — Breton</option><option value="bs">bs — Bosnian</option><option value="ca">ca — Catalan</option><option value="cs">cs — Czech</option><option value="cy">cy — Welsh</option><option value="da">da — Danish</option><option value="de">de — German</option><option value="el">el — Greek</option><option value="en">en — English</option><option value="es">es — Spanish</option><option value="et">et — Estonian</option><option value="eu">eu — Basque</option><option value="fa">fa — Persian</option><option value="fi">fi — Finnish</option><option value="fo">fo — Faroese</option><option value="fr">fr — French</option><option value="gl">gl — Galician</option><option value="gu">gu — Gujarati</option><option value="ha">ha — Hausa</option><option value="haw">haw — Hawaiian</option><option value="he">he — Hebrew</option><option value="hi">hi — Hindi</option><option value="hr">hr — Croatian</option><option value="ht">ht — Haitian Creole</option><option value="hu">hu — Hungarian</option><option value="hy">hy — Armenian</option><option value="id">id — Indonesian</option><option value="is">is — Icelandic</option><option value="it">it — Italian</option><option value="ja">ja — Japanese</option><option value="jw">jw — Javanese</option><option value="ka">ka — Georgian</option><option value="kk">kk — Kazakh</option><option value="km">km — Khmer</option><option value="kn">kn — Kannada</option><option value="ko">ko — Korean</option><option value="la">la — Latin</option><option value="lb">lb — Luxembourgish</option><option value="ln">ln — Lingala</option><option value="lo">lo — Lao</option><option value="lt">lt — Lithuanian</option><option value="lv">lv — Latvian</option><option value="mg">mg — Malagasy</option><option value="mi">mi — Maori</option><option value="mk">mk — Macedonian</option><option value="ml">ml — Malayalam</option><option value="mn">mn — Mongolian</option><option value="mr">mr — Marathi</option><option value="ms">ms — Malay</option><option value="mt">mt — Maltese</option><option value="my">my — Myanmar</option><option value="ne">ne — Nepali</option><option value="nl">nl — Dutch</option><option value="nn">nn — Norwegian Nynorsk</option><option value="no">no — Norwegian</option><option value="oc">oc — Occitan</option><option value="pa">pa — Punjabi</option><option value="pl">pl — Polish</option><option value="ps">ps — Pashto</option><option value="pt">pt — Portuguese</option><option value="ro">ro — Romanian</option><option value="ru">ru — Russian</option><option value="sa">sa — Sanskrit</option><option value="sd">sd — Sindhi</option><option value="si">si — Sinhala</option><option value="sk">sk — Slovak</option><option value="sl">sl — Slovenian</option><option value="sn">sn — Shona</option><option value="so">so — Somali</option><option value="sq">sq — Albanian</option><option value="sr">sr — Serbian</option><option value="su">su — Sundanese</option><option value="sv">sv — Swedish</option><option value="sw">sw — Swahili</option><option value="ta">ta — Tamil</option><option value="te">te — Telugu</option><option value="tg">tg — Tajik</option><option value="th">th — Thai</option><option value="tk">tk — Turkmen</option><option value="tl">tl — Tagalog</option><option value="tr">tr — Turkish</option><option value="tt">tt — Tatar</option><option value="uk">uk — Ukrainian</option><option value="ur">ur — Urdu</option><option value="uz">uz — Uzbek</option><option value="vi">vi — Vietnamese</option><option value="yi">yi — Yiddish</option><option value="yo">yo — Yoruba</option><option value="zh">zh — Chinese</option></select></div>
+        <div class="row" id="rowFwDevice"><label>Device</label><select id="cDevice"><option value="auto">auto</option><option value="cuda">cuda</option><option value="cpu">cpu</option></select></div>
+        <label class="chk"><input type="checkbox" id="cTranslate"> translate to English (any language → English)</label>
+        <div id="translateHint" class="dim small translation-hint" aria-live="polite">Translates non-English speech into English; English speech stays English. Turbo models are transcription-only, so checking this option will switch to a compatible model when available.</div>
+        <details class="adv">
+          <summary>Advanced options</summary>
+          <div class="row" id="rowFwCompute"><label>Compute type</label><select id="cCompute"><option value="auto">auto</option><option value="int8">int8</option><option value="int8_float16">int8_float16</option><option value="float16">float16</option><option value="float32">float32</option></select></div>
+          <div class="row"><label>Beam size</label><input id="cBeam" type="number" value="1" min="1" max="10" step="1" title="1 = greedy and fastest; 5 = slower, can hallucinate more"></div>
+          <div class="row"><label>Hint / prompt</label><input id="cPrompt" type="text" placeholder="names, jargon (optional)"></div>
+          <div class="row"><label>Output folder</label><input id="cOutDir" type="text" placeholder="next to the video" spellcheck="false"></div>
+          <div class="checks">
+            <span id="fwOnlyChecks"><label class="chk"><input type="checkbox" id="cVad" checked=""> VAD (skip silence)</label>
+            <label class="chk"><input type="checkbox" id="cWords" checked=""> word timestamps (JSON)</label>
+            <label class="chk"><input type="checkbox" id="cTemp" title="retry hard segments at higher temperature"> temperature fallback</label>
+            <label class="chk"><input type="checkbox" id="cNorm" title="loudnorm for quiet or uneven recordings"> normalize audio</label></span>
+            <label class="chk"><input type="checkbox" id="cKeep"> keep 16 kHz wav</label>
+            <label class="chk"><input type="checkbox" id="cBurn"> burn into a copy</label>
+          </div>
+        </details>
+        <button id="capBtn" class="primary block">Transcribe to captions</button>
+        <div id="capNote" class="dim small">faster-whisper 1.2.1 · CPU only (no CUDA device)</div>
+        <div class="progress" id="capProgWrap" hidden="">
+          <div class="bar"><div id="capBar"></div></div>
+          <div class="progtext"><span id="capPct">0%</span><span id="capMeta" class="dim"></span></div>
+        </div>
+        <pre id="capTail" class="caption-tail" hidden=""></pre>
+        <button id="capCancel" class="ghost block small" hidden="">Cancel transcription</button>
+        <div class="row cap-manual-row">
+          <label></label>
+          <span class="grow dim small">or start from something else:</span>
+        </div>
+        <div class="row cap-manual-row">
+          <label></label>
+          <span class="grow">
+            <button id="capNewBtn" class="ghost small" title="Empty cue list - no faster-whisper needed">New blank captions</button>
+            <button id="capOpenSrtBtn" class="ghost small" title="Open an existing .srt / .vtt into the editor">Open .srt / .vtt…</button>
+          </span>
+        </div>
+        <div id="capResult" hidden="">
+          <div id="capOut" class="dim small"></div>
+          <div id="capEditor" hidden="">
+            <div class="cap-editor-head">
+              <b>Caption editor</b>
+              <span id="capEdCount" class="dim small"></span>
+              <span class="grow"></span>
+              <button id="capAddCue" class="mini">+ Add cue</button>
+              <button id="capRevert" class="mini" title="Reload the last saved version">Undo changes</button>
+              <button id="capSave" class="mini primary">Save captions</button>
+            </div>
+            <div class="row cap-layout-row">
+              <select id="cSeg" title="How many words share one caption. Used for the next transcription and for Re-split."><option value="engine" title="Whatever the recogniser produced - usually whole sentences. The recogniser is the only thing that knows where Japanese words end, so this is the layout to use when the cuts must be linguistically correct rather than small.">Engine segments (as transcribed)</option><option value="line" title="Up to 7 words, 42 characters or 6 s - the classic subtitle line.">Readable lines (subtitles)</option><option value="burst" title="Up to 3 words, 18 characters or 2.5 s - the short-form look. Japanese/Chinese/Korean count per character.">Burst - 3 words (vertical video)</option><option value="word" title="Every word gets its own cue - the karaoke / word-pop layout. One character per cue for Japanese/Chinese/Korean.">One word at a time</option></select>
+              <button id="capResplit" class="mini" title="Re-cut these captions with this layout - no new transcription">Re-split</button>
+            </div>
+            <div id="capSaved" class="dim small"></div>
+            <div class="cap-editor-scroll">
+              <table id="capCueTable">
+                <thead>
+                  <tr><th>#</th><th>Start (s)</th><th>End (s)</th><th>Text</th><th></th></tr>
+                </thead>
+                <tbody id="capCueBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <button id="capUse" class="primary block">Use these captions → Detect sections</button>
+        </div>
+        <pre id="capError" class="error" hidden=""></pre>
+      </div>
+        </div>

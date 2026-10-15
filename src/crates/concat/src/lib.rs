@@ -269,6 +269,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         editor.set_timeline_tabs(ModelRc::from(models.tabs.clone()));
         editor.set_tracks(ModelRc::from(models.tracks.clone()));
         editor.set_clips(ModelRc::from(models.clips.clone()));
+        editor.set_timeline_sections(ModelRc::from(models.timeline_sections.clone()));
         editor.set_stage_items(ModelRc::from(models.stage.clone()));
         editor.set_stage_guides(ModelRc::from(models.guides.clone()));
         editor.set_media(ModelRc::from(models.media.clone()));
@@ -559,12 +560,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         // whichever is showing.
         state.set_compact(width < studio::COMPACT_WIDTH);
     }));
-    editor.on_dock_set(on_dock!(|state, seat: i32, kind: PaneKind| {
+    editor.on_dock_set(on_window!(|state, seat: i32, kind: PaneKind| {
         let Some(path) = state.dock.leaf_path(seat.max(0) as usize) else {
             return;
         };
         if let Dock::Leaf(held) = state.dock.at_mut(&path) {
             *held = kind;
+        }
+        if kind == PaneKind::Sections {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::OpenPanel,
+            ));
         }
     }));
     editor.on_dock_dropped(on_dock!(|state, from: i32, onto: i32, side: DockSide| {
@@ -595,7 +601,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.dock.split_leaf(&onto_path, taken, side);
         state.dock.remove_leaf(&from_path);
     }));
-    editor.on_dock_add(on_dock!(|state, kind: PaneKind| {
+    editor.on_dock_add(on_window!(|state, kind: PaneKind| {
         let seats = state.dock_layout().seats;
         let Some(biggest) = seats
             .iter()
@@ -614,6 +620,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             return;
         };
         state.dock.split_leaf(&path, kind, side);
+        if kind == PaneKind::Sections {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::OpenPanel,
+            ));
+        }
     }));
     editor.on_dock_remove(on_dock!(|state, seat: i32| {
         let Some(path) = state.dock.leaf_path(seat.max(0) as usize) else {
@@ -1581,7 +1592,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.handle(Msg::Captions(CaptionsMsg::Open));
     }));
     editor.on_sections(on_window!(|state| {
-        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Open));
+        state.open_sections_panel_or_sheet();
     }));
     editor.on_record_voiceover(on_window!(|state| {
         state.handle(Msg::Voiceover(
@@ -1590,6 +1601,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     editor.on_speak(on_window!(|state| {
         state.handle(Msg::Speech(SpeechMsg::Open));
+    }));
+    editor.on_section_filter_toggled(on_window!(|state, kind: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::KindToggled(kind),
+        ));
+    }));
+    editor.on_section_select_all_silence(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::SelectAllSilence,
+        ));
+    }));
+    editor.on_section_remove_selected(on_window!(|state| {
+        state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Apply));
+    }));
+    editor.on_timeline_section_toggled(on_window!(|state, index: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowToggled(index),
+        ));
     }));
 
     app.on_captions_closed(on_window!(|state| {
@@ -1852,6 +1881,135 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
         ));
     }));
+    {
+        let sections = app.global::<SectionsView>();
+        sections.on_detect(on_window!(|state| {
+            state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Detect));
+        }));
+        sections.on_detect_silence_changed(on_window!(|state, on: bool| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::DetectSilenceChanged(on),
+            ));
+        }));
+        sections.on_threshold_changed(on_window!(|state, value: f32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::ThresholdChanged(value),
+            ));
+        }));
+        sections.on_min_silence_changed(on_window!(|state, value: f32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::MinSilenceChanged(value),
+            ));
+        }));
+        sections.on_min_section_changed(on_window!(|state, value: f32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::MinSectionChanged(value),
+            ));
+        }));
+        sections.on_use_captions_changed(on_window!(|state, on: bool| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::UseCaptionsChanged(on),
+            ));
+        }));
+        sections.on_subtitle_path_edited(on_window!(|state, path: SharedString| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SubtitlePathEdited(path.to_string()),
+            ));
+        }));
+        sections.on_browse_subtitle(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::BrowseSubtitle,
+            ));
+        }));
+        sections.on_search_changed(on_window!(|state, text: SharedString| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SearchChanged(text.to_string()),
+            ));
+        }));
+        sections.on_min_duration_changed(on_window!(|state, value: f32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::MinDurationChanged(value),
+            ));
+        }));
+        sections.on_kind_toggled(on_window!(|state, kind: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::KindToggled(kind),
+            ));
+        }));
+        sections.on_select_visible(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SelectVisible,
+            ));
+        }));
+        sections.on_select_none(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SelectNone,
+            ));
+        }));
+        sections.on_select_invert(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SelectInvert,
+            ));
+        }));
+        sections.on_select_all_silence(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SelectAllSilence,
+            ));
+        }));
+        sections.on_select_all_captions(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::SelectAllCaptions,
+            ));
+        }));
+        sections.on_add_captions_to_timeline(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::AddCaptionsToTimeline,
+            ));
+        }));
+        sections.on_add_captions_new_track(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::AddCaptionsNewTrack,
+            ));
+        }));
+        sections.on_delete_selected_captions(on_window!(|state| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::DeleteSelectedCaptions,
+            ));
+        }));
+        sections.on_apply(on_window!(|state| {
+            state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Apply));
+        }));
+        sections.on_row_toggled(on_window!(|state, index: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowToggled(index),
+            ));
+        }));
+        sections.on_row_shift_select(on_window!(|state, index: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowShiftSelect(index),
+            ));
+        }));
+        sections.on_row_drag_begin(on_window!(|state, index: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowDragBegin(index),
+            ));
+        }));
+        sections.on_row_drag_over(on_window!(|state, visible_index: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowDragOver(visible_index),
+            ));
+        }));
+        sections.on_row_seek(on_window!(|state, index: i32| {
+            state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::RowSeek(
+                index,
+            )));
+        }));
+        sections.on_row_text_edited(on_window!(|state, index: i32, text: SharedString| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
+            ));
+        }));
+    }
     app.on_captions_cancel(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Cancel));
     }));

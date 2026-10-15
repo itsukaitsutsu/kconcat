@@ -12,6 +12,7 @@ import { PreviewPane } from "preview-pane.slint";
 import { TimelinePane } from "timeline-pane.slint";
 import { KeyframesPane } from "keyframes-pane.slint";
 import { MetersPane } from "meters-pane.slint";
+import { SectionsWorkspacePane } from "../dialogs/sections.slint";
 
 // One box of the workspace, showing whichever view its `kind` names.
 //
@@ -332,6 +333,18 @@ export component Seat inherits Rectangle {
     }
 
     if root.kind == PaneKind.meters: MetersPane {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+
+            pane-picked(kind) => { root.picked(kind); }
+            pane-seat: root.index;
+            pane-removable: Editor.seats.length > 1;
+            pane-removed => { root.removed(); }
+    }
+
+    if root.kind == PaneKind.sections: SectionsWorkspacePane {
             x: 0;
             y: 0;
             width: root.width;

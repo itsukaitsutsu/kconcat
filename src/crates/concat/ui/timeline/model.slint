@@ -449,3 +449,17 @@ export struct StageGuideData {
     /// height (horizontal).
     at: float,
 }
+
+/// One synchronized section span (`Caption`, `Silence`, or `Other`) rendered
+/// along the timeline ruler and controlled by the timeline's section filter pills.
+export struct TimelineSectionData {
+    source-index: int,
+    start: float,
+    duration: float,
+    /// `0` = Caption, `1` = Silence, `2` = Other
+    kind-code: int,
+    /// `true` when checked for removal (`!row.keep` in Sections).
+    selected: bool,
+    label: string,
+}
+
