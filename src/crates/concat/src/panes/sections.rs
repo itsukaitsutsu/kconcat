@@ -52,6 +52,10 @@ pub enum SectionsMsg {
     RowSeek(i32),
     /// Edit a caption row's text inline.
     RowTextEdited(i32, String),
+    /// User scrolled the Sections rows table directly (passes top/focus visible row index).
+    ListScrolled(i32),
+    /// User clicked a section bar in the Timeline Ruler section strip.
+    TimelineSectionToggled(i32),
     /// Re-run detection with the current controls.
     Detect,
     DetectSilenceChanged(bool),
@@ -119,6 +123,8 @@ pub struct SectionsPane {
     pub show_caption: bool,
     pub show_silence: bool,
     pub show_other: bool,
+    pub scroll_to_row: i32,
+    pub scroll_sync_seq: i32,
     rows_model: Rc<VecModel<SectionRowData>>,
 }
 
@@ -150,6 +156,8 @@ impl Default for SectionsPane {
             show_caption: true,
             show_silence: true,
             show_other: true,
+            scroll_to_row: -1,
+            scroll_sync_seq: 0,
             rows_model: Rc::new(VecModel::default()),
         }
     }
@@ -198,16 +206,21 @@ impl SectionsPane {
             SectionsMsg::SubtitlePicked(path) => {
                 self.set_subtitle_path(path.to_string_lossy().into_owned());
             }
-            SectionsMsg::SearchChanged(value) => self.search = value,
+            SectionsMsg::SearchChanged(value) => {
+                self.search = value;
+                self.sync_scroll_to_time(f64::from(studio.playhead), true);
+            }
             SectionsMsg::MinDurationChanged(value) => {
                 if value.is_finite() {
                     self.min_duration = f64::from(value).clamp(0.0, 3600.0);
+                    self.sync_scroll_to_time(f64::from(studio.playhead), true);
                 }
             }
             SectionsMsg::KindToggled(kind) => {
                 self.toggle_kind(kind);
                 self.ensure_populated(studio);
                 self.sync_timeline_selection(studio);
+                self.sync_scroll_to_time(f64::from(studio.playhead), true);
             }
             SectionsMsg::SelectVisible => {
                 self.ensure_populated(studio);
@@ -243,10 +256,25 @@ impl SectionsPane {
             SectionsMsg::RowToggled(index) => {
                 self.toggle_row(index);
                 self.sync_timeline_selection(studio);
+                if let Some(row) = usize::try_from(index).ok().and_then(|i| self.rows.get(i)) {
+                    studio
+                        .lanes
+                        .ensure_span_visible(row.timeline_start as f32, row.timeline_end as f32);
+                }
+            }
+            SectionsMsg::TimelineSectionToggled(index) => {
+                self.toggle_row(index);
+                self.sync_timeline_selection(studio);
+                self.sync_scroll_to_source_row(index);
             }
             SectionsMsg::RowShiftSelect(index) => {
                 self.shift_select_row(index);
                 self.sync_timeline_selection(studio);
+                if let Some(row) = usize::try_from(index).ok().and_then(|i| self.rows.get(i)) {
+                    studio
+                        .lanes
+                        .ensure_span_visible(row.timeline_start as f32, row.timeline_end as f32);
+                }
             }
             SectionsMsg::RowDragBegin(index) => {
                 self.drag_begin_row(index);
@@ -257,13 +285,56 @@ impl SectionsPane {
                 self.sync_timeline_selection(studio);
             }
             SectionsMsg::RowSeek(index) => {
-                if let Some(row) = usize::try_from(index).ok().and_then(|i| self.rows.get(i)) {
+                if let Some(row) = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| self.rows.get(i))
+                    .cloned()
+                {
                     studio.seek(row.timeline_start as f32);
+                    studio
+                        .lanes
+                        .ensure_span_visible(row.timeline_start as f32, row.timeline_end as f32);
+                    if row.section.kind == Kind::Caption {
+                        let matching: Vec<String> = studio
+                            .timeline()
+                            .clips
+                            .iter()
+                            .filter(|c| {
+                                c.kind == concat_project::model::ClipKind::Text
+                                    && c.start < row.timeline_end - 1e-3
+                                    && c.start + c.duration > row.timeline_start + 1e-3
+                            })
+                            .map(|c| c.id.clone())
+                            .collect();
+                        if !matching.is_empty() {
+                            studio.selection = matching;
+                        }
+                    }
                 }
             }
             SectionsMsg::RowTextEdited(index, text) => {
                 if let Ok(idx) = usize::try_from(index) {
+                    if let Some(row) = self.rows.get(idx) {
+                        studio.lanes.ensure_span_visible(
+                            row.timeline_start as f32,
+                            row.timeline_end as f32,
+                        );
+                    }
                     self.edit_row_text(idx, text, studio);
+                }
+            }
+            SectionsMsg::ListScrolled(visible_index) => {
+                if visible_index <= 0 {
+                    studio.lanes.scroll_to_time(0.0);
+                } else {
+                    let visible = self.visible_indices();
+                    if let Some(&src_idx) = usize::try_from(visible_index)
+                        .ok()
+                        .and_then(|vi| visible.get(vi))
+                        && let Some(row) = self.rows.get(src_idx)
+                    {
+                        studio.lanes.scroll_to_time(row.timeline_start as f32);
+                    }
                 }
             }
             SectionsMsg::Finished(result) => {
@@ -407,6 +478,7 @@ impl SectionsPane {
             self.message = t("sections.nothingFound");
         } else {
             self.message.clear();
+            self.sync_scroll_to_time(f64::from(studio.playhead), true);
         }
     }
 
@@ -1075,6 +1147,7 @@ impl SectionsPane {
             subtitle_path: self.subtitle_path.clone(),
             external_cues: self.external_cues.clone(),
             sub_info: self.sub_info.clone(),
+            scroll_sync_seq: self.scroll_sync_seq,
             rows_model: Rc::clone(&self.rows_model),
             ..SectionsPane::default()
         };
@@ -1115,6 +1188,44 @@ impl SectionsPane {
         }
     }
 
+    /// Scrolls the Sections table to the visible row corresponding to `source_index`.
+    pub fn sync_scroll_to_source_row(&mut self, source_index: i32) {
+        let Ok(src_idx) = usize::try_from(source_index) else {
+            return;
+        };
+        let visible = self.visible_indices();
+        if let Some(vis_pos) = visible.iter().position(|&idx| idx == src_idx) {
+            self.scroll_to_row = vis_pos as i32;
+            self.scroll_sync_seq = self.scroll_sync_seq.wrapping_add(1);
+        }
+    }
+
+    /// Scrolls the Sections table to the visible row covering `time` (in timeline seconds),
+    /// or the nearest visible row if `time` falls between visible rows.
+    /// When `force` is false, only increments `scroll_sync_seq` if the target visible row changed.
+    pub fn sync_scroll_to_time(&mut self, time: f64, force: bool) {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
+            return;
+        }
+        let vis_pos = visible
+            .iter()
+            .position(|&idx| {
+                let r = &self.rows[idx];
+                time >= r.timeline_start - 1e-3 && time <= r.timeline_end + 1e-3
+            })
+            .or_else(|| {
+                visible
+                    .iter()
+                    .position(|&idx| self.rows[idx].timeline_end >= time)
+            })
+            .unwrap_or(visible.len() - 1) as i32;
+        if force || vis_pos != self.scroll_to_row {
+            self.scroll_to_row = vis_pos;
+            self.scroll_sync_seq = self.scroll_sync_seq.wrapping_add(1);
+        }
+    }
+
     /// Run silence detection using the editable VTS-compatible controls.
     fn detect(&mut self, studio: &mut Studio) {
         let Some(clip) = self.clip.as_ref().and_then(|id| studio.clip(id)).cloned() else {
@@ -1149,6 +1260,14 @@ impl SectionsPane {
     /// The sheet as Slint shows it.
     pub fn data(&self, studio: &Studio) -> SectionsSheetData {
         let playhead = f64::from(studio.playhead);
+        let selected_caption_span: Option<(f64, f64)> = if studio.selection.len() == 1 {
+            studio
+                .clip(&studio.selection[0])
+                .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+                .map(|c| (c.start, c.start + c.duration))
+        } else {
+            None
+        };
         let ticks: Vec<bool> = self.rows.iter().map(|row| row.keep).collect();
         let kept = kept_ranges(&self.rows, &ticks);
         let kept_seconds: f64 = kept.iter().map(|(start, end)| end - start).sum();
@@ -1164,35 +1283,43 @@ impl SectionsPane {
             .iter()
             .enumerate()
             .filter(|(_, row)| self.row_visible(row))
-            .map(|(index, row)| SectionRowData {
-                source_index: index as i32,
-                track: self.track_label.clone().into(),
-                start: precise_clock(row.timeline_start).into(),
-                end: precise_clock(row.timeline_end).into(),
-                duration: precise_clock(row.section.duration()).into(),
-                kind: kind_label(row.section.kind).into(),
-                label: if row.section.kind == Kind::Caption && !row.section.text.is_empty() {
-                    row.section.text.clone().into()
-                } else {
-                    kind_label(row.section.kind).into()
-                },
-                range: format!(
-                    "{} – {}",
-                    precise_clock(row.timeline_start),
-                    precise_clock(row.timeline_end)
-                )
-                .into(),
-                keep: row.keep,
-                at_playhead: playhead >= row.timeline_start && playhead < row.timeline_end,
-                kind_code: match row.section.kind {
-                    Kind::Caption => 0,
-                    Kind::Silence => 1,
-                    Kind::Other => 2,
-                },
-                start_ratio: ((row.timeline_start - timeline_start) / timeline_span).clamp(0.0, 1.0)
-                    as f32,
-                end_ratio: ((row.timeline_end - timeline_start) / timeline_span).clamp(0.0, 1.0)
-                    as f32,
+            .map(|(index, row)| {
+                let matches_selected_caption = selected_caption_span.is_some_and(|(s, e)| {
+                    row.section.kind == Kind::Caption
+                        && row.timeline_start < e - 1e-3
+                        && row.timeline_end > s + 1e-3
+                });
+                SectionRowData {
+                    source_index: index as i32,
+                    track: self.track_label.clone().into(),
+                    start: precise_clock(row.timeline_start).into(),
+                    end: precise_clock(row.timeline_end).into(),
+                    duration: precise_clock(row.section.duration()).into(),
+                    kind: kind_label(row.section.kind).into(),
+                    label: if row.section.kind == Kind::Caption && !row.section.text.is_empty() {
+                        row.section.text.clone().into()
+                    } else {
+                        kind_label(row.section.kind).into()
+                    },
+                    range: format!(
+                        "{} – {}",
+                        precise_clock(row.timeline_start),
+                        precise_clock(row.timeline_end)
+                    )
+                    .into(),
+                    keep: row.keep,
+                    at_playhead: (playhead >= row.timeline_start && playhead < row.timeline_end)
+                        || matches_selected_caption,
+                    kind_code: match row.section.kind {
+                        Kind::Caption => 0,
+                        Kind::Silence => 1,
+                        Kind::Other => 2,
+                    },
+                    start_ratio: ((row.timeline_start - timeline_start) / timeline_span)
+                        .clamp(0.0, 1.0) as f32,
+                    end_ratio: ((row.timeline_end - timeline_start) / timeline_span).clamp(0.0, 1.0)
+                        as f32,
+                }
             })
             .collect();
         sync(&self.rows_model, rows);
@@ -1251,6 +1378,8 @@ impl SectionsPane {
             can_add_captions: self.can_add_captions(),
             can_delete_captions: self.can_delete_captions(studio),
             can_apply: !self.running && !kept.is_empty() && self.rows.iter().any(|row| !row.keep),
+            scroll_to_row: self.scroll_to_row,
+            scroll_sync_seq: self.scroll_sync_seq,
             message: self.message.clone().into(),
             rows: slint::ModelRc::from(Rc::clone(&self.rows_model)),
         }

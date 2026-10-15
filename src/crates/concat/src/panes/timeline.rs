@@ -162,7 +162,20 @@ impl TimelinePane {
             // dragged to the lanes' edge scrolls them - and comes back to it
             // at the next seek; the floor at zero is the desk's, where the
             // start of the cut is the left edge and nothing is before it.
-            TimelineMsg::Scrolled(seconds) => self.scrolled(seconds),
+            TimelineMsg::Scrolled(seconds) => {
+                self.scrolled(seconds);
+                let screen = self.width * self.seconds_per_pixel;
+                let focus_time = if self.scroll_left <= 0.01 || screen <= 0.0 {
+                    self.scroll_left.max(0.0)
+                } else {
+                    let lead = (self.scroll_left / (screen * 0.5).max(1.0)).clamp(0.0, 1.0)
+                        * (screen * 0.25);
+                    self.scroll_left + lead
+                };
+                studio
+                    .sections
+                    .sync_scroll_to_time(f64::from(focus_time), false);
+            }
             TimelineMsg::Zoomed { factor, anchor } => {
                 let anchor = if anchor < 0.0 {
                     self.default_anchor(studio)
@@ -219,6 +232,44 @@ impl TimelinePane {
     pub fn recentre(&mut self, playhead: f32) {
         if self.centred && self.width > 0.0 {
             self.scroll_left = playhead - self.width * self.seconds_per_pixel / 2.0;
+        }
+    }
+
+    /// Ensures the timeline span `[start, end]` is comfortably visible in
+    /// the horizontal timeline viewport, scrolling `scroll_left` if needed.
+    pub fn ensure_span_visible(&mut self, start: f32, end: f32) {
+        if self.centred {
+            self.recentre(start);
+            return;
+        }
+        let screen = self.width * self.seconds_per_pixel;
+        if screen <= 0.0 {
+            self.scroll_left = (start - 1.0).max(0.0);
+            return;
+        }
+        let margin = screen * 0.12;
+        if start < self.scroll_left + margin || end > self.scroll_left + screen - margin {
+            let mid = (start + end.max(start)) * 0.5;
+            self.scroll_left = (mid - screen * 0.35).max(0.0);
+        }
+    }
+
+    /// Scrolls the timeline horizontally so `time` sits at ~25% from the
+    /// left edge of the visible timeline viewport (or 0.0 when `time <= 0.0`).
+    pub fn scroll_to_time(&mut self, time: f32) {
+        if self.centred {
+            self.recentre(time);
+            return;
+        }
+        if time <= 0.01 {
+            self.scroll_left = 0.0;
+            return;
+        }
+        let screen = self.width * self.seconds_per_pixel;
+        if screen > 0.0 {
+            self.scroll_left = (time - screen * 0.25).max(0.0);
+        } else {
+            self.scroll_left = time.max(0.0);
         }
     }
 

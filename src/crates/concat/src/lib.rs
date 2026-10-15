@@ -1617,7 +1617,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     editor.on_timeline_section_toggled(on_window!(|state, index: i32| {
         state.handle(Msg::Sections(
-            crate::panes::sections::SectionsMsg::RowToggled(index),
+            crate::panes::sections::SectionsMsg::TimelineSectionToggled(index),
         ));
     }));
 
@@ -2007,6 +2007,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         sections.on_row_text_edited(on_window!(|state, index: i32, text: SharedString| {
             state.handle(Msg::Sections(
                 crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
+            ));
+        }));
+        sections.on_list_scrolled(on_lanes!(|state, visible_index: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::ListScrolled(visible_index),
             ));
         }));
     }

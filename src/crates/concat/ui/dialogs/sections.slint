@@ -65,6 +65,8 @@ export struct SectionsSheetData {
     can-add-captions: bool,
     can-delete-captions: bool,
     can-apply: bool,
+    scroll-to-row: int,
+    scroll-sync-seq: int,
     rows: [SectionRowData],
 }
 
@@ -121,6 +123,7 @@ export global SectionsView {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
     callback threshold-changed(value: float);
@@ -154,6 +157,7 @@ component SectionsBody inherits VerticalLayout {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
     callback threshold-changed(value: float);
@@ -175,8 +179,24 @@ component SectionsBody inherits VerticalLayout {
     callback delete-selected-captions();
     callback apply();
 
+    property <int> last-sync-seq: -1;
+    property <int> sync-trigger: root.data.scroll-sync-seq;
+    changed sync-trigger => {
+        if (root.data.scroll-sync-seq != root.last-sync-seq) {
+            root.last-sync-seq = root.data.scroll-sync-seq;
+            if (root.data.scroll-to-row >= 0 && root.data.rows.length > 0) {
+                let row-y = 4px + root.data.scroll-to-row * 34px;
+                let view-h = list-scroll.height > 68px ? list-scroll.height : 240px;
+                let target = Math.max(0px, row-y - (view-h / 2) + 17px);
+                list-scroll.offset = -target;
+            }
+        }
+    }
+
     DialogSection {
         first: true;
+        collapsible: true;
+        open: !root.in-panel;
         title: root.data.clip-label != "" ? root.data.clip-label : I18n.t("sections.detectSections");
         summary: root.data.summary;
 
@@ -335,6 +355,14 @@ component SectionsBody inherits VerticalLayout {
                 vertical-alignment: center;
             }
         }
+    }
+
+    VerticalLayout {
+        vertical-stretch: 1;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 6px;
+        spacing: 8px;
 
         if root.data.running: Text {
             text: I18n.t("sections.listening");
@@ -369,7 +397,7 @@ component SectionsBody inherits VerticalLayout {
             }
 
             timeline-bar := Rectangle {
-                height: 22px;
+                height: 20px;
                 border-radius: Theme.r-sm;
                 background: Theme.well;
                 border-width: 1px;
@@ -411,7 +439,7 @@ component SectionsBody inherits VerticalLayout {
 
         // Filter & bulk-selection toolbar (matches VTS section.txt)
         if !root.data.running: VerticalLayout {
-            spacing: 8px;
+            spacing: 6px;
 
             HorizontalLayout {
                 spacing: 6px;
@@ -514,7 +542,7 @@ component SectionsBody inherits VerticalLayout {
             }
 
             // Selection hint banner (section.txt)
-            Rectangle {
+            if !root.in-panel: Rectangle {
                 min-height: 26px;
                 border-radius: Theme.r-sm;
                 background: Theme.well;
@@ -538,8 +566,9 @@ component SectionsBody inherits VerticalLayout {
             }
         }
 
-        if !root.data.running && root.data.rows.length > 0: Rectangle {
-            height: 280px;
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: root.in-panel ? 120px : 260px;
             border-radius: Theme.r;
             background: Theme.well;
             border-width: 1px;
@@ -615,8 +644,16 @@ component SectionsBody inherits VerticalLayout {
                     }
                 }
 
-                PaneScroll {
+                list-scroll := PaneScroll {
                     vertical-stretch: 1;
+                    user-scrolled(scroll-top) => {
+                        if (root.data.rows.length > 0) {
+                            let view-h = self.height > 68px ? self.height : 240px;
+                            let focus-y = scroll-top <= 8px ? 0px : (scroll-top + Math.min(68px, view-h * 0.25));
+                            let vis-idx = Math.clamp(Math.floor((focus-y - 4px) / 34px), 0, root.data.rows.length - 1);
+                            root.list-scrolled(vis-idx);
+                        }
+                    }
 
                     list := VerticalLayout {
                         padding: 4px;
@@ -843,6 +880,7 @@ export component SectionsDialog inherits Modal {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
     callback threshold-changed(value: float);
@@ -878,6 +916,7 @@ export component SectionsDialog inherits Modal {
         row-drag-over(visible-index) => { root.row-drag-over(visible-index); }
         row-seek(index) => { root.row-seek(index); }
         row-text-edited(index, text) => { root.row-text-edited(index, text); }
+        list-scrolled(visible-index) => { root.list-scrolled(visible-index); }
         detect => { root.detect(); }
         detect-silence-changed(on) => { root.detect-silence-changed(on); }
         threshold-changed(value) => { root.threshold-changed(value); }
@@ -913,6 +952,15 @@ export component SectionsWorkspacePane inherits Pane {
 
             VerticalLayout {
                 alignment: center;
+                Button {
+                    label: I18n.t("sections.detectSections");
+                    enabled: !SectionsView.data.running;
+                    clicked => { SectionsView.detect(); }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
                 PaneSwitcher {
                     kind: PaneKind.sections;
                     seat: root.pane-seat;
@@ -923,39 +971,37 @@ export component SectionsWorkspacePane inherits Pane {
             }
         }
 
-        PaneScroll {
+        SectionsBody {
             vertical-stretch: 1;
-
-            SectionsBody {
-                data: SectionsView.data;
-                in-panel: true;
-                row-toggled(index) => { SectionsView.row-toggled(index); }
-                row-shift-select(index) => { SectionsView.row-shift-select(index); }
-                row-drag-begin(index) => { SectionsView.row-drag-begin(index); }
-                row-drag-over(visible-index) => { SectionsView.row-drag-over(visible-index); }
-                row-seek(index) => { SectionsView.row-seek(index); }
-                row-text-edited(index, text) => { SectionsView.row-text-edited(index, text); }
-                detect => { SectionsView.detect(); }
-                detect-silence-changed(on) => { SectionsView.detect-silence-changed(on); }
-                threshold-changed(value) => { SectionsView.threshold-changed(value); }
-                min-silence-changed(value) => { SectionsView.min-silence-changed(value); }
-                min-section-changed(value) => { SectionsView.min-section-changed(value); }
-                use-captions-changed(on) => { SectionsView.use-captions-changed(on); }
-                subtitle-path-edited(path) => { SectionsView.subtitle-path-edited(path); }
-                browse-subtitle => { SectionsView.browse-subtitle(); }
-                search-changed(text) => { SectionsView.search-changed(text); }
-                min-duration-changed(value) => { SectionsView.min-duration-changed(value); }
-                kind-toggled(kind) => { SectionsView.kind-toggled(kind); }
-                select-visible => { SectionsView.select-visible(); }
-                select-none => { SectionsView.select-none(); }
-                select-invert => { SectionsView.select-invert(); }
-                select-all-silence => { SectionsView.select-all-silence(); }
-                select-all-captions => { SectionsView.select-all-captions(); }
-                add-captions-to-timeline => { SectionsView.add-captions-to-timeline(); }
-                add-captions-new-track => { SectionsView.add-captions-new-track(); }
-                delete-selected-captions => { SectionsView.delete-selected-captions(); }
-                apply => { SectionsView.apply(); }
-            }
+            data: SectionsView.data;
+            in-panel: true;
+            row-toggled(index) => { SectionsView.row-toggled(index); }
+            row-shift-select(index) => { SectionsView.row-shift-select(index); }
+            row-drag-begin(index) => { SectionsView.row-drag-begin(index); }
+            row-drag-over(visible-index) => { SectionsView.row-drag-over(visible-index); }
+            row-seek(index) => { SectionsView.row-seek(index); }
+            row-text-edited(index, text) => { SectionsView.row-text-edited(index, text); }
+            list-scrolled(visible-index) => { SectionsView.list-scrolled(visible-index); }
+            detect => { SectionsView.detect(); }
+            detect-silence-changed(on) => { SectionsView.detect-silence-changed(on); }
+            threshold-changed(value) => { SectionsView.threshold-changed(value); }
+            min-silence-changed(value) => { SectionsView.min-silence-changed(value); }
+            min-section-changed(value) => { SectionsView.min-section-changed(value); }
+            use-captions-changed(on) => { SectionsView.use-captions-changed(on); }
+            subtitle-path-edited(path) => { SectionsView.subtitle-path-edited(path); }
+            browse-subtitle => { SectionsView.browse-subtitle(); }
+            search-changed(text) => { SectionsView.search-changed(text); }
+            min-duration-changed(value) => { SectionsView.min-duration-changed(value); }
+            kind-toggled(kind) => { SectionsView.kind-toggled(kind); }
+            select-visible => { SectionsView.select-visible(); }
+            select-none => { SectionsView.select-none(); }
+            select-invert => { SectionsView.select-invert(); }
+            select-all-silence => { SectionsView.select-all-silence(); }
+            select-all-captions => { SectionsView.select-all-captions(); }
+            add-captions-to-timeline => { SectionsView.add-captions-to-timeline(); }
+            add-captions-new-track => { SectionsView.add-captions-new-track(); }
+            delete-selected-captions => { SectionsView.delete-selected-captions(); }
+            apply => { SectionsView.apply(); }
         }
     }
 }

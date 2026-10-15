@@ -22,6 +22,10 @@
        - Extracted `SectionsBody` and `export global SectionsView` in `ui/dialogs/sections.slint` and added `export component SectionsWorkspacePane inherits Pane`, mounted in `ui/workspace/seat.slint` when `root.kind == PaneKind.sections`.
        - Added `SectionsMsg::OpenPanel` and `open_on(&mut self, studio: &mut Studio, modal: bool)` in `src/crates/concat/src/panes/sections.rs`, `Studio::open_sections_panel_or_sheet()` in `src/crates/concat/src/studio.rs`, and full callback/data bindings on `app.global::<SectionsView>()` in `src/crates/concat/src/lib.rs` and `src/crates/concat/src/studio.rs`.
        - Fixed the 3 `concat` compile errors reported on Windows (`Cue` struct construction and `concat_project::subtitle::to_srt(&cues)` in `src/crates/concat/src/panes/export.rs`, and `.map(|v| &**v)` on `Option<&Arc<Clip>>` in `src/crates/concat/src/panes/sections.rs`).
+    5. **Bidirectional Scroll Synchronization between `Sections` Panel and `Timeline`**:
+       - Exposed `in-out property <length> offset`, `out property <length> at`, and `callback user-scrolled(scroll-top: length)` on `PaneScroll` (`ui/workspace/pane.slint`).
+       - Made the `SectionsBody` rows table (`list-scroll := PaneScroll`) stretch to fill the panel (`vertical-stretch: 1`) with collapsible detection settings (`DialogSection { collapsible: true; open: !root.in-panel; }`), eliminating nested scrollbars.
+       - Added `scroll_to_row` and `scroll_sync_seq` to `SectionsSheetData` & `SectionsPane` (`sync_scroll_to_time`, `sync_scroll_to_source_row`), and `ensure_span_visible` & `scroll_to_time` to `TimelinePane` (`src/crates/concat/src/panes/timeline.rs`), plus real-time `SectionsView` publishing inside `Studio::publish_lanes`.
 
 ---
 

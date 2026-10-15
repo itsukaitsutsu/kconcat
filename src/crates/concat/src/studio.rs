@@ -2745,6 +2745,9 @@ impl Studio {
                         }
                         shown = Some(frame);
                         studio.playhead = position.min(end);
+                        studio
+                            .sections
+                            .sync_scroll_to_time(f64::from(studio.playhead), false);
                         // The view follows: a playhead that runs off the
                         // right edge, or sits off the left, pages the lanes
                         // to it, the way every editor keeps the cut in view.
@@ -2803,6 +2806,9 @@ impl Studio {
         }
         // A phone's lanes move under a playhead held at their middle.
         self.lanes.recentre(self.playhead);
+        self.lanes.ensure_span_visible(self.playhead, self.playhead);
+        self.sections
+            .sync_scroll_to_time(f64::from(self.playhead), true);
         self.host.playback.seek(f64::from(self.playhead));
         self.request_preview();
     }
@@ -4242,6 +4248,8 @@ impl Studio {
         } else {
             vec![id.to_owned()]
         };
+        self.sections
+            .sync_scroll_to_time(clip.start + clip.duration * 0.5, true);
 
         self.begin_echo();
         if edge >= 0 && self.selection.len() <= 1 {
@@ -7860,6 +7868,11 @@ impl Studio {
     /// event of a scrub, a drag, a trim or a knob.
     pub fn publish_lanes(&self, app: &App, models: &Models) {
         let editor = app.global::<Editor>();
+        if !self.sections.is_empty() || self.sections.open {
+            let sections_data = self.sections.data(self);
+            app.global::<SectionsView>().set_data(sections_data.clone());
+            app.set_sections(sections_data);
+        }
         let project = self.project();
         sync(
             &models.tabs,

@@ -968,6 +968,7 @@ export component App inherits Window {
         row-drag-over(visible-index) => { root.sections-row-drag-over(visible-index); }
         row-seek(index) => { root.sections-row-seek(index); }
         row-text-edited(index, text) => { root.sections-row-text-edited(index, text); }
+        list-scrolled(visible-index) => { SectionsView.list-scrolled(visible-index); }
         detect => { root.sections-detect(); }
         detect-silence-changed(on) => { root.sections-detect-silence-changed(on); }
         threshold-changed(value) => { root.sections-threshold-changed(value); }
