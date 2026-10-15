@@ -40,6 +40,7 @@ pub enum ExportMsg {
     QualityChanged(i32),
     CodecChanged(i32),
     TenBitChanged(bool),
+    BurnCaptionsChanged(bool),
     /// For an HDR timeline: written HDR (true), or tone-mapped to SDR.
     HdrChanged(bool),
     /// Limited or full range, as a row of the Advanced section's list.
@@ -87,6 +88,8 @@ pub struct ExportPane {
     /// Index into `VideoCodec::ALL`.
     pub codec: usize,
     pub ten_bit: bool,
+    /// Paint the captions into a re-encoded picture. On by default.
+    pub burn_captions: bool,
     /// An HDR timeline written tone-mapped to SDR rather than as it is.
     pub sdr: bool,
     /// Index into `ColorRange::ALL`: 0 limited, 1 full. Read only while
@@ -121,6 +124,7 @@ impl Default for ExportPane {
             quality: 1,
             codec: 0,
             ten_bit: false,
+            burn_captions: true,
             sdr: false,
             color_range: 0,
             advanced: false,
@@ -181,6 +185,7 @@ impl ExportPane {
                 }
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
+            ExportMsg::BurnCaptionsChanged(on) => self.burn_captions = on,
             ExportMsg::HdrChanged(on) => self.sdr = !on,
             ExportMsg::ColorRangeChanged(index) => {
                 self.color_range = (index.max(0) as usize).min(ColorRange::ALL.len() - 1);
@@ -590,6 +595,16 @@ impl ExportPane {
         request.rate_den = den;
         let project_for_titles = session.project().clone();
         let titles_engine = std::sync::Arc::clone(&studio.host.titles);
+        // With captions off, the export paints shapes only. A text clip is a
+        // caption or a title; both are left out here.
+        let burn_captions = self.burn_captions;
+        let text_clip_ids: Vec<String> = project_for_titles
+            .active()
+            .clips
+            .iter()
+            .filter(|clip| clip.kind == concat_project::model::ClipKind::Text)
+            .map(|clip| clip.id.clone())
+            .collect();
 
         studio.pause();
         self.phase = ExportPhase::Running;
@@ -612,6 +627,7 @@ impl ExportPane {
                 let title_clips: Vec<_> = titles_engine
                     .clips(&project_for_titles, frame_w, frame_h)
                     .into_iter()
+                    .filter(|title| burn_captions || !text_clip_ids.contains(&title.clip_id))
                     .map(|title| title.clip)
                     .collect();
                 request.clips.extend(title_clips);
@@ -732,6 +748,7 @@ impl ExportPane {
             hevc_encodable: concat_media::VideoCodec::Hevc.encodable(),
             av1_encodable: concat_media::VideoCodec::Av1.encodable(),
             ten_bit: self.ten_bit,
+            burn_captions: self.burn_captions,
             hdr_timeline: studio.timeline().video.color_space.is_hdr(),
             hdr: self.hdr(studio),
             deep_available: concat_media::VideoCodec::ALL

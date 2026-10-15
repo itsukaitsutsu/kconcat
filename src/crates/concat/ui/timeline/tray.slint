@@ -435,12 +435,6 @@ export component TimelineTray inherits Rectangle {
             clicked => { root.captions(); }
         }
         TrayButton {
-            glyph: Glyph.rows;
-            label: I18n.t("tray.sections");
-            icon-size: 16px;
-            clicked => { root.sections(); }
-        }
-        TrayButton {
             glyph: Glyph.volume;
             label: I18n.t("tray.textToSpeech");
             icon-size: 16px;

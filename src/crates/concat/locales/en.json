@@ -644,6 +644,7 @@
   "export.summary": "Summary",
   "export.targetBitrate": "Target bitrate",
   "export.tenBitColour": "10-bit colour",
+  "export.burnCaptions": "Burn captions into the video",
   "export.timelineSize": "Timeline",
   "export.toneMapped": "Tone-mapped, plays anywhere",
   "export.vbr": "VBR",

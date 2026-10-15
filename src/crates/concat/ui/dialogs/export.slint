@@ -57,6 +57,8 @@ export struct ExportData {
     hevc-encodable: bool,
     av1-encodable: bool,
     ten-bit: bool,
+    /// Captions are painted into a re-encoded picture; see the switch.
+    burn-captions: bool,
     /// The timeline is HDR, so the file can be written HDR or SDR.
     hdr-timeline: bool,
     /// It is being written HDR: ten bits, HEVC or AV1.
@@ -344,6 +346,7 @@ component OutputSection inherits DialogSection {
     callback rate-changed(index: int);
     callback codec-changed(index: int);
     callback ten-bit-changed(on: bool);
+    callback burn-captions-changed(on: bool);
     callback hdr-changed(on: bool);
 
     title: I18n.t("export.output");
@@ -428,6 +431,21 @@ component OutputSection inherits DialogSection {
                 Switch {
                     checked: root.data.ten-bit;
                     toggled(on) => { root.ten-bit-changed(on); }
+                }
+            }
+        }
+    }
+    // Captions are painted into the picture on a re-encode. A stream copy
+    // cannot paint them, so the switch is only offered for the re-encodes.
+    if root.data.codec != 3: DialogRow {
+        label: I18n.t("export.burnCaptions");
+        HorizontalLayout {
+            alignment: end;
+            VerticalLayout {
+                alignment: center;
+                Switch {
+                    checked: root.data.burn-captions;
+                    toggled(on) => { root.burn-captions-changed(on); }
                 }
             }
         }
@@ -711,6 +729,7 @@ export component ExportDialog inherits Rectangle {
     callback quality-changed(index: int);
     callback codec-changed(index: int);
     callback ten-bit-changed(on: bool);
+    callback burn-captions-changed(on: bool);
     callback hdr-changed(on: bool);
     callback color-range-changed(index: int);
     callback advanced-toggled(on: bool);
@@ -846,6 +865,7 @@ export component ExportDialog inherits Rectangle {
                             rate-changed(index) => { root.rate-changed(index); }
                             codec-changed(index) => { root.codec-changed(index); }
                             ten-bit-changed(on) => { root.ten-bit-changed(on); }
+                            burn-captions-changed(on) => { root.burn-captions-changed(on); }
                             hdr-changed(on) => { root.hdr-changed(on); }
                         }
                         if !root.running: QualitySection {
@@ -903,6 +923,7 @@ export component ExportDialog inherits Rectangle {
                                 rate-changed(index) => { root.rate-changed(index); }
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
+                                burn-captions-changed(on) => { root.burn-captions-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                             }
                             AdvancedSection {
@@ -946,6 +967,7 @@ export component ExportDialog inherits Rectangle {
                                 rate-changed(index) => { root.rate-changed(index); }
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
+                                burn-captions-changed(on) => { root.burn-captions-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                             }
                             DestinationSection {

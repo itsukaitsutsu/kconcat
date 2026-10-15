@@ -1477,6 +1477,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_export_ten_bit_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Export(ExportMsg::TenBitChanged(on)));
     }));
+    app.on_export_burn_captions_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Export(ExportMsg::BurnCaptionsChanged(on)));
+    }));
     app.on_export_color_range_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Export(ExportMsg::ColorRangeChanged(index)));
     }));
