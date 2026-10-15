@@ -295,17 +295,29 @@ impl SectionsPane {
                         .lanes
                         .ensure_span_visible(row.timeline_start as f32, row.timeline_end as f32);
                     if row.section.kind == Kind::Caption {
-                        let matching: Vec<String> = studio
-                            .timeline()
-                            .clips
-                            .iter()
-                            .filter(|c| {
-                                c.kind == concat_project::model::ClipKind::Text
-                                    && c.start < row.timeline_end - 1e-3
-                                    && c.start + c.duration > row.timeline_start + 1e-3
-                            })
-                            .map(|c| c.id.clone())
-                            .collect();
+                        // A row carries its originating caption id. Falling
+                        // back to text + time keeps older/external rows
+                        // usable, but never selects a hand-made title merely
+                        // because it happens to overlap a subtitle.
+                        let matching: Vec<String> = match row.caption_id {
+                            Some(caption_id) if studio.timeline().clip(&caption_id).is_some() => {
+                                vec![caption_id]
+                            }
+                            _ => studio
+                                .timeline()
+                                .clips
+                                .iter()
+                                .filter(|c| {
+                                    is_caption_clip(c)
+                                        && c.start < row.timeline_end - 1e-3
+                                        && c.start + c.duration > row.timeline_start + 1e-3
+                                        && c.text
+                                            .as_ref()
+                                            .is_some_and(|style| style.content == row.section.text)
+                                })
+                                .map(|c| c.id.clone())
+                                .collect(),
+                        };
                         if !matching.is_empty() {
                             studio.selection = matching;
                         }
@@ -413,7 +425,7 @@ impl SectionsPane {
             .timeline()
             .clips
             .iter()
-            .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+            .filter(|c| is_caption_clip(c))
             .count();
         if self.external_cues.is_empty() && self.subtitle_path.trim().is_empty() {
             if total_captions > 0 {
@@ -436,14 +448,13 @@ impl SectionsPane {
                 for cid in &track_clips {
                     if let Some(c) = studio.timeline().clip(cid) {
                         for cap in studio.timeline().clips.iter().filter(|cap| {
-                            cap.kind == concat_project::model::ClipKind::Text
+                            is_caption_clip(cap)
                                 && cap.start < c.start + c.duration - 1e-3
                                 && cap.start + cap.duration > c.start + 1e-3
                         }) {
                             let rel_s = (cap.start - c.start).max(0.0) * c.speed;
-                            let rel_e = ((cap.start + cap.duration - c.start)
-                                .min(c.duration))
-                                * c.speed;
+                            let rel_e =
+                                ((cap.start + cap.duration - c.start).min(c.duration)) * c.speed;
                             if rel_e > rel_s {
                                 spans.push((c.source_start + rel_s, c.source_start + rel_e));
                             }
@@ -492,7 +503,12 @@ impl SectionsPane {
     /// silences (and kicks off background silence detection if needed) when the
     /// user interacts with the synchronized Timeline Filter bar.
     pub fn ensure_populated(&mut self, studio: &mut Studio) {
-        if self.clip.is_none() || self.clip.as_deref().is_some_and(|id| studio.timeline().clip(id).is_none()) {
+        if self.clip.is_none()
+            || self
+                .clip
+                .as_deref()
+                .is_some_and(|id| studio.timeline().clip(id).is_none())
+        {
             let candidate = studio
                 .selection
                 .iter()
@@ -595,11 +611,7 @@ impl SectionsPane {
             return;
         }
         let mut commands = Vec::new();
-        let has_timeline_captions = studio
-            .timeline()
-            .clips
-            .iter()
-            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+        let has_timeline_captions = studio.timeline().clips.iter().any(|c| is_caption_clip(c));
         if self.use_captions && (!self.external_cues.is_empty() || !has_timeline_captions) {
             let caption_cmds = self.build_caption_commands(studio, &clip_id, false);
             if !caption_cmds.is_empty() {
@@ -677,6 +689,7 @@ impl SectionsPane {
         // keeps a translation on another caption track (same span, other
         // language) from being overwritten by an edit to this one.
         let previous_text = std::mem::replace(&mut row.section.text, text.clone());
+        let caption_id = row.caption_id.clone();
         let sec_start = row.section.start;
         let sec_end = row.section.end;
         let tl_start = row.timeline_start;
@@ -688,18 +701,31 @@ impl SectionsPane {
             }
         }
 
-        let matching_captions: Vec<(String, concat_project::model::TextStyle)> = studio
-            .timeline()
-            .clips
-            .iter()
-            .filter(|cap| {
-                cap.kind == concat_project::model::ClipKind::Text
-                    && cap.start < tl_end - 1e-3
-                    && cap.start + cap.duration > tl_start + 1e-3
-            })
-            .filter_map(|cap| cap.text.clone().map(|style| (cap.id.clone(), style)))
-            .filter(|(_, style)| style.content == previous_text)
-            .collect();
+        let matching_captions: Vec<(String, concat_project::model::TextStyle)> =
+            if let Some(caption_id) = caption_id {
+                studio
+                    .timeline()
+                    .clip(&caption_id)
+                    .filter(|cap| is_caption_clip(cap))
+                    .and_then(|cap| cap.text.clone().map(|style| (cap.id.clone(), style)))
+                    .into_iter()
+                    .collect()
+            } else {
+                // External/old rows did not carry an id. Match their words
+                // as well as their range, and exclude manual title clips.
+                studio
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|cap| {
+                        is_caption_clip(cap)
+                            && cap.start < tl_end - 1e-3
+                            && cap.start + cap.duration > tl_start + 1e-3
+                    })
+                    .filter_map(|cap| cap.text.clone().map(|style| (cap.id.clone(), style)))
+                    .filter(|(_, style)| style.content == previous_text)
+                    .collect()
+            };
 
         for (cap_id, mut style) in matching_captions {
             if style.content != text {
@@ -798,31 +824,44 @@ impl SectionsPane {
         }
     }
 
-    /// Returns timeline caption clip IDs overlapping any checked (`!row.keep`) section row.
+    /// Returns precisely the caption clips selected through the Sections
+    /// rows. A caption row normally names its source clip; the time/text
+    /// fallback is only for an old document or an external subtitle row.
     fn matching_selected_caption_ids(&self, studio: &Studio) -> Vec<String> {
-        let checked_ranges: Vec<(f64, f64)> = self
+        let selected: Vec<&Row> = self
             .rows
             .iter()
-            .filter(|r| !r.keep)
-            .map(|r| (r.timeline_start, r.timeline_end))
+            .filter(|row| !row.keep && row.section.kind == Kind::Caption)
             .collect();
-        if checked_ranges.is_empty() {
+        if selected.is_empty() {
             return Vec::new();
         }
+        let direct: std::collections::HashSet<&str> = selected
+            .iter()
+            .filter_map(|row| row.caption_id.as_deref())
+            .collect();
+        let fallback: Vec<&Row> = selected
+            .iter()
+            .copied()
+            .filter(|row| row.caption_id.is_none())
+            .collect();
         studio
             .timeline()
             .clips
             .iter()
-            .filter(|cap| {
-                cap.kind == concat_project::model::ClipKind::Text && {
-                    let c_start = cap.start;
-                    let c_end = cap.start + cap.duration;
-                    checked_ranges
-                        .iter()
-                        .any(|&(s, e)| c_start < e - 1e-3 && c_end > s + 1e-3)
-                }
+            .filter(|clip| {
+                is_caption_clip(clip)
+                    && (direct.contains(clip.id.as_str())
+                        || fallback.iter().any(|row| {
+                            clip.start < row.timeline_end - 1e-3
+                                && clip.start + clip.duration > row.timeline_start + 1e-3
+                                && clip
+                                    .text
+                                    .as_ref()
+                                    .is_some_and(|style| style.content == row.section.text)
+                        }))
             })
-            .map(|cap| cap.id.clone())
+            .map(|clip| clip.id.clone())
             .collect()
     }
 
@@ -858,7 +897,7 @@ impl SectionsPane {
         let checked_sec_ranges: Vec<(f64, f64)> = self
             .rows
             .iter()
-            .filter(|r| !r.keep && r.section.kind == Kind::Caption)
+            .filter(|r| !r.keep && r.section.kind == Kind::Caption && r.caption_id.is_none())
             .map(|r| (r.section.start, r.section.end))
             .collect();
         if !checked_sec_ranges.is_empty() && !self.external_cues.is_empty() {
@@ -928,11 +967,7 @@ impl SectionsPane {
     ) -> Vec<Command> {
         let base = studio.prefs.title_style.clone();
         let default_look = crate::panes::captions::default_caption_look();
-        let has_existing_text = studio
-            .timeline()
-            .clips
-            .iter()
-            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+        let has_existing_text = studio.timeline().clips.iter().any(|c| is_caption_clip(c));
         let look = if !replace_existing && has_existing_text {
             crate::panes::captions::non_overlapping_caption_look(studio, clip_id, default_look)
         } else {
@@ -1251,7 +1286,7 @@ impl SectionsPane {
         let selected_caption_span: Option<(f64, f64)> = if studio.selection.len() == 1 {
             studio
                 .clip(&studio.selection[0])
-                .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+                .filter(|c| is_caption_clip(c))
                 .map(|c| (c.start, c.start + c.duration))
         } else {
             None
@@ -1376,10 +1411,7 @@ impl SectionsPane {
 
 /// Carves silence intervals `(s_start, s_end)` around caption spans `(c_start, c_end)`
 /// so that no detected silence span ever overlaps or cuts inside an active caption cue.
-fn carve_silences_around_cues(
-    silences: &[(f64, f64)],
-    cues: &mut [(f64, f64)],
-) -> Vec<(f64, f64)> {
+fn carve_silences_around_cues(silences: &[(f64, f64)], cues: &mut [(f64, f64)]) -> Vec<(f64, f64)> {
     if cues.is_empty() || silences.is_empty() {
         return silences.to_vec();
     }
@@ -1418,6 +1450,15 @@ fn carve_silences_around_cues(
 }
 
 /// A section kind as the row's first word.
+/// Whether a text clip is a timeline caption rather than a hand-made title.
+/// Imported captions carry word timing; transcribed captions additionally have
+/// `caption_of`. Old untagged title clips are deliberately not inferred from
+/// timing alone, because deleting a title to remove a subtitle is destructive.
+fn is_caption_clip(clip: &concat_project::model::Clip) -> bool {
+    clip.kind == concat_project::model::ClipKind::Text
+        && (clip.caption_of.is_some() || clip.words.is_some())
+}
+
 fn kind_label(kind: Kind) -> String {
     match kind {
         Kind::Caption => t("sections.caption"),
@@ -1477,6 +1518,7 @@ mod tests {
                 timeline_start: 0.0,
                 timeline_end: 2.0,
                 keep: true,
+                caption_id: Some("caption-1".to_owned()),
             },
             Row {
                 section: Section {
@@ -1488,6 +1530,7 @@ mod tests {
                 timeline_start: 2.0,
                 timeline_end: 3.5,
                 keep: false,
+                caption_id: None,
             },
             Row {
                 section: Section {
@@ -1499,6 +1542,7 @@ mod tests {
                 timeline_start: 3.5,
                 timeline_end: 4.0,
                 keep: true,
+                caption_id: None,
             },
         ]
     }

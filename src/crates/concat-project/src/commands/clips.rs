@@ -758,6 +758,14 @@ pub(super) fn apply(
             }
             segments.push((clip_end, f64::INFINITY, -removed_total));
 
+            // A rebuilt caption or detached-audio piece must point at the
+            // matching rebuilt source piece, not always at the head. Without
+            // this map, a caption over a tail created by Remove selected
+            // still names the old head, then stops following the tail on the
+            // next drag, trim or export.
+            let mut rebuilt_pieces: HashMap<String, Vec<(f64, f64, String)>> = HashMap::new();
+            let mut original_span_of_piece: HashMap<String, (f64, f64)> = HashMap::new();
+
             for participant_id in &participants {
                 let Some(index) = timeline
                     .clips
@@ -858,11 +866,47 @@ pub(super) fn apply(
                             piece.words = None;
                         }
                     }
+                    // Remember the original timeline interval before the
+                    // packed piece loses that coordinate. Link repair below
+                    // uses the interval to pair a caption/audio tail with
+                    // the source tail made from the same kept range.
+                    let piece_id = piece.id.clone();
+                    rebuilt_pieces
+                        .entry(original.id.clone())
+                        .or_default()
+                        .push((start, end, piece_id.clone()));
+                    original_span_of_piece.insert(piece_id, (start, end));
                     pieces.push(piece);
                 }
                 timeline.clips.remove(index);
                 for (offset, piece) in pieces.into_iter().enumerate() {
                     timeline.clips.insert(index + offset, Arc::new(piece));
+                }
+            }
+
+            // A split keeps the first source id, but every later piece gets
+            // a fresh one. Re-link text and detached sound pieces to the
+            // source piece occupying their original interval. This is the
+            // part that makes Sections' Remove selected stay synchronized
+            // after a subsequent timeline edit, instead of merely looking
+            // synchronized until the first drag.
+            for piece in
+                timeline.clips_where(|other| original_span_of_piece.contains_key(&other.id))
+            {
+                let Some(&(raw_start, raw_end)) = original_span_of_piece.get(&piece.id) else {
+                    continue;
+                };
+                if let Some(source) = piece.caption_of.clone()
+                    && let Some(replacement) =
+                        rebuilt_piece_for(&rebuilt_pieces, &source, raw_start, raw_end)
+                {
+                    piece.caption_of = Some(replacement);
+                }
+                if let Some(source) = piece.detached_from.clone()
+                    && let Some(replacement) =
+                        rebuilt_piece_for(&rebuilt_pieces, &source, raw_start, raw_end)
+                {
+                    piece.detached_from = Some(replacement);
                 }
             }
 
@@ -934,6 +978,36 @@ pub(super) fn apply(
 
 /// How far apart two clips may sit and still count as touching, in seconds.
 const JOIN_EPSILON: f64 = 1e-6;
+
+/// The new source-piece id that owns a rebuilt child interval.
+///
+/// `AutotrimClip` creates every piece from one of the same kept segments,
+/// so the interval midpoint normally lands in exactly one source piece. The
+/// overlap fallback keeps a link deterministic when a pre-existing document
+/// has slightly mismatched caption boundaries at a cut edge.
+fn rebuilt_piece_for(
+    rebuilt: &HashMap<String, Vec<(f64, f64, String)>>,
+    source_id: &str,
+    child_start: f64,
+    child_end: f64,
+) -> Option<String> {
+    let pieces = rebuilt.get(source_id)?;
+    let middle = (child_start + child_end) / 2.0;
+    if let Some((_, _, id)) = pieces
+        .iter()
+        .find(|(start, end, _)| *start - JOIN_EPSILON <= middle && middle <= *end + JOIN_EPSILON)
+    {
+        return Some(id.clone());
+    }
+    pieces
+        .iter()
+        .filter_map(|(start, end, id)| {
+            let overlap = end.min(child_end) - start.max(child_start);
+            (overlap > JOIN_EPSILON).then_some((overlap, id))
+        })
+        .max_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, id)| id.clone())
+}
 
 /// Phase 2 (linked captions): shift every caption whose source clip moved.
 ///

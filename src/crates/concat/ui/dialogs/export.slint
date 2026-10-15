@@ -435,16 +435,25 @@ component OutputSection inherits DialogSection {
             }
         }
     }
-    // Captions are painted into the picture on a re-encode. A stream copy
-    // cannot paint them, so the switch is only offered for the re-encodes.
-    if root.data.codec != 3: DialogRow {
+    // Always show this control. Hiding it for Same as copy was read as a
+    // missing feature; stream copy cannot make frames, so it is disabled
+    // there and says why instead of silently exporting without captions.
+    DialogRow {
         label: I18n.t("export.burnCaptions");
         HorizontalLayout {
             alignment: end;
+            if root.data.codec == 3: Text {
+                text: I18n.t("export.burnCaptionsStreamCopy");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
             VerticalLayout {
                 alignment: center;
                 Switch {
                     checked: root.data.burn-captions;
+                    enabled: root.data.codec != 3;
                     toggled(on) => { root.burn-captions-changed(on); }
                 }
             }

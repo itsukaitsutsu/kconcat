@@ -1117,7 +1117,6 @@
   "tray.previewAxisOptions": "プレビュー軸のオプション",
   "tray.recordVoiceover": "ナレーションを録音",
   "tray.redo": "やり直す ({0})",
-  "tray.sections": "Sections: what this clip is made of",
   "tray.splitAtPlayhead": "再生ヘッドで分割 ({0})",
   "tray.splitTool": "分割ツール (B): クリップをクリックした位置で切る",
   "tray.stopRecording": "録音を停止",

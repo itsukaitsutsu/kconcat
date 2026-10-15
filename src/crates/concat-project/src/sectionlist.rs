@@ -50,6 +50,14 @@ pub struct Row {
     pub timeline_end: f64,
     /// Ticked to begin with: everything except silence.
     pub keep: bool,
+    /// The timeline text clip that produced this caption row, when the row
+    /// came from a Concat caption rather than an external subtitle file.
+    ///
+    /// A section row is not just a time range: two caption tracks can cover
+    /// the same range in different languages. Keeping the source clip id
+    /// lets the Sections UI select, edit and delete *that* caption without
+    /// touching the translation or a hand-made title underneath it.
+    pub caption_id: Option<String>,
 }
 
 /// Everything the panel needs for one clip: the rows, and the one-line
@@ -70,6 +78,9 @@ struct Cue {
     start: f64,
     end: f64,
     text: String,
+    /// `None` for a cue read from an external subtitle file. Timeline
+    /// captions keep their identity all the way to [`Row::caption_id`].
+    clip_id: Option<String>,
 }
 
 impl TimedCue for Cue {
@@ -158,6 +169,7 @@ pub fn clip_sections_with_cues(
                 start: cue.start - clip.source_start,
                 end: cue.end - clip.source_start,
                 text: cue.text.clone(),
+                clip_id: None,
             })
             .filter(|cue| cue.end > 0.0 && cue.start < window)
             .collect()
@@ -169,12 +181,12 @@ pub fn clip_sections_with_cues(
             .iter()
             .filter(|c| {
                 c.kind == crate::model::ClipKind::Text
+                    // A caption tied to this source is unambiguous. An
+                    // imported/project-wide caption has no source link but
+                    // does carry word timing. A hand-typed title has neither
+                    // and must not turn into a removable "caption" section.
                     && (linked_ids.contains(&c.id)
-                        || c.caption_of.is_none()
-                        || c.caption_of
-                            .as_deref()
-                            .and_then(|cid| timeline.clip(cid))
-                            .is_some_and(|parent| parent.media_id == clip.media_id))
+                        || (c.caption_of.is_none() && c.words.is_some()))
             })
             .map(|caption| Cue {
                 // Timeline -> the clip's source window: how far into the
@@ -186,6 +198,7 @@ pub fn clip_sections_with_cues(
                     .as_ref()
                     .map(|style| style.content.clone())
                     .unwrap_or_default(),
+                clip_id: Some(caption.id.clone()),
             })
             .filter(|cue| cue.end > 0.0 && cue.start < window)
             .collect()
@@ -209,11 +222,30 @@ pub fn clip_sections_with_cues(
     let summary = sections::summarize(&sections);
     let rows = sections
         .into_iter()
-        .map(|section| Row {
-            timeline_start: sections::round_millis(clip.start + section.start / clip.speed),
-            timeline_end: sections::round_millis(clip.start + section.end / clip.speed),
-            keep: section.kind != Kind::Silence,
-            section,
+        .map(|section| {
+            // `build_sections` labels a caption span with the first cue that
+            // contains its midpoint. Use that same identity rule here so a
+            // row targets one caption track even when translations overlap.
+            let middle = (section.start + section.end) / 2.0;
+            let caption_id = (section.kind == Kind::Caption)
+                .then(|| {
+                    cues.iter()
+                        .find(|cue| {
+                            cue.clip_id.is_some()
+                                && cue.text == section.text
+                                && cue.start - 1e-6 <= middle
+                                && middle <= cue.end + 1e-6
+                        })
+                        .and_then(|cue| cue.clip_id.clone())
+                })
+                .flatten();
+            Row {
+                timeline_start: sections::round_millis(clip.start + section.start / clip.speed),
+                timeline_end: sections::round_millis(clip.start + section.end / clip.speed),
+                keep: section.kind != Kind::Silence,
+                caption_id,
+                section,
+            }
         })
         .collect();
     Some(ClipSections {
@@ -306,6 +338,7 @@ mod tests {
             timeline_start: start,
             timeline_end: end,
             keep,
+            caption_id: None,
         }
     }
 

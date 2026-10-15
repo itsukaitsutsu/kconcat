@@ -3352,7 +3352,7 @@ mod tests {
         use crate::sections::Kind;
 
         let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
-        linked_caption(&mut editor, &clip_id, 1.0, 2.0); // words over [1, 3)
+        let caption_id = linked_caption(&mut editor, &clip_id, 1.0, 2.0); // words over [1, 3)
 
         // Silences on the file clock: [3, 5) and one running off the end.
         let view = clip_sections(
@@ -3376,6 +3376,10 @@ mod tests {
         );
         assert_eq!(view.rows[1].section.text, "Linked words");
         assert_eq!(
+            view.rows[1].caption_id.as_deref(),
+            Some(caption_id.as_str())
+        );
+        assert_eq!(
             (view.rows[1].timeline_start, view.rows[1].timeline_end),
             (1.0, 3.0)
         );
@@ -3395,6 +3399,35 @@ mod tests {
         assert_eq!(kept_ranges(&view.rows, &ticks), [(0.0, 1.0), (5.0, 8.0)]);
         // An unknown clip has no sections, not a panic.
         assert!(clip_sections(editor.project().active(), "nope", &[], 0.0).is_none());
+    }
+
+    #[test]
+    fn sections_do_not_turn_a_hand_title_into_a_removable_caption() {
+        use crate::sectionlist::clip_sections;
+        use crate::sections::Kind;
+
+        let (mut editor, _, clip_id) = fixture(); // clip is [0, 10)
+        editor
+            .apply(Command::AddTextClip {
+                above: true,
+                track_id: None,
+                start: 2.0,
+                style: Some(TextStyle {
+                    content: "Chapter one".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(3.0),
+                offset_y: None,
+                caption_of: None,
+                words: None,
+            })
+            .expect("adds a title");
+
+        let view =
+            clip_sections(editor.project().active(), &clip_id, &[], 0.0).expect("the clip exists");
+        assert_eq!(view.rows.len(), 1);
+        assert_eq!(view.rows[0].section.kind, Kind::Other);
+        assert_eq!(view.rows[0].caption_id, None);
     }
 
     #[test]
@@ -3557,6 +3590,18 @@ mod tests {
             timeline.clip(&clip_id).is_some(),
             "the head keeps the clip's id"
         );
+        let tail_piece = timeline
+            .clips
+            .iter()
+            .find(|clip| {
+                clip.id != clip_id
+                    && clip.media_id == timeline.clip(&clip_id).expect("head piece").media_id
+                    && clip.track_id == track_id
+                    && (clip.start - 3.0).abs() < 1e-6
+            })
+            .expect("tail piece")
+            .id
+            .clone();
         assert_eq!(
             range_of(&editor, &later[0]).0,
             16.0,
@@ -3569,10 +3614,25 @@ mod tests {
             "the second caption rides its piece"
         );
         assert_eq!(
-            editor.project().active().captions_of(&clip_id).len(),
-            2,
-            "both captions still link to the clip"
+            editor.project().active().captions_of(&clip_id),
+            vec![first_words.clone()],
+            "the head caption stays linked to the head piece"
         );
+        assert_eq!(
+            editor.project().active().captions_of(&tail_piece),
+            vec![later_words.clone()],
+            "the tail caption is relinked to the tail piece"
+        );
+
+        // The real regression: after a Sections trim, dragging the tail
+        // carries only the caption over that tail, rather than leaving it
+        // behind because it still points at the old head clip.
+        editor
+            .apply(move_to(&tail_piece, 10.0, &track_id))
+            .expect("moves the tail");
+        assert_eq!(range_of(&editor, &later_words), (11.0, 13.0));
+        assert!(editor.undo());
+        assert_eq!(range_of(&editor, &later_words), (4.0, 6.0));
 
         // One undo step restores clip, captions and the later clip.
         assert!(editor.undo());
@@ -3766,12 +3826,16 @@ mod tests {
             .expect("autotrims");
         let timeline = editor.project().active();
         let pieces: Vec<(f64, f64)> = timeline
-            .captions_of(&clip_id)
+            .clips
             .iter()
-            .map(|id| {
-                let clip = timeline.clip(id).expect("a caption piece");
-                (clip.start, clip.duration)
+            .filter(|clip| {
+                clip.kind == ClipKind::Text
+                    && clip
+                        .text
+                        .as_ref()
+                        .is_some_and(|style| style.content == "Linked words")
             })
+            .map(|clip| (clip.start, clip.duration))
             .collect();
         assert_eq!(
             pieces,
@@ -3798,6 +3862,13 @@ mod tests {
     fn words_follow_a_move_and_split_at_an_autotrim_cut() {
         let (mut editor, _, clip_id) = fixture();
         let words_id = linked_caption(&mut editor, &clip_id, 2.0, 5.0); // [2, 7)
+        let caption_track = editor
+            .project()
+            .active()
+            .clip(&words_id)
+            .expect("caption")
+            .track_id
+            .clone();
         let word = |text: &str, start: f64, end: f64| crate::captionmap::Word {
             text: text.to_owned(),
             start,
@@ -3839,10 +3910,10 @@ mod tests {
             .expect("autotrims");
         let timeline = editor.project().active();
         let pieces: Vec<(String, Vec<String>)> = timeline
-            .captions_of(&clip_id)
+            .clips
             .iter()
-            .map(|id| {
-                let clip = timeline.clip(id).expect("a caption piece");
+            .filter(|clip| clip.kind == ClipKind::Text && clip.track_id == caption_track)
+            .map(|clip| {
                 (
                     clip.text.as_ref().expect("text").content.clone(),
                     clip.words
@@ -3909,13 +3980,8 @@ mod tests {
 
         // clip_sections sees both the linked [1, 3) and unlinked [6, 8) captions.
         // Silence over [3.0, 6.0) is unticked by default.
-        let view = clip_sections(
-            editor.project().active(),
-            &clip_id,
-            &[(3.0, 6.0)],
-            0.0,
-        )
-        .expect("sections");
+        let view = clip_sections(editor.project().active(), &clip_id, &[(3.0, 6.0)], 0.0)
+            .expect("sections");
         let ticks: Vec<bool> = view.rows.iter().map(|r| r.keep).collect();
         let kept = kept_ranges(&view.rows, &ticks);
         assert_eq!(kept, [(0.0, 3.0), (6.0, 10.0)]);
@@ -3936,10 +4002,7 @@ mod tests {
             .active()
             .clip(&unlinked_id)
             .expect("unlinked caption survives");
-        assert_eq!(
-            shifted.text.as_ref().expect("style").content,
-            "Second line"
-        );
+        assert_eq!(shifted.text.as_ref().expect("style").content, "Second line");
         let words = shifted.words.as_ref().expect("words");
         assert_eq!((words[0].start, words[0].end), (3.0, 4.0));
         assert_eq!((words[1].start, words[1].end), (4.0, 5.0));

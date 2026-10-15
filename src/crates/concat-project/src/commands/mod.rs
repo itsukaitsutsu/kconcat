@@ -7,7 +7,7 @@
 //! meaning lives. The clamps and tolerances documented on each variant are
 //! the contract the window's gesture echo mirrors and tests against.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

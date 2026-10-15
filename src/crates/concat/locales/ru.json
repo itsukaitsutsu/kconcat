@@ -1117,7 +1117,6 @@
   "tray.previewAxisOptions": "Параметры оси предпросмотра",
   "tray.recordVoiceover": "Записать закадровый голос",
   "tray.redo": "Повторить ({0})",
-  "tray.sections": "Sections: what this clip is made of",
   "tray.splitAtPlayhead": "Разрезать по курсору ({0})",
   "tray.splitTool": "Инструмент разрезания (B): щелчок по клипу режет его в этом месте",
   "tray.stopRecording": "Остановить запись",

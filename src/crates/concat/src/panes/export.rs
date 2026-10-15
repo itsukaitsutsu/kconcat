@@ -177,6 +177,10 @@ impl ExportPane {
                 let index = index.max(0) as usize;
                 if index == 3 {
                     self.codec = 3;
+                    // Stream copy never creates video frames, so it cannot
+                    // burn captions. Keep the checkbox honest and make the
+                    // reader choose an encoder before requesting a burn.
+                    self.burn_captions = false;
                 } else {
                     let index = index.min(concat_media::VideoCodec::ALL.len() - 1);
                     if concat_media::VideoCodec::ALL[index].encodable() {
@@ -185,7 +189,15 @@ impl ExportPane {
                 }
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
-            ExportMsg::BurnCaptionsChanged(on) => self.burn_captions = on,
+            ExportMsg::BurnCaptionsChanged(on) => {
+                self.burn_captions = on;
+                // The UI disables the switch for stream copy, but retain a
+                // safe invariant for programmatic/remote callers as well:
+                // asking to burn captions selects a real video encoder.
+                if on && self.is_stream_copy() {
+                    self.codec = 0;
+                }
+            }
             ExportMsg::HdrChanged(on) => self.sdr = !on,
             ExportMsg::ColorRangeChanged(index) => {
                 self.color_range = (index.max(0) as usize).min(ColorRange::ALL.len() - 1);
@@ -511,7 +523,7 @@ impl ExportPane {
                 .timeline()
                 .clips
                 .iter()
-                .filter(|c| c.kind == concat_project::model::ClipKind::Text)
+                .filter(|c| is_caption_clip(c))
                 .cloned()
                 .collect();
             text_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -595,14 +607,15 @@ impl ExportPane {
         request.rate_den = den;
         let project_for_titles = session.project().clone();
         let titles_engine = std::sync::Arc::clone(&studio.host.titles);
-        // With captions off, the export paints shapes only. A text clip is a
-        // caption or a title; both are left out here.
+        // With caption burning off, keep hand-made titles and shapes in the
+        // picture. Earlier code treated every text clip as a caption, which
+        // made the toggle silently remove lower-thirds and title cards too.
         let burn_captions = self.burn_captions;
-        let text_clip_ids: Vec<String> = project_for_titles
+        let caption_clip_ids: std::collections::HashSet<String> = project_for_titles
             .active()
             .clips
             .iter()
-            .filter(|clip| clip.kind == concat_project::model::ClipKind::Text)
+            .filter(|clip| is_caption_clip(clip))
             .map(|clip| clip.id.clone())
             .collect();
 
@@ -627,7 +640,7 @@ impl ExportPane {
                 let title_clips: Vec<_> = titles_engine
                     .clips(&project_for_titles, frame_w, frame_h)
                     .into_iter()
-                    .filter(|title| burn_captions || !text_clip_ids.contains(&title.clip_id))
+                    .filter(|title| burn_captions || !caption_clip_ids.contains(&title.clip_id))
                     .map(|title| title.clip)
                     .collect();
                 request.clips.extend(title_clips);
@@ -814,6 +827,14 @@ impl ExportPane {
     }
 }
 
+/// A timeline text clip that represents subtitle/caption content rather
+/// than a hand-made title. Imported captions carry word timings; generated
+/// captions additionally link to their spoken source clip.
+fn is_caption_clip(clip: &concat_project::model::Clip) -> bool {
+    clip.kind == concat_project::model::ClipKind::Text
+        && (clip.caption_of.is_some() || clip.words.is_some())
+}
+
 /// The typed name as the file's, or `None` for one that cannot be: empty
 /// once trimmed, a dot or two, or holding a character no file system
 /// here takes. The set is Windows' - a slash and a backslash, the colon,
@@ -832,6 +853,15 @@ fn file_name(typed: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captions_burn_by_default_but_stream_copy_is_detected() {
+        let export = ExportPane::default();
+        assert!(export.burn_captions);
+        assert!(!export.is_stream_copy());
+        let copy = ExportPane { codec: 3, ..ExportPane::default() };
+        assert!(copy.is_stream_copy());
+    }
 
     /// A name is a file's or the export does not start: trimmed, never
     /// empty, never a path, and none of the characters Windows refuses.
