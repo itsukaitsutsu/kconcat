@@ -695,6 +695,9 @@ pub(super) fn apply(
                 return Ok(Outcome::default());
             };
             let (clip_start, clip_end) = (clip.start, clip.start + clip.duration);
+            // Nothing given at all removes the whole clip. A list that was
+            // given but holds nothing usable is not an edit, as before.
+            let remove_all = kept.is_empty();
 
             // The kept ranges, made sane: inside the clip, sorted,
             // overlaps merged, slivers dropped.
@@ -714,21 +717,20 @@ pub(super) fn apply(
                 }
             }
             let kept_total: f64 = merged.iter().map(|(a, b)| b - a).sum();
-            // Keeping everything (or, with nothing sane, nothing) is not
-            // an edit: a "trim" that deletes a whole clip is RemoveClips'
-            // job, and says so by doing nothing here.
-            if merged.is_empty() || (clip.duration - kept_total).abs() < JOIN_EPSILON {
+            // Keeping everything is not an edit; a trim that deletes a whole
+            // clip is the remove_all case, not a no-op.
+            if !remove_all
+                && (merged.is_empty() || (clip.duration - kept_total).abs() < JOIN_EPSILON)
+            {
                 return Ok(Outcome::default());
             }
             let removed_total = clip.duration - kept_total;
 
-            // Who is rebuilt through the ranges: the clip, the captions
-            // overlapping its span (linked to it, unlinked, or linked to a
-            // sibling piece of the same media), and the sound detached from
-            // it. Everything else either sits before the edit or shifts
-            // behind it.
-            let linked_captions: HashSet<String> =
-                timeline.captions_of(&clip_id).into_iter().collect();
+            // Who is rebuilt through the ranges: the clip, and every other clip
+            // on any lane that overlaps its span - the sound detached from it,
+            // the captions over it, and whatever sits under the picture on
+            // other lanes. Each lane is cut at the same moments as the picture;
+            // a lane left at its old length drifts out of step with it.
             let mut participants: Vec<String> = vec![clip_id.clone()];
             for other in &timeline.clips {
                 if other.id == clip_id {
@@ -736,31 +738,25 @@ pub(super) fn apply(
                 }
                 let overlaps_window = other.start < clip_end - JOIN_EPSILON
                     && other.start + other.duration > clip_start + JOIN_EPSILON;
-                if !overlaps_window {
-                    continue;
-                }
-                let is_caption_participant = linked_captions.contains(&other.id)
-                    || (other.kind == ClipKind::Text
-                        && (other.caption_of.is_none()
-                            || other
-                                .caption_of
-                                .as_deref()
-                                .and_then(|cid| timeline.clip(cid))
-                                .is_some_and(|parent| parent.media_id == clip.media_id)));
-                let is_detached = other.detached_from.as_deref() == Some(clip_id.as_str());
-                if is_caption_participant || is_detached {
+                if overlaps_window {
                     participants.push(other.id.clone());
                 }
             }
 
-            // Where each kept range lands: the pieces pack back to back
-            // from where the clip started.
-            let mut landings: Vec<f64> = Vec::with_capacity(merged.len());
+            // Where time lands. Each segment is (range start, range end, shift):
+            // the time before the clip stays where it is; each kept range moves
+            // by `shift` to where it packs back to; the time after the clip
+            // moves by what came out. A participant that reaches past the
+            // clip keeps its own time outside it, which is what stops a bed
+            // or a voice-over losing its tail.
+            let mut segments: Vec<(f64, f64, f64)> = Vec::with_capacity(merged.len() + 2);
+            segments.push((f64::NEG_INFINITY, clip_start, 0.0));
             let mut cursor = clip_start;
             for (start, end) in &merged {
-                landings.push(cursor);
+                segments.push((*start, *end, cursor - start));
                 cursor += end - start;
             }
+            segments.push((clip_end, f64::INFINITY, -removed_total));
 
             for participant_id in &participants {
                 let Some(index) = timeline
@@ -772,36 +768,32 @@ pub(super) fn apply(
                 };
                 let original = (*timeline.clips[index]).clone();
                 let old_duration = original.duration;
-                let surviving_ranges = merged
+                let (orig_start, orig_end) = (original.start, original.start + original.duration);
+                // The segments this clip reaches into, clipped to its span:
+                // (start, end, shift) in its own time.
+                let reach: Vec<(f64, f64, f64)> = segments
                     .iter()
-                    .filter(|&&(rs, re)| {
-                        re.min(original.start + original.duration) - rs.max(original.start)
-                            >= MIN_CLIP_DURATION
+                    .filter(|&&(rs, re, _)| {
+                        re.min(orig_end) - rs.max(orig_start) >= MIN_CLIP_DURATION
                     })
-                    .count();
+                    .map(|&(rs, re, shift)| (rs.max(orig_start), re.min(orig_end), shift))
+                    .collect();
+                let surviving_ranges = reach.len();
                 let any_range_has_words = original.words.as_ref().is_some_and(|words| {
-                    merged.iter().any(|&(rs, re)| {
-                        let s = rs.max(original.start);
-                        let e = re.min(original.start + original.duration);
-                        e - s >= MIN_CLIP_DURATION
-                            && words.iter().any(|w| w.end > s && w.start < e)
-                    })
+                    reach
+                        .iter()
+                        .any(|&(s, e, _)| words.iter().any(|w| w.end > s && w.start < e))
                 });
-                // This participant's pieces: its span through each kept
-                // range, in order. A caption clipped by a range keeps
-                // its words on every piece it survives as - a text clip
-                // holds one string, and word timings are Phase 6's.
+                // This participant's pieces: its span through each segment,
+                // in order. A caption clipped by a range keeps its words on
+                // every piece it survives as - a text clip holds one string,
+                // and word timings are Phase 6's.
                 let mut pieces: Vec<Clip> = Vec::new();
-                for ((range_start, range_end), lands_at) in merged.iter().zip(&landings) {
-                    let start = range_start.max(original.start);
-                    let end = range_end.min(original.start + original.duration);
-                    if end - start < MIN_CLIP_DURATION {
-                        continue;
-                    }
+                for &(start, end, shift) in &reach {
                     // The first piece produced keeps the original's id -
-                    // whatever links to this clip (a caption's
-                    // `caption_of`, a sound's `detached_from`) must still
-                    // find it after the rebuild.
+                    // whatever links to this clip (a caption's `caption_of`, a
+                    // sound's `detached_from`) must still find it after the
+                    // rebuild.
                     let first = pieces.is_empty();
                     let mut piece = original.clone();
                     piece.id = if first {
@@ -810,7 +802,7 @@ pub(super) fn apply(
                         mint.next("c")
                     };
                     let rel = start - original.start;
-                    piece.start = lands_at + (start - range_start);
+                    piece.start = start + shift;
                     piece.duration = end - start;
                     if piece.kind != ClipKind::Text {
                         piece.source_start = original.source_start + rel * original.speed;
@@ -821,21 +813,20 @@ pub(super) fn apply(
                         piece.transition_in = None;
                         piece.fade_in = 0.0;
                     }
-                    if end < original.start + original.duration - JOIN_EPSILON {
+                    if end < orig_end - JOIN_EPSILON {
                         piece.fade_out = 0.0;
                     }
                     // A curve does not survive being cut into pieces, as
                     // a split's halves go to the constant mean.
-                    if merged.len() > 1 {
+                    if reach.len() > 1 {
                         piece.speed_curve = None;
                     }
                     piece.rewindow_keys(old_duration, rel, rel + piece.duration);
-                    // Phase 6: the piece keeps the words it covers,
-                    // moved to where the piece landed, and - when the
-                    // caption is split across multiple kept ranges - its
-                    // text becomes those words, so a caption cut at a
-                    // silence no longer repeats its whole sentence on both
-                    // sides.
+                    // Phase 6: the piece keeps the words it covers, moved to
+                    // where the piece landed, and - when the caption is split
+                    // across ranges - its text becomes those words, so a
+                    // caption cut at a silence no longer repeats its whole
+                    // sentence on both sides.
                     if let Some(words) = &original.words {
                         let kept: Vec<crate::captionmap::Word> = words
                             .iter()
@@ -875,8 +866,9 @@ pub(super) fn apply(
                 }
             }
 
-            // The timeline closes up: whatever began at or after the
-            // clip's old end moves left by what came out of it (words included).
+            // The clips after the window that were not rebuilt close up:
+            // whatever began at or after the clip's old end moves left by what
+            // came out of it (words included).
             for other in timeline.clips_where(|other| {
                 !participants.contains(&other.id) && other.start >= clip_end - JOIN_EPSILON
             }) {

@@ -3579,8 +3579,10 @@ mod tests {
         assert_eq!(range_of(&editor, &clip_id), (0.0, 10.0));
         assert_eq!(range_of(&editor, &later_words), (6.0, 8.0));
 
-        // Keeping everything, and keeping nothing sane, are no-ops.
-        for kept in [vec![(0.0, 10.0)], vec![], vec![(50.0, 60.0)]] {
+        // Keeping everything, and a list with nothing sane in it, are no-ops.
+        // (An empty list is a whole-clip removal now: see
+        // `a_whole_clip_removal_takes_its_sound_and_closes_every_lane`.)
+        for kept in [vec![(0.0, 10.0)], vec![(50.0, 60.0)]] {
             let outcome = editor
                 .apply(Command::AutotrimClip {
                     clip_id: clip_id.clone(),
@@ -3589,6 +3591,166 @@ mod tests {
                 .expect("applies");
             assert!(!outcome.applied);
         }
+    }
+
+    /// The spans of every clip on `track_id`, in time order, as (start, end).
+    fn spans_on(editor: &Editor, track_id: &str) -> Vec<(f64, f64)> {
+        let mut spans: Vec<(f64, f64)> = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .filter(|clip| clip.track_id == track_id)
+            .map(|clip| (clip.start, clip.start + clip.duration))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        spans
+    }
+
+    fn assert_spans(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
+        assert_eq!(actual.len(), expected.len(), "{actual:?} vs {expected:?}");
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                (a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6,
+                "{actual:?} vs {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_whole_clip_removal_takes_its_sound_and_closes_every_lane() {
+        // Sections removes a whole clip: its sound must go with it, and the
+        // clip after it must close up on both its picture and its sound.
+        let (mut editor, media_id, clip_id) = fixture(); // video [0, 10)
+        let sound = editor
+            .apply(Command::DetachAudio {
+                clip_id: clip_id.clone(),
+            })
+            .expect("detaches")
+            .created_id
+            .expect("sound");
+        let track = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("video")
+            .track_id
+            .clone();
+        let sound_track = editor
+            .project()
+            .active()
+            .clip(&sound)
+            .expect("sound")
+            .track_id
+            .clone();
+        let next = lane(&mut editor, &media_id, &track, &[10.0])[0].clone(); // [10, 20)
+        let next_sound = editor
+            .apply(Command::DetachAudio {
+                clip_id: next.clone(),
+            })
+            .expect("detaches")
+            .created_id
+            .expect("sound");
+
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept: Vec::new(),
+            })
+            .expect("removes the clip");
+
+        assert!(editor.project().active().clip(&clip_id).is_none());
+        assert!(
+            editor.project().active().clip(&sound).is_none(),
+            "the removed clip's sound goes with it"
+        );
+        assert_eq!(range_of(&editor, &next), (0.0, 10.0));
+        assert_eq!(range_of(&editor, &next_sound), (0.0, 10.0));
+        assert_spans(&spans_on(&editor, &sound_track), &[(0.0, 10.0)]);
+    }
+
+    #[test]
+    fn a_second_cut_takes_the_sound_of_the_piece_it_cuts() {
+        // After one cut, the second piece's sound is linked to the first
+        // piece's id. A second cut on that piece must still cut its sound.
+        let (mut editor, _media_id, clip_id) = fixture(); // video [0, 10)
+        editor
+            .apply(Command::DetachAudio {
+                clip_id: clip_id.clone(),
+            })
+            .expect("detaches");
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: clip_id.clone(),
+                kept: vec![(0.0, 3.0), (5.0, 10.0)],
+            })
+            .expect("first cut");
+        let video_track = editor
+            .project()
+            .active()
+            .clip(&clip_id)
+            .expect("video")
+            .track_id
+            .clone();
+        let second = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|clip| clip.kind == ClipKind::Video && (clip.start - 3.0).abs() < 1e-6)
+            .expect("the second piece")
+            .id
+            .clone();
+        let sound_track = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|clip| clip.kind == ClipKind::Audio)
+            .expect("the sound")
+            .track_id
+            .clone();
+
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id: second,
+                kept: vec![(3.0, 5.0), (6.0, 8.0)],
+            })
+            .expect("second cut");
+
+        let expected = [(0.0, 3.0), (3.0, 5.0), (5.0, 7.0)];
+        assert_spans(&spans_on(&editor, &video_track), &expected);
+        assert_spans(&spans_on(&editor, &sound_track), &expected);
+    }
+
+    #[test]
+    fn a_cut_takes_a_bed_on_another_lane_with_the_picture_and_keeps_its_tail() {
+        // An unlinked clip under the picture is cut at the same moments as it,
+        // and the part of it that runs past the cut keeps its place in time.
+        let (mut editor, media_id, clip_id) = fixture(); // video [0, 10)
+        editor
+            .apply(Command::AddTrack { bottom: false })
+            .expect("adds a lane");
+        let bed_track = editor
+            .project()
+            .active()
+            .tracks
+            .last()
+            .expect("the lane")
+            .id
+            .clone();
+        lane(&mut editor, &media_id, &bed_track, &[8.0]); // [8, 18)
+
+        editor
+            .apply(Command::AutotrimClip {
+                clip_id,
+                kept: vec![(0.0, 3.0), (5.0, 10.0)],
+            })
+            .expect("cuts [3, 5)");
+
+        // The bed loses the same two seconds: [8, 10) becomes [6, 8), and the
+        // tail [10, 18) becomes [8, 16).
+        assert_spans(&spans_on(&editor, &bed_track), &[(6.0, 8.0), (8.0, 16.0)]);
     }
 
     #[test]

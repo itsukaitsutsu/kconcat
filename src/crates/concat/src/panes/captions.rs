@@ -64,7 +64,10 @@ pub enum CaptionsMsg {
     DeviceChanged(i32),
     ComputeTypeChanged(i32),
     VadFilterChanged(bool),
+    /// A row of the language list, as the search leaves it.
     LanguageChanged(i32),
+    /// The search field's text.
+    LanguageQueryChanged(String),
     TranslateChanged(bool),
     BeamSizeChanged(f32),
     PromptChanged(String),
@@ -148,6 +151,8 @@ pub struct CaptionsPane {
     pub vad_filter: bool,
     /// Row in Whisper's language list; zero is auto-detect.
     pub language: usize,
+    /// What the language search field holds; empty shows every language.
+    pub language_query: String,
     pub translate: bool,
     pub translate_hint: String,
     pub beam_size: u32,
@@ -198,6 +203,7 @@ impl Default for CaptionsPane {
             compute_type: 0,
             vad_filter: true,
             language: 0,
+            language_query: String::new(),
             translate: false,
             translate_hint: String::new(),
             beam_size: 1,
@@ -297,7 +303,14 @@ impl CaptionsPane {
                 self.vad_filter = on;
             }
             CaptionsMsg::LanguageChanged(index) => {
-                self.language = (index.max(0) as usize).min(language_codes().len() - 1);
+                // `index` is a row of the list as the search left it.
+                let rows = matching_languages(language_labels(), &self.language_query);
+                if let Some(&row) = usize::try_from(index).ok().and_then(|i| rows.get(i)) {
+                    self.language = row;
+                }
+            }
+            CaptionsMsg::LanguageQueryChanged(query) => {
+                self.language_query = query;
             }
             CaptionsMsg::TranslateChanged(on) => {
                 self.translate = on;
@@ -1202,10 +1215,19 @@ impl CaptionsPane {
         } else {
             vec![SharedString::from("Auto — Default Vulkan GPU")]
         };
-        let languages: Vec<SharedString> = language_labels()
+        let language_names = language_labels();
+        let rows = matching_languages(language_names, &self.language_query);
+        let languages: Vec<SharedString> = rows
             .iter()
-            .map(|label| SharedString::from(*label))
+            .map(|&row| SharedString::from(language_names[row]))
             .collect();
+        // The chosen language is hidden when the search leaves it out; the
+        // trigger still names it, from `language_text`.
+        let language = rows
+            .iter()
+            .position(|&row| row == self.language)
+            .map_or(-1, |position| position as i32);
+        let language_text = language_names[self.language.min(language_names.len() - 1)];
         let drafts: Vec<CaptionDraftData> = self
             .drafts
             .iter()
@@ -1240,7 +1262,8 @@ impl CaptionsPane {
             compute_type: self.compute_type as i32,
             vad_filter: self.vad_filter,
             languages: slint::ModelRc::from(Rc::clone(&self.languages_model)),
-            language: self.language as i32,
+            language,
+            language_text: language_text.into(),
             translate: self.translate,
             translate_hint: self.translate_hint.as_str().into(),
             beam_size: self.beam_size as f32,
@@ -1276,6 +1299,19 @@ fn language_codes() -> &'static [&'static str] {
         "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk",
         "tl", "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "zh",
     ]
+}
+
+/// The rows of `labels` that `query` leaves, in their order, as indices
+/// into `labels`. A row stays when its label contains the query, ignoring
+/// case and surrounding spaces; an empty query leaves every row.
+fn matching_languages(labels: &[&str], query: &str) -> Vec<usize> {
+    let needle = query.trim().to_lowercase();
+    labels
+        .iter()
+        .enumerate()
+        .filter(|(_, label)| needle.is_empty() || label.to_lowercase().contains(&needle))
+        .map(|(row, _)| row)
+        .collect()
 }
 
 /// Human-readable `"code — Name"` labels matching VTS `autocaption.txt`.
@@ -1759,5 +1795,51 @@ mod tests {
         assert_eq!(language_codes()[0], "auto");
         assert!(language_codes().contains(&"en"));
         assert!(language_codes().contains(&"id"));
+    }
+
+    #[test]
+    fn a_language_search_keeps_the_rows_whose_label_contains_it() {
+        use super::matching_languages;
+        let labels = [
+            "auto — Auto-detect",
+            "ja — Japanese",
+            "jw — Javanese",
+            "en — English",
+        ];
+
+        // An empty or blank query leaves every row, in order.
+        assert_eq!(matching_languages(&labels, ""), vec![0, 1, 2, 3]);
+        assert_eq!(matching_languages(&labels, "   "), vec![0, 1, 2, 3]);
+
+        // Case and surrounding spaces do not matter; the name and the code both match.
+        assert_eq!(matching_languages(&labels, "  JAPAN "), vec![1]);
+        assert_eq!(matching_languages(&labels, "ja"), vec![1, 2]);
+        assert_eq!(matching_languages(&labels, "en —"), vec![3]);
+
+        // Nothing matches: no rows, not a fallback to all of them.
+        assert!(matching_languages(&labels, "klingon").is_empty());
+    }
+
+    #[test]
+    fn every_real_language_is_found_by_its_name_and_by_its_code() {
+        use super::matching_languages;
+        let labels = language_labels();
+        for (row, label) in labels.iter().enumerate() {
+            let (code, name) = label.split_once(" — ").expect("a code and a name");
+            assert!(
+                matching_languages(labels, name).contains(&row),
+                "{name} should find itself"
+            );
+            // Codes are short, so the code can match other rows too; the row itself must still be there.
+            assert!(
+                matching_languages(labels, code).contains(&row),
+                "{code} should find its own row"
+            );
+        }
+        // The chosen language keeps its index in the full list, so a search does not renumber it.
+        assert_eq!(
+            matching_languages(labels, "Korean"),
+            vec![language_codes().iter().position(|c| *c == "ko").unwrap()]
+        );
     }
 }

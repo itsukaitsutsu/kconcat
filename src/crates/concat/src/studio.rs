@@ -2745,9 +2745,12 @@ impl Studio {
                         }
                         shown = Some(frame);
                         studio.playhead = position.min(end);
+                        // Read before the `sections` borrow: `studio` is a
+                        // RefMut, and reaching `sections` takes it mutably.
+                        let playhead = studio.playhead;
                         studio
                             .sections
-                            .sync_scroll_to_time(f64::from(studio.playhead), false);
+                            .sync_scroll_to_time(f64::from(playhead), false);
                         // The view follows: a playhead that runs off the
                         // right edge, or sits off the left, pages the lanes
                         // to it, the way every editor keeps the cut in view.
@@ -7452,9 +7455,20 @@ impl Studio {
                 self.caption_import = pane;
             }
             crate::panes::Msg::Sections(msg) => {
+                let revision = self.revision;
                 let mut pane = std::mem::take(&mut self.sections);
                 pane.update(msg, self);
                 self.sections = pane;
+                // While the pane is out of the studio, `after_change` sees
+                // a blank pane and skips its refresh, so an edit the pane
+                // made itself (a caption added, a row's words changed)
+                // would leave its rows describing the old timeline. Re-tile
+                // here, once the pane is back.
+                if self.revision != revision && (!self.sections.is_empty() || self.sections.open) {
+                    let mut pane = std::mem::take(&mut self.sections);
+                    pane.refresh_from_timeline(self);
+                    self.sections = pane;
+                }
             }
             crate::panes::Msg::Speech(msg) => {
                 let mut pane = std::mem::take(&mut self.speech);
@@ -7873,6 +7887,19 @@ impl Studio {
             app.global::<SectionsView>().set_data(sections_data.clone());
             app.set_sections(sections_data);
         }
+        // The section strip on the ruler is drawn from the clips' places, so
+        // it moves with them. It was published only with the window's chrome,
+        // which a clip drag or a trim does not publish, so the strip stayed
+        // where the caption was before the gesture until something else
+        // published the whole window.
+        sync(
+            &models.timeline_sections,
+            self.sections.timeline_sections(),
+        );
+        editor.set_section_filter_caption(self.sections.show_caption);
+        editor.set_section_filter_silence(self.sections.show_silence);
+        editor.set_section_filter_other(self.sections.show_other);
+        editor.set_can_remove_selected_sections(self.sections.can_remove_selected());
         let project = self.project();
         sync(
             &models.tabs,
@@ -9653,14 +9680,6 @@ impl Studio {
         let sections_data = self.sections.data(self);
         app.global::<SectionsView>().set_data(sections_data.clone());
         app.set_sections(sections_data);
-        sync(
-            &models.timeline_sections,
-            self.sections.timeline_sections(),
-        );
-        editor.set_section_filter_caption(self.sections.show_caption);
-        editor.set_section_filter_silence(self.sections.show_silence);
-        editor.set_section_filter_other(self.sections.show_other);
-        editor.set_can_remove_selected_sections(self.sections.can_remove_selected());
         let voices = installed(&self.settings.voices);
         sync(
             &models.speech_models,

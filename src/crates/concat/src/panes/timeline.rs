@@ -164,17 +164,9 @@ impl TimelinePane {
             // start of the cut is the left edge and nothing is before it.
             TimelineMsg::Scrolled(seconds) => {
                 self.scrolled(seconds);
-                let screen = self.width * self.seconds_per_pixel;
-                let focus_time = if self.scroll_left <= 0.01 || screen <= 0.0 {
-                    self.scroll_left.max(0.0)
-                } else {
-                    let lead = (self.scroll_left / (screen * 0.5).max(1.0)).clamp(0.0, 1.0)
-                        * (screen * 0.25);
-                    self.scroll_left + lead
-                };
                 studio
                     .sections
-                    .sync_scroll_to_time(f64::from(focus_time), false);
+                    .sync_scroll_to_time(f64::from(self.focus_time()), false);
             }
             TimelineMsg::Zoomed { factor, anchor } => {
                 let anchor = if anchor < 0.0 {
@@ -222,6 +214,27 @@ impl TimelinePane {
         } else {
             seconds.max(0.0)
         };
+    }
+
+    /// The time the Sections list follows: the one `scroll_to_time` would
+    /// have been given to land here. A row the list asks the timeline to
+    /// show is put a quarter of the lanes' width in from the left edge, and
+    /// this reads that same point back, so scrolling either side leaves the
+    /// other on the same row. Centred views keep the playhead in the middle
+    /// and read the middle. At the start of the cut there is nothing to the
+    /// left, so the first row is the one followed.
+    pub fn focus_time(&self) -> f32 {
+        let screen = self.width * self.seconds_per_pixel;
+        if screen <= 0.0 {
+            return self.scroll_left.max(0.0);
+        }
+        if self.centred {
+            return (self.scroll_left + screen * 0.5).max(0.0);
+        }
+        if self.scroll_left <= 0.01 {
+            return 0.0;
+        }
+        self.scroll_left + screen * 0.25
     }
 
     /// Puts the playhead at the middle of the lanes, when the view is the

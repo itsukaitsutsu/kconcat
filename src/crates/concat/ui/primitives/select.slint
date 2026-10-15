@@ -46,8 +46,21 @@ export component Select inherits Rectangle {
     /// field as its unit with a square seam between them; see Field.
     in property <length> radius-left: Theme.r;
     in property <length> radius-right: Theme.r;
+    /// A search field across the top of the list, for a list too long to
+    /// scroll through. Typing sets `query` and calls `query-changed`; the
+    /// owner narrows `options` to match, and `current` then indexes the
+    /// narrowed list. Opening the list clears the query, and the owner is
+    /// told so through `query-changed("")`.
+    in property <bool> searchable: false;
+    in property <string> search-placeholder;
+    in-out property <string> query;
+    /// The words the trigger shows when `current` is not in `options` — a
+    /// searchable list whose choice the query has hidden. Empty: the
+    /// trigger shows `options[current]`.
+    in property <string> value-text;
 
     callback changed(index: int);
+    callback query-changed(text: string);
 
     property <bool> ring;
     property <length> row-h: 26px;
@@ -56,6 +69,8 @@ export component Select inherits Rectangle {
     /// finger - see `flick`.
     property <length> content-h: root.options.length * root.row-h + 8px;
     property <length> list-h: Math.min(240px, root.content-h);
+    /// The search field's band above the rows; none when there is no search.
+    property <length> search-h: root.searchable ? 34px : 0px;
     /// How far down the rows are parked: the list's Flickable's own
     /// viewport, which is zero or less. Clamped on read, so a list that
     /// reopens shorter cannot leave the rows parked beyond its end.
@@ -79,9 +94,11 @@ export component Select inherits Rectangle {
     // without telling us, so a hand-rolled flag goes stale.
     property <bool> open: list.is-open;
     property <int> active;
-    property <string> label: (root.current >= 0 && root.current < root.options.length)
-        ? root.options[root.current]
-        : root.placeholder;
+    property <string> label: root.value-text != ""
+        ? root.value-text
+        : (root.current >= 0 && root.current < root.options.length)
+            ? root.options[root.current]
+            : root.placeholder;
     /// the current option has a mark, so the trigger wears it instead of words
     property <bool> marked: root.current >= 0 && root.current < root.icons.length;
     property <Glyph> mark: root.marked ? root.icons[root.current] : Glyph.none;
@@ -120,6 +137,16 @@ export component Select inherits Rectangle {
     /// Whether row `index` is one of the `disabled`.
     pure function off(index: int) -> bool {
         return index < root.disabled.length && root.disabled[index];
+    }
+
+    /// Moves the highlight by `step` rows and keeps it in view. The search
+    /// field's Up and Down go through here, as the list's own keys do.
+    function step(delta: int) {
+        if (root.options.length == 0) {
+            return;
+        }
+        root.active = Math.max(0, Math.min(root.active + delta, root.options.length - 1));
+        root.reveal-row(root.active);
     }
 
     function commit(index: int) {
@@ -193,7 +220,7 @@ export component Select inherits Rectangle {
         if !root.marked: Text {
             horizontal-stretch: 1;
             text: root.label;
-            color: root.current >= 0 ? (root.flat ? Theme.fg-muted : Theme.fg) : Theme.fg-dim;
+            color: (root.current >= 0 || root.value-text != "") ? (root.flat ? Theme.fg-muted : Theme.fg) : Theme.fg-dim;
             font-size: Theme.fs;
             vertical-alignment: center;
             overflow: elide;
@@ -265,12 +292,18 @@ export component Select inherits Rectangle {
         x: root.width - root.list-w;
         y: root.height + 4px;
         width: root.list-w;
-        height: root.list-h;
+        height: root.search-h + root.list-h;
         close-policy: close-on-click-outside;
 
         // The popup is torn down on close, so `init` runs on every open.
         init => {
-            keys.focus();
+            if (root.searchable) {
+                root.query = "";
+                root.query-changed("");
+                search.focus();
+            } else {
+                keys.focus();
+            }
         }
 
         Rectangle {
@@ -279,6 +312,75 @@ export component Select inherits Rectangle {
             border-color: Theme.line-strong;
             border-radius: Theme.r;
             clip: true;
+
+            // The search field: its own band above the rows, present only
+            // when `searchable`. Its keys mirror the list's for the movement
+            // and choice ones; the rest type, Space included.
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: root.search-h;
+                visible: root.searchable;
+
+                search := TextInput {
+                    x: 8px;
+                    y: 0px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text <=> root.query;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    single-line: true;
+                    vertical-alignment: center;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    edited => {
+                        // A new query starts at the best match, so Enter takes it.
+                        root.active = 0;
+                        root.content-y = 0px;
+                        root.query-changed(self.text);
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.DownArrow) {
+                            root.step(1);
+                            return EventResult.accept;
+                        }
+                        if (event.text == Key.UpArrow) {
+                            root.step(-1);
+                            return EventResult.accept;
+                        }
+                        if (event.text == "\n") {
+                            root.commit(root.active);
+                            return EventResult.accept;
+                        }
+                        if (event.text == Key.Escape) {
+                            list.close();
+                            fs.focus();
+                            return EventResult.accept;
+                        }
+                        return EventResult.reject;
+                    }
+                }
+
+                if root.query == "" && !search.has-focus: Text {
+                    x: 8px;
+                    y: 0px;
+                    height: parent.height;
+                    text: root.search-placeholder;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.line;
+                }
+            }
 
             keys := FocusScope {
                 key-pressed(event) => {
@@ -322,6 +424,8 @@ export component Select inherits Rectangle {
             // ever tapped, never dragged, so nothing loses a gesture to it:
             // a tap reaches the row, a drag past the threshold scrolls.
             flick := Flickable {
+                y: root.search-h;
+                height: root.list-h;
                 content-y <=> root.content-y;
                 content-width: self.width;
                 content-height: root.content-h;
@@ -400,8 +504,8 @@ export component Select inherits Rectangle {
 
             ThinScrollbar {
                 x: parent.width - self.width - 1px;
-                y: 1px;
-                height: parent.height - 2px;
+                y: root.search-h + 1px;
+                height: root.list-h - 2px;
                 viewport: root.list-h;
                 content: root.content-h;
                 offset: root.at;

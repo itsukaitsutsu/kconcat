@@ -580,12 +580,16 @@ pub enum Command {
     /// [`crate::sectionlist::kept_ranges`] returns them - deleting the
     /// rest and closing the timeline up behind it.
     ///
-    /// The clip's linked captions (Phase 1's `caption_of`) and its
-    /// detached sound are rebuilt through the same ranges, so the words
-    /// and the sound stay on the picture; everything that started after
-    /// the clip shifts left by what was removed. Ranges are clamped
-    /// into the clip, sorted and merged; keeping everything or nothing
-    /// is a no-op rather than an edit. One command, so one undo step.
+    /// Every clip on any lane that overlaps the clip - its detached
+    /// sound, its captions, and whatever sits under the picture on other
+    /// lanes - is rebuilt through the same ranges, so every lane is cut at
+    /// the same moments as the picture. Time before the clip stays put;
+    /// time after it shifts left by what was removed, on every lane.
+    /// Ranges are clamped into the clip, sorted and merged. Keeping
+    /// everything is a no-op; an empty `kept` removes the whole clip and
+    /// its overlapping clips, and closes the gap on every lane. A non-empty
+    /// list with nothing usable in it is also a no-op. One command, so one
+    /// undo step.
     AutotrimClip {
         /// The clip to trim by content.
         clip_id: String,

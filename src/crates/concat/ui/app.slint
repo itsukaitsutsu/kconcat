@@ -302,6 +302,7 @@ export component App inherits Window {
     callback captions-compute-type-changed(index: int);
     callback captions-vad-filter-changed(on: bool);
     callback captions-language-changed(index: int);
+    callback captions-language-query-changed(text: string);
     callback captions-translate-changed(on: bool);
     callback captions-beam-size-changed(value: float);
     callback captions-prompt-changed(text: string);
@@ -912,6 +913,7 @@ export component App inherits Window {
         compute-type-changed(index) => { root.captions-compute-type-changed(index); }
         vad-filter-changed(on) => { root.captions-vad-filter-changed(on); }
         language-changed(index) => { root.captions-language-changed(index); }
+        language-query-changed(text) => { root.captions-language-query-changed(text); }
         translate-changed(on) => { root.captions-translate-changed(on); }
         beam-size-changed(value) => { root.captions-beam-size-changed(value); }
         prompt-changed(text) => { root.captions-prompt-changed(text); }

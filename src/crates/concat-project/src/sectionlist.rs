@@ -32,6 +32,8 @@
 //! both clocks so the panel never has to do this arithmetic itself -
 //! arithmetic done twice, in two crates, is arithmetic that disagrees.
 
+use std::collections::HashMap;
+
 use crate::model::Timeline;
 use crate::sections::{self, Kind, Section, Summary, TimedCue};
 
@@ -221,6 +223,49 @@ pub fn clip_sections_with_cues(
     })
 }
 
+/// Carries the ticks a reader has already set over to rows rebuilt from
+/// the same timeline.
+///
+/// The panel rebuilds its rows whenever the document changes, and every
+/// fresh row starts ticked by its default. Without this, any edit made
+/// anywhere - a caption's words, a volume knob - would put back the
+/// silences the reader had chosen to keep. A new row takes the tick of
+/// the old row with the same kind and the same span, to the millisecond;
+/// a row that matches nothing keeps its default.
+pub fn carry_ticks(previous: &[Row], rows: &mut [Row]) {
+    if previous.is_empty() {
+        return;
+    }
+    let ticks: HashMap<(Kind, i64, i64), bool> = previous
+        .iter()
+        .map(|row| {
+            (
+                span_key(row.section.kind, row.timeline_start, row.timeline_end),
+                row.keep,
+            )
+        })
+        .collect();
+    for row in rows.iter_mut() {
+        if let Some(&keep) = ticks.get(&span_key(
+            row.section.kind,
+            row.timeline_start,
+            row.timeline_end,
+        )) {
+            row.keep = keep;
+        }
+    }
+}
+
+/// A row's identity for [`carry_ticks`]: its kind and its span, in whole
+/// milliseconds, so that float noise cannot make two equal rows differ.
+fn span_key(kind: Kind, start: f64, end: f64) -> (Kind, i64, i64) {
+    (
+        kind,
+        (start * 1000.0).round() as i64,
+        (end * 1000.0).round() as i64,
+    )
+}
+
 /// The timeline ranges a set of ticks keeps, neighbours merged.
 ///
 /// `ticks` pairs with `rows` by index; a slice of the wrong length is a
@@ -244,4 +289,72 @@ pub fn kept_ranges(rows: &[Row], ticks: &[bool]) -> Vec<(f64, f64)> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(kind: Kind, start: f64, end: f64, keep: bool) -> Row {
+        Row {
+            section: Section {
+                kind,
+                start,
+                end,
+                text: String::new(),
+            },
+            timeline_start: start,
+            timeline_end: end,
+            keep,
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_row_takes_the_tick_its_twin_had() {
+        // The reader chose to keep a pause (a silence starts not kept, so
+        // flipping it on is a choice) and then edited something elsewhere,
+        // which rebuilds every row with the silence back at its default.
+        let before = vec![
+            row(Kind::Caption, 0.0, 2.0, true),
+            row(Kind::Silence, 2.0, 3.0, true),
+        ];
+        let mut after = vec![
+            row(Kind::Caption, 0.0, 2.0, true),
+            row(Kind::Silence, 2.0, 3.0, false),
+        ];
+        carry_ticks(&before, &mut after);
+        assert!(after[1].keep, "the pause the reader kept stays kept");
+    }
+
+    #[test]
+    fn an_unmatched_row_keeps_its_default() {
+        let before = vec![row(Kind::Silence, 2.0, 3.0, true)];
+        // The silence moved: a different span is a different row.
+        let mut after = vec![row(Kind::Silence, 2.5, 3.5, false)];
+        carry_ticks(&before, &mut after);
+        assert!(!after[0].keep, "the default for a silence is ticked off");
+    }
+
+    #[test]
+    fn kind_is_part_of_the_identity() {
+        let before = vec![row(Kind::Other, 1.0, 2.0, false)];
+        let mut after = vec![row(Kind::Caption, 1.0, 2.0, true)];
+        carry_ticks(&before, &mut after);
+        assert!(after[0].keep);
+    }
+
+    #[test]
+    fn float_noise_below_a_millisecond_still_matches() {
+        let before = vec![row(Kind::Silence, 2.0, 3.0, true)];
+        let mut after = vec![row(Kind::Silence, 2.0 + 1e-9, 3.0 - 1e-9, false)];
+        carry_ticks(&before, &mut after);
+        assert!(after[0].keep);
+    }
+
+    #[test]
+    fn nothing_to_carry_changes_nothing() {
+        let mut after = vec![row(Kind::Silence, 2.0, 3.0, false)];
+        carry_ticks(&[], &mut after);
+        assert!(!after[0].keep);
+    }
 }

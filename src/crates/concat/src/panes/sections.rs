@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use concat_project::Command;
 use concat_project::commands::ClipPatch;
-use concat_project::sectionlist::{Row, clip_sections_with_cues, kept_ranges};
+use concat_project::sectionlist::{Row, carry_ticks, clip_sections_with_cues, kept_ranges};
 use concat_project::sections::Kind;
 use concat_project::subtitle::Cue;
 use slint::VecModel;
@@ -346,6 +346,10 @@ impl SectionsPane {
                     Ok(silences) => {
                         self.silences_cache = silences.clone();
                         self.populate_sections(studio, &clip_id, &silences);
+                        // A finished detection brings the list to the playhead.
+                        // Only that: a rebuild after an edit must leave the list
+                        // where the reader is typing or scrolling it.
+                        self.sync_scroll_to_time(f64::from(studio.playhead), true);
                     }
                     Err(error) => self.message = error,
                 }
@@ -472,13 +476,15 @@ impl SectionsPane {
                 }
             }
         }
+        // The reader's ticks survive the rebuild: an edit anywhere in the
+        // document must not put back the silences they chose to keep.
+        carry_ticks(&self.rows, &mut all_rows);
         self.rows = all_rows;
         self.row_clip_ids = all_clip_ids;
         if self.rows.is_empty() {
             self.message = t("sections.nothingFound");
         } else {
             self.message.clear();
-            self.sync_scroll_to_time(f64::from(studio.playhead), true);
         }
     }
 
@@ -640,44 +646,21 @@ impl SectionsPane {
             }
             let ticks: Vec<bool> = group_rows.iter().map(|r| r.keep).collect();
             let kept = kept_ranges(&group_rows, &ticks);
-            if kept.is_empty() {
-                // Entire clip piece was checked for removal: remove any
-                // overlapping captions and ripple-delete the clip piece.
-                if let Some(c) = studio.timeline().clip(&owner_id) {
-                    let c_start = c.start;
-                    let c_end = c.start + c.duration;
-                    let overlapping_caps: Vec<String> = studio
-                        .timeline()
-                        .clips
-                        .iter()
-                        .filter(|other| {
-                            other.kind == concat_project::model::ClipKind::Text
-                                && other.start < c_end - 1e-3
-                                && other.start + other.duration > c_start + 1e-3
-                        })
-                        .map(|other| other.id.clone())
-                        .collect();
-                    if !overlapping_caps.is_empty() {
-                        commands.push(Command::RemoveClips {
-                            clip_ids: overlapping_caps,
-                            ripple: false,
-                        });
-                    }
-                }
-                commands.push(Command::RemoveClips {
-                    clip_ids: vec![owner_id],
-                    ripple: true,
-                });
-            } else {
-                commands.push(Command::AutotrimClip {
-                    clip_id: owner_id,
-                    kept,
-                });
-            }
+            // An empty `kept` is a whole-clip removal: the clip, its sound and
+            // the captions over it go, and the gap closes on every lane, the
+            // same way a partial cut closes it. (RemoveClips' ripple closed
+            // only the clip's own lane, which left its sound behind.)
+            commands.push(Command::AutotrimClip {
+                clip_id: owner_id,
+                kept,
+            });
         }
 
         studio.apply(Command::Batch { commands });
         self.external_cues.clear();
+        // The rows describe the trim's old timeline; none of their ticks
+        // mean anything against the new one, so they are not carried over.
+        self.rows.clear();
         self.refresh_from_timeline(studio);
         studio.notify(&t("sections.trimmed"), false);
     }
@@ -689,7 +672,11 @@ impl SectionsPane {
         if row.section.kind != Kind::Caption {
             return;
         }
-        row.section.text = text.clone();
+        // The caption this row shows is the timeline clip whose words are
+        // the row's old words. Matching on the words, not only on the time,
+        // keeps a translation on another caption track (same span, other
+        // language) from being overwritten by an edit to this one.
+        let previous_text = std::mem::replace(&mut row.section.text, text.clone());
         let sec_start = row.section.start;
         let sec_end = row.section.end;
         let tl_start = row.timeline_start;
@@ -711,6 +698,7 @@ impl SectionsPane {
                     && cap.start + cap.duration > tl_start + 1e-3
             })
             .filter_map(|cap| cap.text.clone().map(|style| (cap.id.clone(), style)))
+            .filter(|(_, style)| style.content == previous_text)
             .collect();
 
         for (cap_id, mut style) in matching_captions {

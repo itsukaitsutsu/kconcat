@@ -50,7 +50,10 @@ export struct CaptionsSheetData {
     compute-type: int,
     vad-filter: bool,
     languages: [string],
+    /// The language list as the search leaves it: -1 when the chosen one is hidden.
     language: int,
+    /// The chosen language's label, shown on the trigger whatever the search hides.
+    language-text: string,
     translate: bool,
     translate-hint: string,
     beam-size: float,
@@ -95,6 +98,7 @@ export component CaptionsDialog inherits Modal {
     callback compute-type-changed(index: int);
     callback vad-filter-changed(on: bool);
     callback language-changed(index: int);
+    callback language-query-changed(text: string);
     callback translate-changed(on: bool);
     callback beam-size-changed(value: float);
     callback prompt-changed(text: string);
@@ -249,7 +253,11 @@ export component CaptionsDialog inherits Modal {
                 Select {
                     options: root.data.languages;
                     current: root.data.language;
+                    value-text: root.data.language-text;
+                    searchable: true;
+                    search-placeholder: I18n.t1("common.searchKind", I18n.t("captions.language"));
                     changed(index) => { root.language-changed(index); }
+                    query-changed(text) => { root.language-query-changed(text); }
                 }
             }
 
