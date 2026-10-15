@@ -538,7 +538,7 @@ type HeldStills = (
 /// How many in-memory stills the pool keeps. Each is a frame, mostly
 /// transparent, at the monitor's size; a drag makes a few dozen a second
 /// and shows one.
-const STILLS_HELD: usize = 24;
+const STILLS_HELD: usize = 96;
 
 impl ReaderPool {
     /// A pool with `cache_bytes` of frame cache and up to `max_readers` warm

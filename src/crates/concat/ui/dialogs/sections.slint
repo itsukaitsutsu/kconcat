@@ -61,6 +61,8 @@ export struct SectionsSheetData {
     timeline-start: string,
     timeline-end: string,
     message: string,
+    can-add-captions: bool,
+    can-delete-captions: bool,
     can-apply: bool,
     rows: [SectionRowData],
 }
@@ -113,6 +115,9 @@ export component SectionsDialog inherits Modal {
     in property <SectionsSheetData> data;
 
     callback row-toggled(index: int);
+    callback row-shift-select(index: int);
+    callback row-drag-begin(index: int);
+    callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
     callback detect();
@@ -131,11 +136,14 @@ export component SectionsDialog inherits Modal {
     callback select-invert();
     callback select-all-silence();
     callback select-all-captions();
+    callback add-captions-to-timeline();
+    callback add-captions-new-track();
+    callback delete-selected-captions();
     callback apply();
 
     open: root.data.open;
     title: I18n.t("sections.sections");
-    surface-width: 680px;
+    surface-width: 740px;
 
     DialogSection {
         first: true;
@@ -448,6 +456,12 @@ export component SectionsDialog inherits Modal {
                     clicked => { root.apply(); }
                 }
 
+                Button {
+                    label: I18n.t("sections.addCaptionsToTimeline");
+                    enabled: root.data.can-add-captions;
+                    clicked => { root.add-captions-to-timeline(); }
+                }
+
                 Rectangle { horizontal-stretch: 1; }
 
                 Button {
@@ -578,7 +592,7 @@ export component SectionsDialog inherits Modal {
                         padding: 4px;
                         spacing: 2px;
 
-                        for row in root.data.rows: Rectangle {
+                        for row[visible-index] in root.data.rows: Rectangle {
                             height: 32px;
                             border-radius: Theme.r-sm;
                             background: row.at-playhead ? Theme.accent.transparentize(0.84)
@@ -600,12 +614,46 @@ export component SectionsDialog inherits Modal {
                                 padding-right: 8px;
                                 spacing: 8px;
 
-                                VerticalLayout {
-                                    alignment: center;
-                                    Check {
-                                        // Checked = selected for removal (!row.keep), matching section.txt
-                                        checked: !row.keep;
-                                        toggled => { root.row-toggled(row.source-index); }
+                                Rectangle {
+                                    width: 22px;
+                                    height: 32px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Check {
+                                            // Checked = selected for removal (!row.keep), matching section.txt
+                                            checked: !row.keep;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        property <bool> shift-held: false;
+                                        property <int> last-vis: visible-index;
+                                        pointer-event(event) => {
+                                            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                                                self.shift-held = event.modifiers.shift;
+                                                self.last-vis = visible-index;
+                                                if (event.modifiers.shift) {
+                                                    root.row-shift-select(row.source-index);
+                                                } else {
+                                                    root.row-drag-begin(row.source-index);
+                                                }
+                                            }
+                                        }
+                                        moved => {
+                                            if (self.pressed && !self.shift-held && root.data.rows.length > 0) {
+                                                let target-vis = Math.clamp(
+                                                    visible-index + Math.floor(self.mouse-y / 34px),
+                                                    0,
+                                                    root.data.rows.length - 1
+                                                );
+                                                if (target-vis != self.last-vis) {
+                                                    self.last-vis = target-vis;
+                                                    root.row-drag-over(target-vis);
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
@@ -726,6 +774,25 @@ export component SectionsDialog inherits Modal {
         Button {
             label: I18n.t("common.cancel");
             clicked => { root.closed(); }
+        }
+
+        Button {
+            label: I18n.t("sections.addCaptionsToTimeline");
+            enabled: root.data.can-add-captions;
+            clicked => { root.add-captions-to-timeline(); }
+        }
+
+        Button {
+            label: I18n.t("sections.addAsNewCaptionTrack");
+            enabled: root.data.can-add-captions;
+            clicked => { root.add-captions-new-track(); }
+        }
+
+        Button {
+            label: I18n.t("sections.deleteSelectedCaptions");
+            danger: true;
+            enabled: root.data.can-delete-captions;
+            clicked => { root.delete-selected-captions(); }
         }
 
         Button {

@@ -484,20 +484,15 @@ impl ExportPane {
             hdr: self.hdr(studio),
         };
         let (frame_w, frame_h) = studio.output_size();
-        let titles = studio
-            .host
-            .titles
-            .clips(session.project(), frame_w, frame_h)
-            .into_iter()
-            .map(|title| title.clip)
-            .collect();
-        let mut request = export::request(session, &spec, titles);
+        let mut request = export::request(session, &spec, Vec::new());
         let (width, height) = self.size(studio);
         let (num, den) = self.rate(studio);
         request.width = width;
         request.height = height;
         request.rate_num = num;
         request.rate_den = den;
+        let project_for_titles = session.project().clone();
+        let titles_engine = std::sync::Arc::clone(&studio.host.titles);
 
         studio.pause();
         self.phase = ExportPhase::Running;
@@ -517,6 +512,12 @@ impl ExportPane {
         spawn(
             move || {
                 let job = job;
+                let title_clips: Vec<_> = titles_engine
+                    .clips(&project_for_titles, frame_w, frame_h)
+                    .into_iter()
+                    .map(|title| title.clip)
+                    .collect();
+                request.clips.extend(title_clips);
                 export::run_on(&request, compositor, job.cancel_flag(), |progress| {
                     let fraction = if progress.total > 0 {
                         progress.frame as f32 / progress.total as f32

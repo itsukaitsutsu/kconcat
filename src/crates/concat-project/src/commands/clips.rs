@@ -81,6 +81,11 @@ pub(super) fn apply(
                 .max(MIN_CLIP_DURATION);
             let timeline = project.active_mut();
             let track_id = match track_id {
+                Some(ref id) if id == "__top__" => timeline
+                    .tracks
+                    .last()
+                    .map(|t| t.id.clone())
+                    .unwrap_or_else(|| fresh_track(timeline, mint)),
                 Some(id) if timeline.track(&id).is_some() => id,
                 Some(_) => return Err(CommandError::TrackGone),
                 // Every lane above the video is taken: a new one at the top

@@ -216,7 +216,7 @@ impl Titles {
     /// each, for a `width` × `height` frame. One that fails to paint is left
     /// out and said once on stderr; the rest of the edit still renders.
     pub fn clips(&self, project: &Project, width: u32, height: u32) -> Vec<TitleClip> {
-        self.clips_with(project, width, height, false)
+        self.clips_with(project, width, height, false, None)
     }
 
     /// [`Titles::clips`] for a monitor showing a change as it is made:
@@ -226,16 +226,53 @@ impl Titles {
     /// touches the disk, which is what makes a drag smooth: a PNG per
     /// pointer step, encoded, written and decoded again, was the lag.
     pub fn clips_live(&self, project: &Project, width: u32, height: u32) -> Vec<TitleClip> {
-        self.clips_with(project, width, height, true)
+        self.clips_with(project, width, height, true, None)
     }
 
-    fn clips_with(&self, project: &Project, width: u32, height: u32, live: bool) -> Vec<TitleClip> {
+    /// Same as [`Titles::clips_live`], but only rasterizes titles and word
+    /// highlights overlapping `[win_from, win_to]` (plus any clip in
+    /// `include_ids`), so styling 200+ captions at once (`Apply to all captions`)
+    /// only paints the 1–2 captions visible near the playhead instead of
+    /// freezing the UI thread across the entire timeline.
+    pub fn clips_live_window(
+        &self,
+        project: &Project,
+        width: u32,
+        height: u32,
+        win_from: f64,
+        win_to: f64,
+        include_ids: &[String],
+    ) -> Vec<TitleClip> {
+        self.clips_with(
+            project,
+            width,
+            height,
+            true,
+            Some((win_from, win_to, include_ids)),
+        )
+    }
+
+    fn clips_with(
+        &self,
+        project: &Project,
+        width: u32,
+        height: u32,
+        live: bool,
+        window: Option<(f64, f64, &[String])>,
+    ) -> Vec<TitleClip> {
         if live {
             self.live.lock().unwrap_or_else(|e| e.into_inner()).begin();
         }
         let timeline = project.active();
         let mut out = Vec::new();
         for clip in &timeline.clips {
+            if let Some((win_from, win_to, include_ids)) = window {
+                let clip_end = clip.start + clip.duration;
+                let in_window = clip_end >= win_from && clip.start <= win_to;
+                if !in_window && !include_ids.iter().any(|id| id == &clip.id) {
+                    continue;
+                }
+            }
             let (text, shape);
             let painting = match clip.kind {
                 ModelClipKind::Text => {
@@ -329,9 +366,16 @@ impl Titles {
             let overlays = match painting {
                 Painting::Title(style) if !style.highlight_color.is_empty() => {
                     match clip.words.as_deref() {
-                        Some(words) => {
-                            self.highlights(project, &title, style, words, width, height, live)
-                        }
+                        Some(words) => self.highlights(
+                            project,
+                            &title,
+                            style,
+                            words,
+                            width,
+                            height,
+                            live,
+                            window.map(|(f, t, _)| (f, t)),
+                        ),
                         None => Vec::new(),
                     }
                 }
@@ -364,6 +408,7 @@ impl Titles {
         width: u32,
         height: u32,
         live: bool,
+        window: Option<(f64, f64)>,
     ) -> Vec<TitleClip> {
         let base = &title.clip;
         // No length, no moment to read the caption's motion against.
@@ -383,6 +428,11 @@ impl Titles {
             let from = word.start.max(window_start);
             let to = word.end.min(window_end);
             if !from.is_finite() || !to.is_finite() || to <= from {
+                continue;
+            }
+            if let Some((win_from, win_to)) = window
+                && (to < win_from || from > win_to)
+            {
                 continue;
             }
             let painting = Painting::Highlight {

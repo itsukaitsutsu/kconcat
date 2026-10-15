@@ -1613,6 +1613,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_captions_download_model_clicked(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DownloadModelClicked));
     }));
+    app.on_captions_engine_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::EngineChanged(index)));
+    }));
+    app.on_captions_device_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::DeviceChanged(index)));
+    }));
+    app.on_captions_compute_type_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::ComputeTypeChanged(index)));
+    }));
+    app.on_captions_vad_filter_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::VadFilterChanged(on)));
+    }));
     app.on_captions_language_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::LanguageChanged(index)));
     }));
@@ -1692,6 +1704,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_captions_draft_insert(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DraftInsert));
+    }));
+    app.on_captions_draft_insert_new_track(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::DraftInsertNewTrack));
     }));
     app.on_captions_draft_insert_and_detect(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::DraftInsertAndDetect));
@@ -1789,12 +1804,42 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             crate::panes::sections::SectionsMsg::SelectAllCaptions,
         ));
     }));
+    app.on_sections_add_captions_to_timeline(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::AddCaptionsToTimeline,
+        ));
+    }));
+    app.on_sections_add_captions_new_track(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::AddCaptionsNewTrack,
+        ));
+    }));
+    app.on_sections_delete_selected_captions(on_window!(|state| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::DeleteSelectedCaptions,
+        ));
+    }));
     app.on_sections_apply(on_window!(|state| {
         state.handle(Msg::Sections(crate::panes::sections::SectionsMsg::Apply));
     }));
     app.on_sections_row_toggled(on_window!(|state, index: i32| {
         state.handle(Msg::Sections(
             crate::panes::sections::SectionsMsg::RowToggled(index),
+        ));
+    }));
+    app.on_sections_row_shift_select(on_window!(|state, index: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowShiftSelect(index),
+        ));
+    }));
+    app.on_sections_row_drag_begin(on_window!(|state, index: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowDragBegin(index),
+        ));
+    }));
+    app.on_sections_row_drag_over(on_window!(|state, visible_index: i32| {
+        state.handle(Msg::Sections(
+            crate::panes::sections::SectionsMsg::RowDragOver(visible_index),
         ));
     }));
     app.on_sections_row_seek(on_window!(|state, index: i32| {

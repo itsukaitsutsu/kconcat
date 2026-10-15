@@ -167,9 +167,23 @@ export component TextPanel inherits VerticalLayout {
         }
     }
 
+    if !root.batch && root.selected.caption-siblings > 1: SectionBody {
+        padding-left: Theme.pad;
+        padding-right: Theme.pad;
+        padding-top: 8px;
+        padding-bottom: 4px;
+        SwitchRow {
+            label: I18n.t1("textPanel.applyToAllCaptions", "\{root.selected.caption-siblings}");
+            checked: root.selected.apply-all-captions;
+            toggled(on) => {
+                root.set(ClipField.apply-all-captions, on ? 1 : 0);
+            }
+        }
+    }
+
     // ── content ──────────────────────────────────────────────────────────
     if !root.batch: Section {
-        first: true;
+        first: root.selected.caption-siblings <= 1;
         content := SectionHeader {
             title: I18n.t("textPanel.content");
             collapsible: true;

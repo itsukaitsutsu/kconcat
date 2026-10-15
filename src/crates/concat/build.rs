@@ -87,6 +87,59 @@ fn main() {
             )
             .compile()
             .expect("could not embed the Windows icon");
+
+        // Stage runtime DLLs (FFmpeg, ONNX Runtime, sherpa-onnx) into the
+        // profile directory (`target/<profile>`) and `target/<profile>/deps`
+        // so Windows loads our `onnxruntime.dll` from the application folder
+        // instead of `C:\Windows\System32\onnxruntime.dll` (which causes
+        // STATUS_INVALID_IMAGE_FORMAT / 0xc000007b).
+        if let Ok(out_dir) = std::env::var("OUT_DIR")
+            && let Some(profile_dir) = std::path::Path::new(&out_dir)
+                .parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+        {
+            let deps_dir = profile_dir.join("deps");
+            let _ = std::fs::create_dir_all(&deps_dir);
+            let mut dll_dirs: Vec<std::path::PathBuf> = Vec::new();
+            if let Ok(ff) = std::env::var("FFMPEG_DIR") {
+                dll_dirs.push(std::path::PathBuf::from(ff).join("bin"));
+            }
+            if let Ok(ort) = std::env::var("ORT_LIB_LOCATION") {
+                dll_dirs.push(std::path::PathBuf::from(ort));
+            }
+            if let Ok(sherpa) = std::env::var("SHERPA_ONNX_LIB_DIR")
+                && let Some(parent) = std::path::Path::new(&sherpa).parent()
+            {
+                dll_dirs.push(parent.join("sherpa-dlls"));
+            }
+            dll_dirs.push(std::path::PathBuf::from(r"C:\Concat-deps\sherpa-dlls"));
+            for src_dir in dll_dirs {
+                let Ok(entries) = std::fs::read_dir(&src_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("dll"))
+                        && let Some(name) = path.file_name()
+                    {
+                        for dst_dir in [profile_dir, deps_dir.as_path()] {
+                            let dst = dst_dir.join(name);
+                            let same_len = std::fs::metadata(&path)
+                                .ok()
+                                .zip(std::fs::metadata(&dst).ok())
+                                .is_some_and(|(a, b)| a.len() == b.len());
+                            if !same_len {
+                                let _ = std::fs::copy(&path, &dst);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Three facts about the build that the built thing cannot ask for at run

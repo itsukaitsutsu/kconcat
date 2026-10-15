@@ -5085,4 +5085,84 @@ mod tests {
         assert!((cap_row.timeline_start - 3.0).abs() < 1e-6);
         assert!((cap_row.timeline_end - 5.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn add_text_clip_with_top_track_sentinel_places_multi_track_captions_on_dedicated_top_track() {
+        let (mut editor, _, clip_id) = fixture();
+        // First language track: caption at [0, 2) on a free track above the clip.
+        let c1 = editor
+            .apply(Command::AddTextClip {
+                track_id: None,
+                above: true,
+                start: 0.0,
+                style: None,
+                duration: Some(2.0),
+                offset_y: Some(360.0),
+                caption_of: Some(clip_id.clone()),
+                words: None,
+            })
+            .expect("first caption")
+            .created_id
+            .expect("c1 id");
+        let first_track = editor
+            .project()
+            .active()
+            .clip(&c1)
+            .expect("c1")
+            .track_id
+            .clone();
+
+        // Second language track in one batch: AddTrack { bottom: false } + two captions
+        // (including one at [4, 6) where `first_track` has an open gap).
+        editor
+            .apply(Command::Batch {
+                commands: vec![
+                    Command::AddTrack { bottom: false },
+                    Command::AddTextClip {
+                        track_id: Some("__top__".to_owned()),
+                        above: true,
+                        start: 0.0,
+                        style: None,
+                        duration: Some(2.0),
+                        offset_y: Some(230.0),
+                        caption_of: Some(clip_id.clone()),
+                        words: None,
+                    },
+                    Command::AddTextClip {
+                        track_id: Some("__top__".to_owned()),
+                        above: true,
+                        start: 4.0,
+                        style: None,
+                        duration: Some(2.0),
+                        offset_y: Some(230.0),
+                        caption_of: Some(clip_id.clone()),
+                        words: None,
+                    },
+                ],
+            })
+            .expect("second caption track batch");
+
+        let top_track = editor
+            .project()
+            .active()
+            .tracks
+            .last()
+            .expect("top track")
+            .id
+            .clone();
+        assert_ne!(top_track, first_track);
+        let top_clips: Vec<_> = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .filter(|c| c.track_id == top_track)
+            .collect();
+        assert_eq!(
+            top_clips.len(),
+            2,
+            "both captions of the second language track stay on the new top track"
+        );
+        assert_eq!(editor.project().active().captions_of(&clip_id).len(), 3);
+    }
 }

@@ -205,6 +205,9 @@ and continue. User handles all git commands themselves — deliverables are
    word-level/karaoke (+ SRT/VTT modules already in from Tranche A).
    Estimate given to user: 3 phases/sessions after 6a, 2-4 part-time
    days, dominated by user's app builds (30-90 min each).
+7. Phase 8 (Stages A-E + Stages 1-4 + Multi-GPU Vulkan + Live Caption Styling Perf + Multi-Caption Track Isolation) DELIVERED 2026-10-15:
+   - `kconcat-multi-caption-fix.zip` / `kconcat-vts-gpu-and-perf-fix.zip`
+   - Adding new captions via Auto-caption (`Generate` -> `Add to timeline` / `+ Add as new caption track` / `Add & detect sections`), `From script`, `Import captions` (`.srt`/`.vtt`), or `Sections` now always spawns a dedicated new track at the top (`Command::AddTrack { bottom: false }` + `Some("__top__")`), preserves existing caption tracks without deleting or colliding with them, and nudges `offset_y` by `-0.12` in Concat's normalized `[-1.0, 1.0]` frame-height coordinate space.
 
 ## Rules established with the user
 - Deliverable = one .zip per phase, paths mirroring repo root, plus a

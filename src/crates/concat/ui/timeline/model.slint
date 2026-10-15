@@ -180,6 +180,8 @@ export enum ClipField {
     /// which of the media's audio tracks the clip plays, as a row of
     /// Editor.audio-tracks
     audio-track,
+    /// whether styling/positioning a caption clip applies to all captions on its track
+    apply-all-captions,
 }
 
 /// One keyable property's state at the playhead, as the inspector needs it.
@@ -405,6 +407,10 @@ export struct SelectedClipData {
     text-width: float,
     /// the box's height as a fraction of the frame's; zero is the words' own
     text-height: float,
+    /// how many caption clips share this track & parent clip (> 1 shows "Apply to all captions")
+    caption-siblings: int,
+    /// whether styling/positioning this caption applies to all captions on its track
+    apply-all-captions: bool,
 }
 
 /// One picture under the playhead, as the monitor places it.

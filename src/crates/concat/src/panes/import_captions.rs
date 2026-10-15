@@ -10,7 +10,9 @@ use concat_project::Command;
 use crate::host::spawn_in_project;
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
-use crate::panes::captions::caption_clip;
+use crate::panes::captions::{
+    caption_clip_on_track, default_caption_look, non_overlapping_caption_look,
+};
 use crate::studio::Studio;
 use crate::ui::CaptionImportData;
 
@@ -113,20 +115,51 @@ impl ImportCaptionsPane {
                             return;
                         }
                         let count = placed.len();
-                        let commands = placed
-                            .into_iter()
-                            .map(|cue| {
-                                caption_clip(
-                                    cue.text,
-                                    cue.start,
-                                    cue.duration,
-                                    (0.0, 0.05),
-                                    None,
-                                    cue.caption_of.as_deref(),
-                                    None,
-                                )
-                            })
-                            .collect();
+                        let clip_id = target.as_ref().map_or("", |t| t.id.as_str());
+                        let has_existing_text = studio
+                            .timeline()
+                            .clips
+                            .iter()
+                            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+                        let look = if has_existing_text {
+                            non_overlapping_caption_look(studio, clip_id, default_caption_look())
+                        } else {
+                            default_caption_look()
+                        };
+                        let base = studio.prefs.title_style.clone();
+                        let top_track_busy = studio.timeline().tracks.last().is_none_or(|top| {
+                            studio.timeline().clips.iter().any(|c| c.track_id == top.id)
+                        });
+                        let mut commands = Vec::new();
+                        if has_existing_text || top_track_busy {
+                            commands.push(Command::AddTrack { bottom: false });
+                        }
+                        for (idx, cue) in placed.iter().enumerate() {
+                            let next_start = placed
+                                .get(idx + 1)
+                                .map(|next| next.start)
+                                .unwrap_or(f64::INFINITY);
+                            let duration = if next_start > cue.start + 0.05 {
+                                cue.duration.min(next_start - cue.start).max(0.05)
+                            } else {
+                                cue.duration.max(0.05)
+                            };
+                            let words = concat_project::captionmap::estimate_words(
+                                &cue.text,
+                                cue.start,
+                                cue.start + duration,
+                            );
+                            commands.push(caption_clip_on_track(
+                                cue.text.clone(),
+                                cue.start,
+                                duration,
+                                look,
+                                base.as_ref(),
+                                cue.caption_of.as_deref(),
+                                Some(words),
+                                Some("__top__".to_owned()),
+                            ));
+                        }
                         studio.apply(Command::Batch { commands });
                         *self = Self::default();
                         studio.notify(&tf("captions.addedCaptions", &[&count]), false);

@@ -287,6 +287,7 @@ if exist "%SLIBS%\*.lib" if exist "%SDLLS%\*.dll" (
     mkdir "%SDLLS%"
     copy /y "!SINNER!\lib\sherpa-onnx-*.lib" "%SLIBS%\" >nul
     copy /y "!SINNER!\lib\sherpa-onnx-*.dll" "%SDLLS%\" >nul
+    if exist "!SINNER!\lib\cargs.dll" copy /y "!SINNER!\lib\cargs.dll" "%SDLLS%\" >nul
     rmdir /s /q "%DEPS%\sherpa-stage"
     del "%DEPS%\sherpa.tar.bz2"
 

@@ -1,74 +1,71 @@
-# Phase 8 + VTS Integration — Sections, Auto-Caption Editor, Shared Whisper Models, and Caption Import
+# CHECKPOINT — VTS Parity Integration (`detect-section.txt`, `section.txt`, `autocaption.txt`) + Stages 1–4 Enhancements
 
-This is a **source overlay** for the `kconcat` repository (`https://github.com/itsukaitsutsu/kconcat`). It is not a compiled installer. It contains all Phase 8 and VTS Sections/Captions integration code changes since commit `85ee8bf`, along with `CHECKPOINT-VTS-INTEGRATION.md`, `CHECKPOINT-PHASE-8.md`, and `PHASE-8-MANIFEST.txt`.
+- **Repository**: `https://github.com/itsukaitsutsu/kconcat.git`
+- **Base Commit**: `4381c05` (`Phase 7 Stage 6: Complete all remaining tasks (6a-6e)`)
+- **Completed Stages**:
+  - **Stages A–E** (`b58089f` → `1fb3e08`): Full VTS parity + direct timeline caption insertion (verified on Windows: `95 / 95` tests passing in `concat`).
+  - **Stage 1** (`3ade750`): Engine selector (`faster-whisper` vs `whisper.cpp` Vulkan GPU `whisper-cli.exe` / CPU), `Device`, `Compute type`, `VAD (skip silence)` compaction + timestamp remapping, and live Elapsed + ETA countdown during Auto-caption.
+  - **Stage 2** (`edda2a4`): Multi-track bilingual/multi-language captions (`+ Add as new caption track` in both `Captions` and `Sections`, using `__top__` track resolution and non-overlapping vertical offsets) + `Apply to all captions` (`capApplyAll`, checked by default) in Concat's Text inspector and stage gestures, scoped per caption track.
+  - **Stage 3** (`3dfa8f5`): Hold-and-drag checkbox painting + `Shift`+click range selection in `Sections`, live timeline selection sync when rows are checked/unchecked, and a dedicated `Delete selected captions` button alongside `Remove selected` (which trims video).
+  - **Stage 4** (`HEAD`): Full 24-locale i18n synchronization (`1,124` keys, `0 missing, 0 stale`), full test suite verification (`443 / 443` sandbox tests passing), and updated deliverable `.zip` archives.
 
-## Included
+---
 
-- **Detect Sections controls (`detect-section.txt`)**:
-  - **Silence** detection toggle (`detect_silence`, default `true`), configurable **Threshold** in dB (default `-45`), **Min silence** in ms (default `800`, step `50`), and **Min section** in ms (default `120`, step `20`).
-  - **Captions (.srt / .vtt)** toggle (`use_captions`, default `true`), optional `.srt`/`.vtt` path field + **Upload .srt/.vtt** file picker (`sub_info` cue count), and explicit **Detect sections** button.
-  - Backed by `clip_sections_with_cues(timeline, clip_id, silences, pad, use_captions, min_section_ms, external_cues)` in `concat-project`.
-- **Searchable/filterable Sections list & 7-column table (`section.txt`)**:
-  - Clip-wide normalized timeline strip and 7-column table (`[checkbox, track, start, end, dur, kind, text]`).
-  - Toggleable **Caption**, **Silence**, and **Other** filter chips, **min section** filter in seconds (`s`, step `0.1`), and **Search caption text…** field.
-  - Bulk selection actions (**Select visible**, **Clear**, **Remove selected**, **Invert**, **All silence**, **All captions**) + selection hint banner.
-  - Active playhead row highlight (`at_playhead`), click-to-seek on non-text cells (`track`, `start`, `end`, `dur`, `kind`), and inline caption text editing that updates both the section row and any linked timeline caption clip.
-- **Auto-caption Whisper options & interactive Caption Editor (`autocaption.txt`)**:
-  - Whisper model selector + inline **Get model** downloader with progress bar and model folder status.
-  - Whisper **Language** selector with all 99 languages formatted as `"code — Name"` (`"auto — Auto-detect"`, `"en — English"`, `"id — Indonesian"`, etc.).
-  - **Translate speech to English** toggle with dynamic `translateHint` and automatic fallback away from transcription-only `large-v3-turbo`.
-  - Collapsible **Advanced options**: **Beam size** (`1..10`), **Hint / prompt**, **Output folder** + **Browse**, and checkboxes for **word timestamps (JSON)**, **temperature fallback**, **normalize audio**, and **keep 16 kHz wav**.
-  - Manual start buttons: **New blank captions** and **Open .srt / .vtt…**.
-  - Interactive **Caption editor**:
-    - Header bar with `(N cues)` counter, **+ Add cue**, **Undo changes**, and **Save captions** (exports both `.srt` and `.vtt`).
-    - 4-mode **Layout** re-splitter (`Engine segments (as transcribed)`, `Readable lines (subtitles)`, `Burst - 3 words (vertical video)`, `One word at a time`) + **Re-split** button backed by `concat_project::captionmap::resplit_cues`.
-    - Cue table (`#`, `Start (s)`, `End (s)`, `Text`, `×`).
-    - Footer actions: **Discard**, **Use these captions**, and **Use these captions → Detect sections** (inserts captions onto the timeline linked to the clip and immediately opens the Sections dialog).
-- **Shared Whisper model folder & local-only VTS models**:
-  - Configurable Whisper model folder under **Settings → Transcriber**, defaulting on non-portable Windows to:
-    `D:\autotrim\workspace-01a11267-3c03-70c7-ba2b-746368a13969\video-trim-studio\work\whisper-models`
-  - Detects and allows selecting existing VTS `ggml-large-v3-turbo.bin` and `ggml-large-v3.bin` files as **local-only** models (protected from Concat download/removal).
-- **Subtitle import (`File → Import Captions`)**:
-  - Imports `.srt` and `.vtt` files into editable timeline caption clips with a choice between project timecodes (`00:00` at timeline start) and alignment to a selected constant-speed video clip.
+## 1. What Was Built in Stages 1–4
 
-## Apply the ZIP
+### Stage 1 — Transcription Speedups (Vulkan GPU `whisper-cli.exe` + `faster-whisper` + VAD) & Live ETA
+- **Engine Selector (`captions.engine`)**:
+  - Added **Engine** selector (`faster-whisper (Python)` vs `whisper.cpp (Vulkan GPU / CPU)`) in the Auto-caption sheet (`ui/dialogs/captions.slint`, `src/panes/captions.rs`), plus **Device** (`auto`, `cuda`, `cpu`), **Compute type** (`auto`, `int8`, `int8_float16`, `float16`, `float32`), and **VAD (skip silence)** (`vad-filter`, checked by default) in **Advanced options**.
+  - Displays live engine status in the model status bar (e.g., whether Vulkan GPU `whisper-cli.exe` or Python `faster-whisper` was auto-detected on the machine).
+- **Hardware-Accelerated Backends (`src/crates/concat-speech/src/transcribe.rs`)**:
+  - **`whisper.cpp` Vulkan GPU CLI (`transcribe_via_whisper_cli`)**: Automatically discovers `whisper-cli.exe` / `main.exe` in `CONCAT_WHISPER_CLI`, `C:\dev\video-trimmer-subtitle\bin\whisper\`, `PATH`, or next to the executable, runs with `-ojf` (full JSON with word timestamps) and `--print-progress`, parses `progress = XX%` from stderr in real time, and falls back seamlessly to in-process `whisper-rs` if `whisper-cli` is not installed.
+  - **`faster-whisper` Python Backend (`transcribe_via_faster_whisper`)**: Automatically discovers a Python interpreter with `faster_whisper` (`CONCAT_PYTHON`, `C:\dev\video-trimmer-subtitle\.venv\Scripts\python.exe`, `python`, `py`), resolves HuggingFace CTranslate2 models (`Systran/faster-whisper-*`), streams JSON progress/segments back to Concat, and falls back to `whisper.cpp` if `faster_whisper` is not installed.
+  - **VAD Silence Compaction (`compact_silence_vad` & `remap_segments_from_vad`)**: Strips silent stretches (`>= 0.65 s`) from the 16 kHz mono PCM buffer before inference and remaps all segment and word timestamps back to the original clip clock afterwards.
+- **Live Elapsed + ETA Readout (`eta_clock`)**:
+  - Tracks `started_at: Option<Instant>` during transcription and displays `Elapsed 0:08 · ETA 0:15 (35%)` in the Auto-caption progress bar.
 
-1. Back up your checkout (or make a Git commit/stash first).
-2. Extract the overlay ZIP **into the repository root** — for example `C:\dev\kconcat`, the folder containing `src\` — and allow it to overwrite the included files.
-3. Open `open-a-real-build-terminal.bat`, then run the checks below from `C:\dev\kconcat\src`.
+### Stage 2 — Multi-Track Simultaneous Captions & Per-Track `Apply to all captions`
+- **Dedicated Multi-Track Caption Insertion (`__top__` track sentinel)**:
+  - Updated `Command::AddTextClip` (`src/crates/concat-project/src/commands/clips.rs`) so `track_id == Some("__top__")` resolves to `timeline.tracks.last()`, allowing a single undoable `Command::Batch` starting with `Command::AddTrack { bottom: false }` to place an entire new language track onto a dedicated top track without captions dropping into silent gaps on lower caption tracks.
+  - Added **`+ Add as new caption track`** to both the **Captions** review footer (`ui/dialogs/captions.slint`) and the **Sections** dialog footer (`ui/dialogs/sections.slint`), with `non_overlapping_caption_look` automatically nudging the new track's vertical `offset_y` by `130px` so multiple simultaneous subtitle tracks (e.g., English + Japanese) never overlap on the video canvas.
+- **`Apply to all captions` (`capApplyAll`) in Text Inspector & Stage Gestures**:
+  - Added `Apply to all captions (N)` switch (`SwitchRow`, checked by default) at the top of `TextPanel` (`ui/inspector/text-panel.slint`) whenever a selected caption clip has sibling captions on the same track (`caption_track_siblings` in `src/crates/concat/src/studio.rs`).
+  - Scoped per caption track (`other.track_id == primary.track_id && other.caption_of == primary.caption_of`) so styling or moving an English caption track updates all English captions while leaving a Japanese caption track untouched, and editing the **Content** text box still edits only the individual selected caption.
+  - Extended stage canvas gestures (`StageMove`, `StageScale`, `StageRotate`, `StageStretch`, `TextWidth`, `TextHeight`) to fan out across `stage_gesture_targets` when `Apply to all captions` is enabled.
 
-## Verify on Windows
+### Stage 3 — Hold-and-Drag Checkboxes, Live Timeline Selection Sync, & `Delete selected captions`
+- **Hold-and-Drag & `Shift`+Click Checkbox Selection (`ui/dialogs/sections.slint`, `src/panes/sections.rs`)**:
+  - Pressing and dragging vertically across checkboxes in the `Sections` table continuously paints rows (`RowDragBegin` + `RowDragOver`), and `Shift`+clicking a checkbox selects/deselects the entire visible range from the last clicked row (`RowShiftSelect`).
+- **Live Timeline Selection Sync (`sync_timeline_selection`)**:
+  - Checking or unchecking rows in `Sections` (via click, `Shift`+click, drag-paint, or bulk selection buttons) automatically updates `studio.selection` to highlight the corresponding timeline caption clips on the Concat timeline.
+- **`Delete selected captions` vs `Remove selected`**:
+  - Added a dedicated **`Delete selected captions`** button (`SectionsMsg::DeleteSelectedCaptions`) in `Sections` that removes only the timeline caption clips overlapping the checked rows (`Command::RemoveClips { ripple: false }`) while keeping the video clip intact, whereas **`Remove selected`** (`Apply`) cuts the checked sections out of the video clip (`Command::AutotrimClip`).
 
-```bat
-cargo fmt --all -- --check
-cargo test -p concat-project
-cargo test -p concat-text
-cargo test -p concat-host
-cargo test -p concat-speech
-cargo test -p concat-api
-cargo test -p concat-server
-cargo test -p concat
-cargo check -p concat
+---
+
+## 2. Verification Performed
+
+### Verified in Linux Sandbox (`rustc 1.99.0`)
+1. `python3 scripts/locales.py --check` -> **0 missing, 0 stale** across all 24 locale files (`1,124` keys each).
+2. `cargo test -p concat-core` -> **53 unit + 2 doc tests passed (0 failed)**.
+3. `cargo test -p concat-project` -> **241 unit tests passed (0 failed)** (including `add_text_clip_with_top_track_sentinel_places_multi_track_captions_on_dedicated_top_track`, `resplit_cues_supports_engine_line_burst_and_word_layouts`, `clip_sections_with_options_respects_use_captions_and_min_section_ms`, and `clip_sections_with_cues_uses_external_srt_cues_shifted_to_source_start`).
+4. `cargo test -p concat-effects` -> **72 unit tests passed (0 failed)**.
+5. `cargo test -p concat-text` -> **30 unit tests passed (0 failed)**.
+6. `cargo test -p concat-render -- --skip gpu::tests` -> **45 CPU unit tests passed (0 failed)**.
+7. `slint-build::compile("src/crates/concat/ui/app.slint")` (`slint-check`) -> **compiled cleanly (exit code 0)** across all `.slint` components (`app.slint`, `captions.slint`, `sections.slint`, `text-panel.slint`, `model.slint`).
+
+### To Verify on Windows (`C:\dev\kconcat`)
+After extracting `kconcat-vts-integration-overlay.zip` over `C:\dev\kconcat`:
+```powershell
+cd C:\dev\kconcat\src
+cargo test -p concat-speech -p concat-project -p concat
+cargo run -p concat
 ```
 
-Before launching `cargo dev`, clean its separate `quick` profile so Slint regenerates the updated dialog bindings:
+---
 
-```bat
-cargo clean -p concat --profile quick
-cargo dev
-```
+## 3. Deliverable Archives
 
-## In-session verification summary
-
-Verified inside the Linux sandbox (Rust 1.93.1 + `slint-build 1.18.1`):
-
-- Slint UI compilation of `src/crates/concat/ui/app.slint`: **passed** (0 errors, 0 warnings)
-- `python3 scripts/locales.py --check`: **exits 0** (`1115 strings in en.json`, 0 missing English keys, 0 stale keys)
-- `python3 scripts/models.py --check`: **exits 0** (`23 models, 3.37 GB, mirrored on models-v1`)
-- `cargo fmt --all -- --check`: **exits 0**
-- `cargo clippy -p concat-project -p concat-render --all-targets -- -D warnings`: **exits 0**
-- `cargo test -p concat-project`: **240 passed**, 0 failed
-- `cargo test -p concat-render -- --skip gpu::tests`: **45 passed**, 0 failed
-- `pane_logic` harness (`rustc --test` against `libconcat_project.rlib`): **2 passed**, 0 failed
-
-Full native linking of `concat-media`, `concat-speech`, and `concat` requires your Windows FFmpeg / ONNX Runtime / sherpa-onnx development environment (`cargo check -p concat`).
+- `/home/user/kconcat-vts-integration-overlay.zip`: Overlay archive containing all modified/added files from `4381c05..HEAD` with paths relative to the repo root (`src/...`). Extract directly over `C:\dev\kconcat`.
+- `/home/user/kconcat-vts-stage-6-complete.zip`: Identical copy of the overlay archive for convenience.
+- `/home/user/kconcat-phase-8.zip`: Full repository snapshot at `HEAD` (`git archive --format=zip`).

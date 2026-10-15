@@ -1,29 +1,49 @@
-CHECKPOINT-PHASE-8.md
-CHECKPOINT-VTS-INTEGRATION.md
-PHASE-8-MANIFEST.txt
-README-PHASE-8.md
-scripts/models.py
-src/crates/concat-api/src/lib.rs
-src/crates/concat-host/src/dirs.rs
-src/crates/concat-host/src/titles.rs
-src/crates/concat-project/src/captionmap.rs
-src/crates/concat-project/src/lib.rs
-src/crates/concat-project/src/sectionlist.rs
-src/crates/concat-server/src/grpc.rs
-src/crates/concat-server/src/lib.rs
-src/crates/concat-speech/src/transcribe.rs
-src/crates/concat/locales/en.json
-src/crates/concat/src/lib.rs
-src/crates/concat/src/panes/captions.rs
-src/crates/concat/src/panes/import_captions.rs
-src/crates/concat/src/panes/mod.rs
-src/crates/concat/src/panes/sections.rs
-src/crates/concat/src/panes/settings.rs
-src/crates/concat/src/prefs.rs
-src/crates/concat/src/studio.rs
-src/crates/concat/ui/app.slint
-src/crates/concat/ui/dialogs/caption-import.slint
-src/crates/concat/ui/dialogs/captions.slint
-src/crates/concat/ui/dialogs/sections.slint
-src/crates/concat/ui/dialogs/settings.slint
-src/crates/concat/ui/primitives/modal.slint
+ CHECKPOINT-VTS-INTEGRATION.md                   |  219 ++---
+ PHASE-8-MANIFEST.txt                            |   81 +-
+ README-PHASE-8.md                               |  124 ++-
+ fetch-native-deps.bat                           |    1 +
+ src/crates/concat-host/src/titles.rs            |   62 +-
+ src/crates/concat-media/src/pool.rs             |    2 +-
+ src/crates/concat-project/src/captionmap.rs     |    3 +-
+ src/crates/concat-project/src/commands/clips.rs |    5 +
+ src/crates/concat-project/src/lib.rs            |   85 +-
+ src/crates/concat-speech/src/transcribe.rs      |  818 +++++++++++++++++-
+ src/crates/concat/build.rs                      |   53 ++
+ src/crates/concat/locales/ar.json               |  104 +++
+ src/crates/concat/locales/bn.json               |  104 +++
+ src/crates/concat/locales/de.json               |  104 +++
+ src/crates/concat/locales/en.json               |   91 +-
+ src/crates/concat/locales/es.json               |  104 +++
+ src/crates/concat/locales/fa.json               |  104 +++
+ src/crates/concat/locales/fr.json               |  104 +++
+ src/crates/concat/locales/he.json               |  104 +++
+ src/crates/concat/locales/hi.json               |  104 +++
+ src/crates/concat/locales/hr.json               |  104 +++
+ src/crates/concat/locales/id.json               |  104 +++
+ src/crates/concat/locales/it.json               |  104 +++
+ src/crates/concat/locales/ja.json               |  104 +++
+ src/crates/concat/locales/ko.json               |  104 +++
+ src/crates/concat/locales/nl.json               |  104 +++
+ src/crates/concat/locales/pl.json               |  104 +++
+ src/crates/concat/locales/pt-BR.json            |  104 +++
+ src/crates/concat/locales/ru.json               |  104 +++
+ src/crates/concat/locales/th.json               |  104 +++
+ src/crates/concat/locales/tr.json               |  104 +++
+ src/crates/concat/locales/uk.json               |  104 +++
+ src/crates/concat/locales/ur.json               |  104 +++
+ src/crates/concat/locales/vi.json               |  104 +++
+ src/crates/concat/locales/zh-Hans.json          |  104 +++
+ src/crates/concat/locales/zh-TW.json            |  104 +++
+ src/crates/concat/src/host.rs                   |    4 +-
+ src/crates/concat/src/lib.rs                    |  120 +++
+ src/crates/concat/src/panes/captions.rs         | 1028 +++++++++++++++++++++--
+ src/crates/concat/src/panes/export.rs           |   17 +-
+ src/crates/concat/src/panes/import_captions.rs  |    6 +-
+ src/crates/concat/src/panes/sections.rs         |  644 ++++++++++++--
+ src/crates/concat/src/studio.rs                 |  238 ++++--
+ src/crates/concat/ui/app.slint                  |   64 ++
+ src/crates/concat/ui/dialogs/captions.slint     |  566 +++++++++++--
+ src/crates/concat/ui/dialogs/sections.slint     |  864 +++++++++++++------
+ src/crates/concat/ui/inspector/text-panel.slint |   16 +-
+ src/crates/concat/ui/timeline/model.slint       |    6 +
+ 48 files changed, 6762 insertions(+), 851 deletions(-)

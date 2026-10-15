@@ -297,6 +297,10 @@ export component App inherits Window {
     callback captions-model-changed(index: int);
     callback captions-download-model-changed(index: int);
     callback captions-download-model-clicked();
+    callback captions-engine-changed(index: int);
+    callback captions-device-changed(index: int);
+    callback captions-compute-type-changed(index: int);
+    callback captions-vad-filter-changed(on: bool);
     callback captions-language-changed(index: int);
     callback captions-translate-changed(on: bool);
     callback captions-beam-size-changed(value: float);
@@ -322,6 +326,7 @@ export component App inherits Window {
     callback captions-draft-resplit();
     callback captions-draft-discard();
     callback captions-draft-insert();
+    callback captions-draft-insert-new-track();
     callback captions-draft-insert-and-detect();
     callback captions-begin();
     callback captions-cancel();
@@ -334,6 +339,9 @@ export component App inherits Window {
     in property <SectionsSheetData> sections;
     callback sections-closed();
     callback sections-row-toggled(index: int);
+    callback sections-row-shift-select(index: int);
+    callback sections-row-drag-begin(index: int);
+    callback sections-row-drag-over(visible-index: int);
     callback sections-row-seek(index: int);
     callback sections-row-text-edited(index: int, text: string);
     callback sections-detect();
@@ -352,6 +360,9 @@ export component App inherits Window {
     callback sections-select-invert();
     callback sections-select-all-silence();
     callback sections-select-all-captions();
+    callback sections-add-captions-to-timeline();
+    callback sections-add-captions-new-track();
+    callback sections-delete-selected-captions();
     callback sections-apply();
 
     in property <SpeechSheetData> speech;
@@ -896,6 +907,10 @@ export component App inherits Window {
         model-changed(index) => { root.captions-model-changed(index); }
         download-model-changed(index) => { root.captions-download-model-changed(index); }
         download-model-clicked => { root.captions-download-model-clicked(); }
+        engine-changed(index) => { root.captions-engine-changed(index); }
+        device-changed(index) => { root.captions-device-changed(index); }
+        compute-type-changed(index) => { root.captions-compute-type-changed(index); }
+        vad-filter-changed(on) => { root.captions-vad-filter-changed(on); }
         language-changed(index) => { root.captions-language-changed(index); }
         translate-changed(on) => { root.captions-translate-changed(on); }
         beam-size-changed(value) => { root.captions-beam-size-changed(value); }
@@ -921,6 +936,7 @@ export component App inherits Window {
         draft-resplit => { root.captions-draft-resplit(); }
         draft-discard => { root.captions-draft-discard(); }
         draft-insert => { root.captions-draft-insert(); }
+        draft-insert-new-track => { root.captions-draft-insert-new-track(); }
         draft-insert-and-detect => { root.captions-draft-insert-and-detect(); }
         begin => { root.captions-begin(); }
         cancel => { root.captions-cancel(); }
@@ -947,6 +963,9 @@ export component App inherits Window {
 
         closed => { root.sections-closed(); }
         row-toggled(index) => { root.sections-row-toggled(index); }
+        row-shift-select(index) => { root.sections-row-shift-select(index); }
+        row-drag-begin(index) => { root.sections-row-drag-begin(index); }
+        row-drag-over(visible-index) => { root.sections-row-drag-over(visible-index); }
         row-seek(index) => { root.sections-row-seek(index); }
         row-text-edited(index, text) => { root.sections-row-text-edited(index, text); }
         detect => { root.sections-detect(); }
@@ -965,6 +984,9 @@ export component App inherits Window {
         select-invert => { root.sections-select-invert(); }
         select-all-silence => { root.sections-select-all-silence(); }
         select-all-captions => { root.sections-select-all-captions(); }
+        add-captions-to-timeline => { root.sections-add-captions-to-timeline(); }
+        add-captions-new-track => { root.sections-add-captions-new-track(); }
+        delete-selected-captions => { root.sections-delete-selected-captions(); }
         apply => { root.sections-apply(); }
     }
 

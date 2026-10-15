@@ -42,6 +42,13 @@ export struct CaptionsSheetData {
     downloading-model: bool,
     download-progress: float,
     download-status: string,
+    /// 0 faster-whisper (Python), 1 whisper.cpp (Vulkan GPU / CPU)
+    engine: int,
+    devices: [string],
+    device: int,
+    /// 0 auto, 1 int8, 2 int8_float16, 3 float16, 4 float32
+    compute-type: int,
+    vad-filter: bool,
     languages: [string],
     language: int,
     translate: bool,
@@ -60,6 +67,7 @@ export struct CaptionsSheetData {
     running: bool,
     /// 0..1
     progress: float,
+    progress-meta: string,
     /// A transcriber model is installed.
     ready: bool,
     reviewing: bool,
@@ -82,6 +90,10 @@ export component CaptionsDialog inherits Modal {
     callback model-changed(index: int);
     callback download-model-changed(index: int);
     callback download-model-clicked();
+    callback engine-changed(index: int);
+    callback device-changed(index: int);
+    callback compute-type-changed(index: int);
+    callback vad-filter-changed(on: bool);
     callback language-changed(index: int);
     callback translate-changed(on: bool);
     callback beam-size-changed(value: float);
@@ -107,6 +119,7 @@ export component CaptionsDialog inherits Modal {
     callback draft-resplit();
     callback draft-discard();
     callback draft-insert();
+    callback draft-insert-new-track();
     callback draft-insert-and-detect();
     callback begin();
     callback cancel();
@@ -211,6 +224,27 @@ export component CaptionsDialog inherits Modal {
             }
 
             DialogRow {
+                label: I18n.t("captions.engine");
+                Select {
+                    options: [
+                        "faster-whisper (Python)",
+                        "whisper.cpp (Vulkan GPU / CPU)",
+                    ];
+                    current: root.data.engine;
+                    changed(index) => { root.engine-changed(index); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("captions.device");
+                Select {
+                    options: root.data.devices;
+                    current: root.data.device;
+                    changed(index) => { root.device-changed(index); }
+                }
+            }
+
+            DialogRow {
                 label: I18n.t("captions.language");
                 Select {
                     options: root.data.languages;
@@ -250,6 +284,15 @@ export component CaptionsDialog inherits Modal {
             collapsible: true;
             open: false;
             title: I18n.t("captions.advancedOptions");
+
+            DialogRow {
+                label: I18n.t("captions.computeType");
+                Select {
+                    options: ["auto", "int8", "int8_float16", "float16", "float32"];
+                    current: root.data.compute-type;
+                    changed(index) => { root.compute-type-changed(index); }
+                }
+            }
 
             HorizontalLayout {
                 spacing: 10px;
@@ -316,7 +359,24 @@ export component CaptionsDialog inherits Modal {
             }
 
             HorizontalLayout {
-                spacing: 12px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Check {
+                            checked: root.data.vad-filter;
+                            toggled => { root.vad-filter-changed(!root.data.vad-filter); }
+                        }
+                    }
+                    Text {
+                        text: I18n.t("captions.vadFilter");
+                        color: Theme.fg;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
 
                 HorizontalLayout {
                     spacing: 6px;
@@ -510,6 +570,13 @@ export component CaptionsDialog inherits Modal {
                     label: I18n.t("captions.saveCaptions");
                     enabled: root.data.drafts.length > 0;
                     clicked => { root.draft-save(); }
+                }
+
+                Button {
+                    label: I18n.t("sections.addCaptionsToTimeline");
+                    primary: true;
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-insert(); }
                 }
             }
 
@@ -707,10 +774,10 @@ export component CaptionsDialog inherits Modal {
                 }
 
                 Text {
-                    text: "\{Math.round(root.data.progress * 100)}%";
+                    text: root.data.progress-meta != "" ? root.data.progress-meta : "\{Math.round(root.data.progress * 100)}%";
                     color: Theme.fg-muted;
                     font-family: Theme.font-technical;
-                    font-size: Theme.fs;
+                    font-size: Theme.fs-sm;
                     vertical-alignment: center;
                 }
             }
@@ -743,6 +810,13 @@ export component CaptionsDialog inherits Modal {
                     large: true;
                     enabled: root.data.drafts.length > 0;
                     clicked => { root.draft-insert(); }
+                }
+
+                Button {
+                    label: I18n.t("captions.addAsNewCaptionTrack");
+                    large: true;
+                    enabled: root.data.drafts.length > 0;
+                    clicked => { root.draft-insert-new-track(); }
                 }
 
                 Button {

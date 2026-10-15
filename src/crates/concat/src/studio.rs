@@ -832,13 +832,15 @@ pub struct Studio {
     /// below is keyed on, so a frame of an unchanged document reuses it.
     revision: u64,
     /// The last flattening of the document for the monitor - titles
-    /// included - and the revision and output size it was made at. Shared
-    /// with the monitor by pointer, so it can keep its plan for as long as
+    /// included - and the revision, monitor size and time bucket it was made at.
+    /// Shared with the monitor by pointer, so it can keep its plan for as long as
     /// the list is the same one.
+    #[allow(clippy::type_complexity)]
     flat: Option<(
         u64,
         u32,
         u32,
+        i64,
         std::sync::Arc<Vec<concat_export::ExportClip>>,
     )>,
     /// An inspector commit waiting to land: a knob being dragged commits
@@ -956,6 +958,8 @@ pub struct Studio {
     /// release until the model has read what was under it, so the paint
     /// does not vanish before its answer arrives.
     pending_stroke: Option<(String, f32, bool)>,
+    /// Whether styling/positioning a caption clip applies to all captions on its track (`capApplyAll`).
+    pub apply_all_captions: bool,
 }
 
 // ── conversions between the document and the window ─────────────────────
@@ -2081,6 +2085,7 @@ impl Studio {
             reverse_jobs: HashMap::new(),
             region_job: None,
             pending_stroke: None,
+            apply_all_captions: true,
             host,
         };
         studio.handle(crate::panes::Msg::Settings(
@@ -2572,66 +2577,68 @@ impl Studio {
         // without it the monitor would show every cutout as shot.
         let project_dir = std::path::PathBuf::from(session.path());
         let (width, height) = self.output_size();
-        // The flattening is the document's, not the frame's: kept between
-        // frames of an unchanged document and handed over by pointer, so
-        // playback and scrubbing neither flatten nor plan again. A gesture
-        // in flight - the echo - is not the document, and flattens fresh.
+        let (shown_w, shown_h) =
+            crate::panes::monitor::MonitorPane::frame_size(self.quality_of(), (width, height));
+        let now = f64::from(self.preview_time());
+        let bucket = (now / 1.5).floor() as i64;
+        // The flattening is cached per 1.5-second bucket of unchanged document,
+        // and titles are rasterized in memory at the monitor's size only for
+        // the active window around `preview_time` / `playhead` - so styling
+        // 200+ captions at once (`Apply to all captions`) never encodes
+        // hundreds of PNGs to disk on the UI thread.
         let cached = self.echo.is_none()
-            && self
-                .flat
-                .as_ref()
-                .is_some_and(|(at, w, h, _)| *at == self.revision && *w == width && *h == height);
+            && self.flat.as_ref().is_some_and(|(at, w, h, b, _)| {
+                *at == self.revision && *w == shown_w && *h == shown_h && *b == bucket
+            });
         let clips = if cached {
-            std::sync::Arc::clone(&self.flat.as_ref().expect("checked").3)
+            std::sync::Arc::clone(&self.flat.as_ref().expect("checked").4)
         } else {
             let mut clips = concat_export::flatten::flatten_timeline_in(
                 self.project(),
                 None,
                 Some(&project_dir),
             );
-            // Titles, painted to pictures and rejoined; see concat-host's titles.
-            if self.echo.is_some() {
-                // A change in flight: the titles are painted in memory at
-                // the monitor's size and handed to it as pixels - no file
-                // per pointer step - and the blocks they report are scaled
-                // back up to the output's terms, which the stage measures
-                // in. Nothing is written until the change is committed.
-                let (shown_w, shown_h) = crate::panes::monitor::MonitorPane::frame_size(
-                    self.quality_of(),
-                    (width, height),
-                );
-                let scale = f64::from(shown_w) / f64::from(width);
-                let up = |px: u32| (f64::from(px) / scale).round() as u32;
-                let up_off = |px: i32| (f64::from(px) / scale).round() as i32;
-                for title in self
-                    .host
-                    .titles
-                    .clips_live(self.project(), shown_w, shown_h)
-                {
-                    self.title_blocks.insert(
-                        title.clip_id,
-                        (
-                            (up(title.block.0), up(title.block.1)),
-                            (up_off(title.offset.0), up_off(title.offset.1)),
-                        ),
-                    );
-                    if let Some(frame) = title.frame {
-                        self.host
-                            .monitor
-                            .hold_still(std::path::Path::new(&title.clip.path), frame);
-                    }
-                    clips.push(title.clip);
-                }
+            let scale = f64::from(shown_w) / f64::from(width.max(1));
+            let up = |px: u32| (f64::from(px) / scale).round() as u32;
+            let up_off = |px: i32| (f64::from(px) / scale).round() as i32;
+            let sole: Vec<String> = self.sole_selection().into_iter().collect();
+            let (win_from, win_to) = if self.echo.is_some() {
+                (now - 0.15, now + 0.35)
             } else {
-                for title in self.host.titles.clips(self.project(), width, height) {
-                    self.title_blocks
-                        .insert(title.clip_id, (title.block, title.offset));
-                    clips.push(title.clip);
+                let b_start = (bucket as f64) * 1.5;
+                (b_start - 0.3, b_start + 2.0)
+            };
+            for title in self.host.titles.clips_live_window(
+                self.project(),
+                shown_w,
+                shown_h,
+                win_from,
+                win_to,
+                &sole,
+            ) {
+                self.title_blocks.insert(
+                    title.clip_id,
+                    (
+                        (up(title.block.0), up(title.block.1)),
+                        (up_off(title.offset.0), up_off(title.offset.1)),
+                    ),
+                );
+                if let Some(frame) = title.frame {
+                    self.host
+                        .monitor
+                        .hold_still(std::path::Path::new(&title.clip.path), frame);
                 }
+                clips.push(title.clip);
             }
             let clips = std::sync::Arc::new(clips);
             if self.echo.is_none() {
-                self.flat = Some((self.revision, width, height, std::sync::Arc::clone(&clips)));
+                self.flat = Some((
+                    self.revision,
+                    shown_w,
+                    shown_h,
+                    bucket,
+                    std::sync::Arc::clone(&clips),
+                ));
             }
             clips
         };
@@ -3495,14 +3502,54 @@ impl Studio {
         })
     }
 
+    /// Returns all caption clip IDs on the same track and linked to the same
+    /// parent clip as `clip_id` (always starting with `clip_id` itself), so
+    /// styling or moving one caption on an English track applies to all English
+    /// captions on that track without touching a Japanese caption track above it.
+    pub fn caption_track_siblings(&self, clip_id: &str) -> Vec<String> {
+        let Some(primary) = self.clip(clip_id) else {
+            return Vec::new();
+        };
+        if primary.kind != model::ClipKind::Text {
+            return vec![clip_id.to_owned()];
+        }
+        let is_caption = primary.caption_of.is_some() || primary.words.is_some();
+        if !is_caption {
+            return vec![clip_id.to_owned()];
+        }
+        let mut out = vec![clip_id.to_owned()];
+        for other in &self.timeline().clips {
+            if other.id != clip_id
+                && other.kind == model::ClipKind::Text
+                && other.track_id == primary.track_id
+                && other.caption_of == primary.caption_of
+            {
+                out.push(other.id.clone());
+            }
+        }
+        out
+    }
+
+    fn stage_gesture_targets(&self, clip_id: &str) -> Vec<String> {
+        if self.apply_all_captions {
+            self.caption_track_siblings(clip_id)
+        } else {
+            vec![clip_id.to_owned()]
+        }
+    }
+
     /// The selected clip's id, when exactly one is selected.
-    /// The clips the inspector's knobs write to: the one selected clip, or
+    /// The clips the inspector's knobs write to: the one selected clip (plus
+    /// its same-track caption siblings when `apply_all_captions` is on), or
     /// every selected clip when two or more are selected and all of them
     /// are titles - a batch of captions styled together. Anything else
     /// selected together is nothing the inspector edits.
     /// https://github.com/jub0t/Concat/issues/224
     pub fn edit_targets(&self) -> Vec<String> {
         if let Some(id) = self.sole_selection() {
+            if self.apply_all_captions {
+                return self.caption_track_siblings(&id);
+            }
             return vec![id];
         }
         if self.selection.len() < 2 {
@@ -4481,6 +4528,11 @@ impl Studio {
     /// One field of the selected clip, on the echo. `clip_commit` turns the
     /// accumulated edits into commands.
     pub fn clip_set(&mut self, field: ClipField, value: f32) {
+        if field == ClipField::ApplyAllCaptions {
+            self.flush_commit();
+            self.apply_all_captions = value != 0.0;
+            return;
+        }
         let ids = self.edit_targets();
         if ids.is_empty() {
             return;
@@ -4649,6 +4701,7 @@ impl Studio {
                 ClipField::BackgroundPaddingY => {
                     text.background_padding_y = value.clamp(0.0, 0.5);
                 }
+                ClipField::ApplyAllCaptions => {}
             }
             // A media clip has no text; the placeholder must not linger.
             if clip.kind != model::ClipKind::Text {
@@ -4658,7 +4711,11 @@ impl Studio {
     }
 
     pub fn clip_set_text(&mut self, field: ClipTextField, value: &str) {
-        let ids = self.edit_targets();
+        let ids = if field == ClipTextField::Content {
+            self.sole_selection().into_iter().collect()
+        } else {
+            self.edit_targets()
+        };
         if ids.is_empty() {
             return;
         }
@@ -4889,7 +4946,7 @@ impl Studio {
         self.request_preview();
         self.commit_timer.start(
             slint::TimerMode::SingleShot,
-            std::time::Duration::from_millis(120),
+            std::time::Duration::from_millis(250),
             || {
                 crate::host::Shell::with(|shell, app| {
                     shell.studio.borrow_mut().flush_commit();
@@ -5193,21 +5250,34 @@ impl Studio {
             self.gesture = Gesture::None;
             return;
         }
-        let origins: Vec<StageOrigin> = self
+        let mut move_ids: Vec<String> = self
             .stage_clips()
             .into_iter()
             .filter(|clip| {
                 self.selection.iter().any(|held| held == &clip.id) && !self.locked(&clip.track_id)
             })
-            .map(|clip| {
-                // A keyed clip is dragged from where its ride has it at
-                // the playhead, not from a constant nothing shows.
+            .map(|clip| clip.id.clone())
+            .collect();
+        if self.apply_all_captions {
+            for sib in self.caption_track_siblings(&id) {
+                if !move_ids.contains(&sib) {
+                    move_ids.push(sib);
+                }
+            }
+        }
+        let origins: Vec<StageOrigin> = move_ids
+            .into_iter()
+            .filter_map(|cid| {
+                let clip = self.clip(&cid)?;
+                if self.locked(&clip.track_id) {
+                    return None;
+                }
                 let at = place_in(clip, self.playhead);
-                StageOrigin {
+                Some(StageOrigin {
                     clip: clip.id.clone(),
                     offset_x: shown(clip, model::KeyProperty::OffsetX, at),
                     offset_y: shown(clip, model::KeyProperty::OffsetY, at),
-                }
+                })
             })
             .collect();
         self.begin_echo();
@@ -5485,9 +5555,11 @@ impl Studio {
                     }
                 }
                 let playhead = self.playhead;
-                if let Some(clip) = self.echo_clip_mut(clip) {
-                    let at = place_in(clip, playhead);
-                    write_keyable(clip, model::KeyProperty::Scale, next.clamp(0.05, 8.0), at);
+                for target_id in self.stage_gesture_targets(clip) {
+                    if let Some(clip) = self.echo_clip_mut(&target_id) {
+                        let at = place_in(clip, playhead);
+                        write_keyable(clip, model::KeyProperty::Scale, next.clamp(0.05, 8.0), at);
+                    }
                 }
             }
             Gesture::StageStretch {
@@ -5510,11 +5582,13 @@ impl Studio {
                 if snap {
                     next = (next * 20.0).round() / 20.0;
                 }
-                if let Some(clip) = self.echo_clip_mut(clip) {
-                    if *across {
-                        clip.stretch_x = next.clamp(0.1, 10.0);
-                    } else {
-                        clip.stretch_y = next.clamp(0.1, 10.0);
+                for target_id in self.stage_gesture_targets(clip) {
+                    if let Some(clip) = self.echo_clip_mut(&target_id) {
+                        if *across {
+                            clip.stretch_x = next.clamp(0.1, 10.0);
+                        } else {
+                            clip.stretch_y = next.clamp(0.1, 10.0);
+                        }
                     }
                 }
             }
@@ -5533,8 +5607,10 @@ impl Studio {
                 if snap {
                     next = (next * 20.0).round() / 20.0;
                 }
-                if let Some(clip) = self.echo_clip_mut(clip) {
-                    clip.text.get_or_insert_with(TextStyle::default).max_width = next;
+                for target_id in self.stage_gesture_targets(clip) {
+                    if let Some(clip) = self.echo_clip_mut(&target_id) {
+                        clip.text.get_or_insert_with(TextStyle::default).max_width = next;
+                    }
                 }
             }
             Gesture::TextHeight {
@@ -5551,8 +5627,10 @@ impl Studio {
                 if snap {
                     next = (next * 20.0).round() / 20.0;
                 }
-                if let Some(clip) = self.echo_clip_mut(clip) {
-                    clip.text.get_or_insert_with(TextStyle::default).max_height = next;
+                for target_id in self.stage_gesture_targets(clip) {
+                    if let Some(clip) = self.echo_clip_mut(&target_id) {
+                        clip.text.get_or_insert_with(TextStyle::default).max_height = next;
+                    }
                 }
             }
             Gesture::StageRotate {
@@ -5572,9 +5650,11 @@ impl Studio {
                 // stopping: a turn through the bottom carries on.
                 next = (next + 180.0).rem_euclid(360.0) - 180.0;
                 let playhead = self.playhead;
-                if let Some(clip) = self.echo_clip_mut(clip) {
-                    let at = place_in(clip, playhead);
-                    write_keyable(clip, model::KeyProperty::Rotation, next, at);
+                for target_id in self.stage_gesture_targets(clip) {
+                    if let Some(clip) = self.echo_clip_mut(&target_id) {
+                        let at = place_in(clip, playhead);
+                        write_keyable(clip, model::KeyProperty::Rotation, next, at);
+                    }
                 }
             }
             _ => {
@@ -5601,7 +5681,8 @@ impl Studio {
             Gesture::StageScale { clip, .. }
             | Gesture::StageRotate { clip, .. }
             | Gesture::StageStretch { clip, .. }
-            | Gesture::TextWidth { clip, .. } => vec![clip],
+            | Gesture::TextWidth { clip, .. }
+            | Gesture::TextHeight { clip, .. } => self.stage_gesture_targets(&clip),
             Gesture::Paint {
                 clip,
                 tool,
@@ -9006,9 +9087,14 @@ impl Studio {
                 .get(&Self::analysis_key(&clip.media_id, cutout.subject))
                 .copied()
         });
+        let caption_siblings = self.caption_track_siblings(&clip.id).len() as i32;
         SelectedClipData {
             present: true,
-            batch: targets.len() as i32,
+            batch: if self.selection.len() > 1 {
+                targets.len() as i32
+            } else {
+                1
+            },
             frame_width: self.output_size().0 as i32,
             frame_height: self.output_size().1 as i32,
             id: clip.id.as_str().into(),
@@ -9094,6 +9180,8 @@ impl Studio {
             tracking: text.tracking as f32,
             text_width: text.max_width as f32,
             text_height: text.max_height as f32,
+            caption_siblings,
+            apply_all_captions: self.apply_all_captions,
             cutout: match &clip.cutout {
                 None => 0,
                 Some(cutout) if cutout.mode == model::CutoutMode::Auto => 1,

@@ -60,6 +60,10 @@ pub enum CaptionsMsg {
     ModelChanged(i32),
     DownloadModelChanged(i32),
     DownloadModelClicked,
+    EngineChanged(i32),
+    DeviceChanged(i32),
+    ComputeTypeChanged(i32),
+    VadFilterChanged(bool),
     LanguageChanged(i32),
     TranslateChanged(bool),
     BeamSizeChanged(f32),
@@ -88,6 +92,7 @@ pub enum CaptionsMsg {
     DraftResplit,
     DraftDiscard,
     DraftInsert,
+    DraftInsertNewTrack,
     DraftInsertAndDetect,
     /// Run the pass the sheet describes.
     Begin,
@@ -104,8 +109,6 @@ pub enum CaptionsMsg {
 struct Subject {
     start: f64,
     speed: f64,
-    /// The look chosen when the run began.
-    look: (f64, f64),
     /// The clip whose voice this is (`empty` when created as unlinked timeline captions).
     clip_id: String,
 }
@@ -135,6 +138,14 @@ pub struct CaptionsPane {
     pub model: usize,
     /// Row in the downloadable transcriber list (`Get model`).
     pub download_model: usize,
+    /// `0` = `faster-whisper`, `1` = `whispercpp`.
+    pub engine: usize,
+    /// `0` = `auto`, `1` = `cuda`, `2` = `cpu`.
+    pub device: usize,
+    /// `0` = `auto`, `1` = `int8`, `2` = `int8_float16`, `3` = `float16`, `4` = `float32`.
+    pub compute_type: usize,
+    /// Skip silent spans via VAD (`cVad` in `autocaption.txt`).
+    pub vad_filter: bool,
     /// Row in Whisper's language list; zero is auto-detect.
     pub language: usize,
     pub translate: bool,
@@ -152,6 +163,9 @@ pub struct CaptionsPane {
     pub size: usize,
     pub running: bool,
     pub progress: f32,
+    /// Elapsed time and ETA string shown while transcribing (`capMeta`).
+    pub progress_meta: String,
+    started_at: Option<std::time::Instant>,
     /// Why the last run failed, when it did.
     pub message: String,
     /// Layout preset index (`0` Engine, `1` Line, `2` Burst, `3` Word).
@@ -165,6 +179,7 @@ pub struct CaptionsPane {
     undo_stack: Vec<Vec<CaptionDraft>>,
     sources_model: Rc<VecModel<SharedString>>,
     download_models_model: Rc<VecModel<SharedString>>,
+    devices_model: Rc<VecModel<SharedString>>,
     languages_model: Rc<VecModel<SharedString>>,
     drafts_model: Rc<VecModel<CaptionDraftData>>,
 }
@@ -178,6 +193,10 @@ impl Default for CaptionsPane {
             text: String::new(),
             model: 0,
             download_model: 1, // default to "small" when present
+            engine: 1,         // whisper.cpp (Vulkan GPU / CPU) by default
+            device: 0,
+            compute_type: 0,
+            vad_filter: true,
             language: 0,
             translate: false,
             translate_hint: String::new(),
@@ -192,6 +211,8 @@ impl Default for CaptionsPane {
             size: 1,
             running: false,
             progress: 0.0,
+            progress_meta: String::new(),
+            started_at: None,
             message: String::new(),
             seg_preset: 0,
             subject: None,
@@ -200,6 +221,7 @@ impl Default for CaptionsPane {
             undo_stack: Vec::new(),
             sources_model: Rc::new(VecModel::default()),
             download_models_model: Rc::new(VecModel::default()),
+            devices_model: Rc::new(VecModel::default()),
             languages_model: Rc::new(VecModel::default()),
             drafts_model: Rc::new(VecModel::default()),
         }
@@ -258,6 +280,21 @@ impl CaptionsPane {
                 if let Some(id) = managed.get(self.download_model).cloned() {
                     studio.handle(Msg::Settings(SettingsMsg::ModelDownload(id)));
                 }
+            }
+            CaptionsMsg::EngineChanged(index) => {
+                self.engine = (index.max(0) as usize).min(1);
+            }
+            CaptionsMsg::DeviceChanged(index) => {
+                let count = concat_speech::transcribe::list_compute_devices(&studio.host.dirs)
+                    .len()
+                    .max(1);
+                self.device = (index.max(0) as usize).min(count - 1);
+            }
+            CaptionsMsg::ComputeTypeChanged(index) => {
+                self.compute_type = (index.max(0) as usize).min(4);
+            }
+            CaptionsMsg::VadFilterChanged(on) => {
+                self.vad_filter = on;
             }
             CaptionsMsg::LanguageChanged(index) => {
                 self.language = (index.max(0) as usize).min(language_codes().len() - 1);
@@ -326,10 +363,13 @@ impl CaptionsPane {
             CaptionsMsg::DraftResplit => self.resplit_drafts(),
             CaptionsMsg::DraftDiscard => self.discard_drafts(),
             CaptionsMsg::DraftInsert => {
-                let _ = self.insert_drafts_inner(studio);
+                let _ = self.insert_drafts_inner(studio, false);
+            }
+            CaptionsMsg::DraftInsertNewTrack => {
+                let _ = self.insert_drafts_inner(studio, false);
             }
             CaptionsMsg::DraftInsertAndDetect => {
-                if let Some(clip_id) = self.insert_drafts_inner(studio) {
+                if let Some(clip_id) = self.insert_drafts_inner(studio, false) {
                     if !clip_id.is_empty() {
                         studio.selection = vec![clip_id];
                     }
@@ -349,14 +389,33 @@ impl CaptionsPane {
             CaptionsMsg::Cancel => {
                 studio.host.transcriber.cancel();
                 self.running = false;
+                self.started_at = None;
+                self.progress_meta.clear();
                 self.subject = None;
                 self.open = false;
             }
             CaptionsMsg::Progress(percent) => {
                 self.progress = (percent as f32 / 100.0).clamp(0.0, 1.0);
+                if let Some(started) = self.started_at {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    if (2..100).contains(&percent) {
+                        let frac = (f64::from(percent) / 100.0).clamp(0.01, 0.99);
+                        let rem = (elapsed * (1.0 - frac) / frac).max(0.0);
+                        self.progress_meta = format!(
+                            "Elapsed {} · ETA ~{} remaining",
+                            eta_clock(elapsed),
+                            eta_clock(rem)
+                        );
+                    } else {
+                        self.progress_meta =
+                            format!("Elapsed {} · estimating ETA…", eta_clock(elapsed));
+                    }
+                }
             }
             CaptionsMsg::Finished(result) => {
                 self.running = false;
+                self.started_at = None;
+                self.progress_meta.clear();
                 match result {
                     Ok(segments) => {
                         if self.subject.is_none() {
@@ -564,19 +623,20 @@ impl CaptionsPane {
         if self.subject.is_some() {
             return;
         }
+        if self.clip.is_none() {
+            self.clip = sources(studio).first().map(|s| s.id.clone());
+        }
         let clip_opt = self.clip.as_ref().and_then(|id| studio.clip(id)).cloned();
         if let Some(clip) = clip_opt {
             self.subject = Some(Subject {
                 start: clip.start,
                 speed: clip.speed,
-                look: self.look(),
                 clip_id: clip.id,
             });
         } else {
             self.subject = Some(Subject {
                 start: f64::from(studio.playhead).max(0.0),
                 speed: 1.0,
-                look: self.look(),
                 clip_id: String::new(),
             });
         }
@@ -801,6 +861,10 @@ impl CaptionsPane {
             clip,
             model,
             download_model: self.download_model,
+            engine: self.engine,
+            device: self.device,
+            compute_type: self.compute_type,
+            vad_filter: self.vad_filter,
             language: self.language,
             translate: self.translate,
             translate_hint: self.translate_hint.clone(),
@@ -816,6 +880,7 @@ impl CaptionsPane {
             seg_preset: self.seg_preset,
             sources_model: Rc::clone(&self.sources_model),
             download_models_model: Rc::clone(&self.download_models_model),
+            devices_model: Rc::clone(&self.devices_model),
             languages_model: Rc::clone(&self.languages_model),
             drafts_model: Rc::clone(&self.drafts_model),
             ..CaptionsPane::default()
@@ -838,18 +903,39 @@ impl CaptionsPane {
             self.message = t("captions.nothingToCaptionYet");
             return;
         }
-        let look = self.look();
+        let has_existing = studio
+            .timeline()
+            .clips
+            .iter()
+            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+        let look = if has_existing {
+            non_overlapping_caption_look(studio, "", self.look())
+        } else {
+            self.look()
+        };
+        let target_track = has_existing.then(|| "__top__".to_owned());
         let mut at = f64::from(studio.playhead);
         let base = studio.prefs.title_style.clone();
-        let commands: Vec<Command> = lines
-            .into_iter()
-            .map(|(text, seconds)| {
-                let command = caption_clip(text, at, seconds, look, base.as_ref(), None, None);
-                at += seconds;
-                command
-            })
-            .collect();
-        let count = commands.len();
+        let mut commands: Vec<Command> = Vec::new();
+        if has_existing {
+            commands.push(Command::AddTrack { bottom: false });
+        }
+        let mut count = 0usize;
+        for (text, seconds) in lines {
+            let command = caption_clip_on_track(
+                text,
+                at,
+                seconds,
+                look,
+                base.as_ref(),
+                None,
+                None,
+                target_track.clone(),
+            );
+            at += seconds;
+            commands.push(command);
+            count += 1;
+        }
         self.open = false;
         studio.apply(Command::Batch { commands });
         studio.notify(&tf("captions.addedCaptions", &[&count]), false);
@@ -875,6 +961,23 @@ impl CaptionsPane {
         };
         let out_dir =
             (!self.output_dir.trim().is_empty()).then(|| self.output_dir.trim().to_owned());
+        let engine_str = if self.engine == 0 {
+            "faster-whisper"
+        } else {
+            "whispercpp"
+        };
+        let device_list = concat_speech::transcribe::list_compute_devices(&studio.host.dirs);
+        let device_str = device_list
+            .get(self.device)
+            .map(|(id, _)| id.as_str())
+            .unwrap_or("auto");
+        let compute_str = match self.compute_type {
+            1 => "int8",
+            2 => "int8_float16",
+            3 => "float16",
+            4 => "float32",
+            _ => "auto",
+        };
         let request = concat_speech::transcribe::TranscribeRequest {
             path: media.path.clone(),
             audio_stream: clip.audio_stream,
@@ -884,6 +987,10 @@ impl CaptionsPane {
             language: language_codes()[self.language.min(language_codes().len() - 1)].to_owned(),
             translate: self.translate,
             prompt: self.prompt.clone(),
+            engine: engine_str.to_owned(),
+            device: device_str.to_owned(),
+            compute_type: compute_str.to_owned(),
+            vad_filter: self.vad_filter,
             beam_size: self.beam_size,
             word_timestamps: self.word_timestamps,
             temperature_fallback: self.temperature_fallback,
@@ -896,11 +1003,12 @@ impl CaptionsPane {
         self.subject = Some(Subject {
             start: clip.start,
             speed: clip.speed,
-            look: self.look(),
             clip_id: clip.id.clone(),
         });
         self.running = true;
         self.progress = 0.0;
+        self.started_at = Some(std::time::Instant::now());
+        self.progress_meta = "Elapsed 0:00 · estimating ETA…".to_owned();
         self.message.clear();
         let epoch = crate::host::project_epoch();
         spawn_in_project(
@@ -916,36 +1024,89 @@ impl CaptionsPane {
     }
 
     /// Inserts draft cues onto the timeline and returns the linked `clip_id` (if any).
-    fn insert_drafts_inner(&mut self, studio: &mut Studio) -> Option<String> {
+    /// When `replace_existing` is `false`, keeps all existing caption tracks and
+    /// places the new captions on a fresh track above (`+ Add as new caption track`).
+    fn insert_drafts_inner(&mut self, studio: &mut Studio, replace_existing: bool) -> Option<String> {
         let subject = self.subject.as_ref()?.clone();
+        let clip_id = if !subject.clip_id.is_empty() {
+            subject.clip_id.clone()
+        } else {
+            self.clip.clone().unwrap_or_default()
+        };
+        let has_existing_text = studio
+            .timeline()
+            .clips
+            .iter()
+            .any(|c| c.kind == concat_project::model::ClipKind::Text);
+        let look = if !replace_existing && has_existing_text {
+            non_overlapping_caption_look(studio, &clip_id, self.look())
+        } else {
+            self.look()
+        };
+        // Always place the caption batch onto the dedicated top track (`__top__`).
+        let target_track = Some("__top__".to_owned());
         let base = studio.prefs.title_style.clone();
-        let caption_of = (!subject.clip_id.is_empty()).then_some(subject.clip_id.as_str());
-        let commands: Vec<Command> = self
+        let caption_of = (!clip_id.is_empty()).then_some(clip_id.as_str());
+        let valid_drafts: Vec<&CaptionDraft> = self
             .drafts
             .iter()
             .filter(|cue| !cue.text.trim().is_empty() && cue.end > cue.start)
-            .map(|cue| {
+            .collect();
+        let caption_commands: Vec<Command> = valid_drafts
+            .iter()
+            .enumerate()
+            .map(|(idx, cue)| {
+                let next_start = valid_drafts
+                    .get(idx + 1)
+                    .map(|next| next.start)
+                    .unwrap_or(f64::INFINITY);
+                let end = if next_start > cue.start + 0.05 {
+                    cue.end.min(next_start)
+                } else {
+                    cue.end
+                };
+                let duration = (end - cue.start).max(0.05);
                 let words = if cue.edited {
-                    concat_project::captionmap::estimate_words(&cue.text, cue.start, cue.end)
+                    concat_project::captionmap::estimate_words(&cue.text, cue.start, end)
                 } else {
                     cue.words.clone()
                 };
-                caption_clip(
+                caption_clip_on_track(
                     cue.text.trim().to_owned(),
                     cue.start,
-                    cue.end - cue.start,
-                    subject.look,
+                    duration,
+                    look,
                     base.as_ref(),
                     caption_of,
                     Some(words),
+                    target_track.clone(),
                 )
             })
             .collect();
-        let count = commands.len();
+        let count = caption_commands.len();
         if count == 0 {
             self.message = t("captions.nothingToCaptionYet");
             return None;
         }
+        let mut commands = Vec::new();
+        if replace_existing && !clip_id.is_empty() {
+            let existing = studio.timeline().captions_of(&clip_id);
+            if !existing.is_empty() {
+                commands.push(Command::RemoveClips {
+                    clip_ids: existing,
+                    ripple: false,
+                });
+            }
+        }
+        let top_track_busy = studio
+            .timeline()
+            .tracks
+            .last()
+            .is_none_or(|top| studio.timeline().clips.iter().any(|c| c.track_id == top.id));
+        if !replace_existing || top_track_busy {
+            commands.push(Command::AddTrack { bottom: false });
+        }
+        commands.extend(caption_commands);
         self.drafts.clear();
         self.source_cues.clear();
         self.undo_stack.clear();
@@ -953,7 +1114,7 @@ impl CaptionsPane {
         self.open = false;
         studio.apply(Command::Batch { commands });
         studio.notify(&tf("captions.addedCaptions", &[&count]), false);
-        Some(subject.clip_id)
+        Some(clip_id)
     }
 
     /// The sheet as Slint shows it.
@@ -1005,6 +1166,16 @@ impl CaptionsPane {
             })
             .unwrap_or(0.0);
         let on_disk = installed(&studio.settings.transcribers);
+        let engine_str = if self.engine == 0 {
+            "faster-whisper"
+        } else {
+            "whispercpp"
+        };
+        let engine_note = if self.open {
+            concat_speech::transcribe::engine_status_note(&studio.host.dirs, engine_str)
+        } else {
+            String::new()
+        };
         let download_status = if let Some(dl) = active_dl {
             format!(
                 "Downloading {} ({:.0} / {:.0} MB)…",
@@ -1014,12 +1185,22 @@ impl CaptionsPane {
             )
         } else if on_disk.is_empty() {
             t("captions.downloadTranscriberModelFirst")
+        } else if !engine_note.is_empty() {
+            format!("{} model(s) · {engine_note}", on_disk.len())
         } else {
             format!(
                 "{} model(s) installed · {}",
                 on_disk.len(),
                 studio.settings.whisper_models_dir
             )
+        };
+        let devices: Vec<SharedString> = if self.open {
+            concat_speech::transcribe::list_compute_devices(&studio.host.dirs)
+                .into_iter()
+                .map(|(_, label)| SharedString::from(label))
+                .collect()
+        } else {
+            vec![SharedString::from("Auto — Default Vulkan GPU")]
         };
         let languages: Vec<SharedString> = language_labels()
             .iter()
@@ -1036,6 +1217,7 @@ impl CaptionsPane {
             .collect();
         sync(&self.sources_model, labels);
         sync(&self.download_models_model, download_models);
+        sync(&self.devices_model, devices);
         sync(&self.languages_model, languages);
         sync(&self.drafts_model, drafts);
         CaptionsSheetData {
@@ -1052,6 +1234,11 @@ impl CaptionsPane {
             downloading_model,
             download_progress,
             download_status: download_status.into(),
+            engine: self.engine as i32,
+            devices: slint::ModelRc::from(Rc::clone(&self.devices_model)),
+            device: self.device as i32,
+            compute_type: self.compute_type as i32,
+            vad_filter: self.vad_filter,
             languages: slint::ModelRc::from(Rc::clone(&self.languages_model)),
             language: self.language as i32,
             translate: self.translate,
@@ -1067,6 +1254,7 @@ impl CaptionsPane {
             size: self.size as i32,
             running: self.running,
             progress: self.progress,
+            progress_meta: self.progress_meta.as_str().into(),
             ready: !on_disk.is_empty(),
             reviewing: !self.running && self.subject.is_some(),
             can_undo: !self.undo_stack.is_empty(),
@@ -1241,8 +1429,68 @@ fn source_label(name: &str, start: f64) -> String {
     }
 }
 
+/// Default caption placement and size (bottom placement, medium size).
+pub(crate) fn default_caption_look() -> (f64, f64) {
+    (CAPTION_OFFSETS[0], CAPTION_SIZES[1])
+}
+
+/// Picks a vertical offset `(offset_y, font_size)` in Concat's normalized
+/// frame-height fraction `[-1.0, 1.0]` that does not collide with any existing
+/// caption/text track on the timeline, so adding a second or third language
+/// track (e.g. English + Japanese) stacks cleanly without overlapping.
+pub(crate) fn non_overlapping_caption_look(
+    studio: &Studio,
+    clip_id: &str,
+    preferred: (f64, f64),
+) -> (f64, f64) {
+    let (mut offset_y, font_size) = preferred;
+    let existing_ids: std::collections::HashSet<String> = if clip_id.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        studio
+            .timeline()
+            .captions_of(clip_id)
+            .into_iter()
+            .collect()
+    };
+    let used_offsets: Vec<f64> = studio
+        .timeline()
+        .clips
+        .iter()
+        .filter(|c| {
+            c.kind == concat_project::model::ClipKind::Text
+                && (existing_ids.is_empty() || existing_ids.contains(&c.id) || c.caption_of.is_some())
+        })
+        .map(|c| c.offset_y)
+        .collect();
+    if used_offsets.is_empty() {
+        return (offset_y, font_size);
+    }
+    // Nudge upward by 0.12 (12% of frame height) per existing caption layer at the same height.
+    for _ in 0..6 {
+        let collides = used_offsets.iter().any(|&y| (y - offset_y).abs() < 0.06);
+        if !collides {
+            break;
+        }
+        offset_y = (offset_y - 0.12).clamp(-0.42, 0.42);
+    }
+    (offset_y, font_size)
+}
+
+/// Formats seconds as `m:ss` or `h:mm:ss` for the transcription ETA readout.
+fn eta_clock(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    let (hours, minutes, secs) = (total / 3600, (total / 60) % 60, total % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{secs:02}")
+    } else {
+        format!("{minutes}:{secs:02}")
+    }
+}
+
 /// One caption as a title clip: its words, when and for how long, its look,
 /// and - for a caption transcribed from a clip's voice - its word timings.
+#[allow(dead_code)]
 pub(crate) fn caption_clip(
     text: String,
     start: f64,
@@ -1251,6 +1499,21 @@ pub(crate) fn caption_clip(
     base: Option<&TextStyle>,
     caption_of: Option<&str>,
     words: Option<Vec<concat_project::captionmap::Word>>,
+) -> Command {
+    caption_clip_on_track(text, start, duration, look, base, caption_of, words, None)
+}
+
+/// Same as `caption_clip`, optionally targeting an explicit `track_id` (such
+/// as `Some("__top__".to_owned())` right after `Command::AddTrack { bottom: false }`).
+pub(crate) fn caption_clip_on_track(
+    text: String,
+    start: f64,
+    duration: f64,
+    look: (f64, f64),
+    base: Option<&TextStyle>,
+    caption_of: Option<&str>,
+    words: Option<Vec<concat_project::captionmap::Word>>,
+    track_id: Option<String>,
 ) -> Command {
     let (offset_y, font_size) = look;
     let mut style = match base {
@@ -1273,7 +1536,7 @@ pub(crate) fn caption_clip(
         style.highlight_color = concat_project::model::DEFAULT_HIGHLIGHT.to_owned();
     }
     Command::AddTextClip {
-        track_id: None,
+        track_id,
         above: true,
         start,
         style: Some(style),
@@ -1412,7 +1675,6 @@ mod tests {
             subject: Some(Subject {
                 start: 10.0,
                 speed: 2.0,
-                look: (0.35, 0.05),
                 clip_id: "clip-1".to_owned(),
             }),
             ..CaptionsPane::default()
