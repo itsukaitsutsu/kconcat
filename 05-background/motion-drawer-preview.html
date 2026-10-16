@@ -71,6 +71,8 @@
   .note { font-size: 12px; margin-top: 8px; }
   pre { background: #101216; border: 1px solid var(--line); border-radius: 5px; padding: 10px; margin: 8px 0 0; color: #cfd3dc; font-size: 12px; white-space: pre-wrap; }
   .hidden-row { display: none; }
+  .deferred { display: none; font-size: 12px; margin: 4px 0 8px; padding: 6px 8px; border-radius: 4px; background: #2a2418; color: #ffcf8a; }
+  .deferred.show { display: block; }
   .placement { margin: 14px; padding: 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--dim); font-size: 12px; }
   .placement b { color: var(--fg); }
 </style>
@@ -106,6 +108,7 @@
     <div class="legend">
       Playback runs the same caption under the chosen motion mode. The highlight (karaoke colour) is separate and stays on.
       Move <b>Timing error</b> to see what ±200–500 ms of Whisper error does to the words.
+      <b>Typewriter</b> letters appear across each word's spoken time.
     </div>
   </section>
 
@@ -125,14 +128,16 @@
     <div class="drawer closed"><h3>Position <small>▸</small></h3><div class="body">Placement on the frame.</div></div>
 
     <div class="drawer motion" id="motion-drawer">
-      <h3>Motion <span class="badge">PROPOSED</span> <small>▾</small></h3>
+      <h3>Motion <span class="badge">v1 APPROVED</span> <small>▾</small></h3>
       <div class="body">
         <div class="seg" id="mode">
           <button data-v="none" class="on">None</button>
           <button data-v="pop">Pop</button>
           <button data-v="word-reveal">Word reveal</button>
+          <button data-v="typewriter">Typewriter</button>
         </div>
 
+        <div class="deferred" id="tw-note">Typewriter: letters appear across each word's spoken time. The duration slider is not used in this mode.</div>
         <div class="row"><span>Duration per word</span><span id="dur-v">0.18 s</span></div>
         <input type="range" id="dur" min="0.05" max="0.6" step="0.01" value="0.18">
 
@@ -145,7 +150,7 @@
         <div class="switch"><span>Highlight (karaoke colour)</span><input type="checkbox" id="hl" checked></div>
         <div class="switch"><span>Raw shifts (ignore word order)</span><input type="checkbox" id="raw"></div>
 
-        <div class="note">Open question: should this drawer show for captions only, or for titles too?</div>
+        <div class="note">Decided 16 Oct 2026: this drawer shows for captions and titles.</div>
         <pre id="toml"></pre>
       </div>
     </div>
@@ -214,11 +219,12 @@
       const finished = t > e;
       if (started && !finished) activeIdx = i;
 
+      el.textContent = WORDS[i][0];
       el.classList.toggle("active", started && !finished);
       el.classList.toggle("hl", state.hl);
 
       // Visibility per mode.
-      if (state.mode === "word-reveal") {
+      if (state.mode === "word-reveal" || state.mode === "typewriter") {
         el.classList.toggle("hidden", !started);
       } else {
         el.classList.toggle("hidden", false);
@@ -238,6 +244,13 @@
         // Inline opacity overrides the .hidden class, so set it here.
         el.style.transform = "scale(1)";
         el.style.opacity = started ? "1" : "0";
+      } else if (state.mode === "typewriter") {
+        // typewriter: letters appear across the word's spoken time.
+        el.style.transform = "scale(1)";
+        el.style.opacity = started ? "1" : "0";
+        const full = WORDS[i][0];
+        const k = started ? Math.min(1, (t - s) / Math.max(0.02, e - s)) : 0;
+        el.textContent = full.slice(0, Math.ceil(k * full.length));
       } else {
         el.style.transform = "scale(1)";
         el.style.opacity = "1";
@@ -253,6 +266,7 @@
     document.getElementById("time").textContent = `${t.toFixed(2)} / ${TOTAL.toFixed(2)} s`;
     document.getElementById("scrub").value = t;
     document.getElementById("scale-row").classList.toggle("hidden-row", state.mode !== "pop");
+    document.getElementById("tw-note").classList.toggle("show", state.mode === "typewriter");
     document.getElementById("scale").style.display = state.mode === "pop" ? "" : "none";
     drawLane();
     updateToml();
@@ -281,6 +295,7 @@
     const lines = ["[motion]", `mode = "${state.mode}"`, `duration = ${state.dur.toFixed(2)}`];
     if (state.mode === "pop") lines.push(`scale_from = ${state.scale.toFixed(2)}`);
     else lines.push(`# scale_from applies to pop only`);
+    if (state.mode === "typewriter") lines.push(`# typewriter: timing from each word's start and end; duration not used`);
     lines.push(`# highlight stays in style.highlightColor (karaoke colour)`);
     document.getElementById("toml").textContent = lines.join("\n");
   }

@@ -29,6 +29,9 @@
 | **D3** | **SELECTED (owner, 16 Oct 2026): (a) `[motion]` block in `preset.toml`.** Schema not yet written. C2 preset files wait for the schema, because (a) changes their shape. | (a) | C5, C2 (preset files) |
 | **D4** | **SELECTED (owner, 16 Oct 2026): B: new pure crate `concat-timing` (no dependencies).** Holds the snapper (T2/T3) and the energy helpers `rms` and `linear_from_db`, moved from `concat-media/src/silence.rs` so there is one copy. `concat-speech` calls it after `refine_segments_with_vad`. `concat-media` depends on it for the helpers. | B | T2, T3 |
 | **D5** | **SELECTED (owner, 16 Oct 2026): B.** Split in two. (1) The Whisper cache (`whisper-cache.json`) is made once by an example binary in `concat-speech`, on the owner's machine (it needs Whisper and FFmpeg). (2) The metric runner (Tier 1 table, WER) is an example binary in `concat-timing`, which reads the cache and `audio-16k.f32` and runs in the sandbox, using the same energy code as the snapper. | B | T1, T8 |
+| **D6** | **SELECTED (owner, 16 Oct 2026): typed lanes.** Timeline lanes are V (video, caption, image) or A (audio). Today a lane is untyped (`model.rs` `Track`: 'Deliberately untyped: any media goes on any track'). This changes that design. Legacy tracks need a rule to get a type on load. | typed | E5, P3, C5 (caption placement) |
+| **D7** | **SELECTED (owner, 16 Oct 2026): one caption lane per speaker, linked to video and audio.** Each speaker's captions sit on their own caption lane (typed V, per D6). Captions, video, and that speaker's audio are linked (E5). Replaces the per-word colour idea. Overlap is shown by two lanes at once, not by one shared lane. | selected | E5, P3, T5 (caption identity changes: a caption follows its speaker's audio, not only the video) |
+| **D8** | **SELECTED (owner, 16 Oct 2026): lane numbers with video on top.** V1 = video. Caption lane of speaker 1 = V2, speaker 2 = V3. Audio lanes: speaker 1 = A1, speaker 2 = A2. Each speaker's caption lane follows that speaker's audio (D7). | selected | E5, D7, T5 |
 
 ---
 
@@ -187,12 +190,12 @@ Applies to: trim, autotrim, playhead split, Enter-split (E4), re-split (C1), inl
 - **Change:** a transform field in the style model. Applied at render time, never to the stored text, so the transcript keeps its casing.
 - **Test first:** a preset with uppercase renders uppercase, and the stored caption text is unchanged.
 
-### C5. Caption motion — D3 selected (a), schema pending
-- **Plan status:** open. **Code status:** absent (confirmed 16 Oct 2026: the caption dialog has no motion control; no preset sets motion; the `pop`/`slide`/`zoom` names in `concat-effects/packages/` are video effects).
-- **Do not start** until the `[motion]` schema is written and reviewed by the owner (D3(a) is chosen; the fields are not yet defined). Then: write one test that a preset yields motion on apply and the choice survives a project reload.
-- **Schema (to define, not yet fixed):** motion type (none / pop / typewriter / word-reveal), duration, and how it reads the per-word reveal order that is already baked (`src/crates/concat-core/src/shader.rs`).
+### C5. Caption motion — D3 selected (a), schema approved (16 Oct 2026)
+- **Plan status:** fixed in plan (schema v1 approved by owner, 16 Oct 2026). **Code status:** absent. **Code status:** absent (confirmed 16 Oct 2026: the caption dialog has no motion control; no preset sets motion; the `pop`/`slide`/`zoom` names in `concat-effects/packages/` are video effects).
+- **Do not start** before C5's place in the plan order (after D3 schema, which is now approved). Then: write one test that a preset yields motion on apply and the choice survives a project reload.
+- **Schema v1 (approved, 16 Oct 2026):** motion modes none / pop / word-reveal / typewriter, `duration` (pop and word-reveal), and `scale_from` (pop only). Reads the per-word reveal order already baked (`src/crates/concat-core/src/shader.rs`). Typewriter timing comes from each word's spoken start and end.
 
-**DRAFT motion schema (D3-a). Not approved; owner reviews before any code.**
+**Motion schema v1 (D3-a). APPROVED by owner, 16 Oct 2026. Owner decisions on the open questions are recorded below.**
 
 *Facts it rests on (checked 16 Oct 2026):*
 - `TextStyle` (`src/crates/concat-project/src/model.rs`, near line 980) has no motion field. `highlight_color` is the karaoke accent and stays separate.
@@ -202,26 +205,27 @@ Applies to: trim, autotrim, playhead split, Enter-split (E4), re-split (C1), inl
 *Proposed preset block (v1, smallest set that gives a CapCut-style pop and reveal):*
 ```toml
 [motion]
-mode = "none"       # none | pop | word-reveal
-duration = 0.18     # seconds per word for pop / word-reveal
+mode = "none"       # none | pop | word-reveal | typewriter
+duration = 0.18     # seconds per word for pop / word-reveal (not used by typewriter)
 scale_from = 1.15   # pop only: starting scale of each word
 ```
 *Meaning of each mode (agreed definition for the preview and the engine):*
 - `none`: the whole cue is on screen from its start. Only the highlight moves.
 - `word-reveal`: the cue starts empty; each word appears at its spoken time and stays.
 - `pop`: each word appears at its spoken time with a scale-in from `scale_from` to 1 over `duration`.
+- `typewriter`: letters of each word appear one by one across the word's spoken time (start to end). `duration` is not used.
 
 *Stored on the clip too*, as a field on `TextStyle` with `serde(default)` so older projects load as `mode = "none"`. The preset copies its block into the clip on apply. This is what lets "the choice survives a project reload" pass.
 
 *Rules:*
 - Clamp `duration` and `scale_from` in the one place where `TextStyle` values are clamped (`AGENTS.md` invariant 6). Do not clamp elsewhere.
 - Motion is timed on the word timings. Until T2 is accepted, pop will land on the wrong word by the same ±200–500 ms as the highlight.
-- `typewriter` is left out of v1. It is a per-character reveal; add it only after `pop` and `word-reveal` pass review.
+- `typewriter` is in v1 by owner decision (16 Oct 2026). Its tests must be the same as pop and word-reveal (apply, reload) plus one check that letters appear in order within each word.
 
-*Open questions for the owner:*
-1. Is v1 limited to none / pop / word-reveal?
-2. Does the motion drawer show for captions only, or for titles too (see the Motion drawer question in the Text-tab discussion)?
-3. Default `duration` (0.18 s is a starting guess).
+*Owner decisions (16 Oct 2026):*
+1. v1 has four modes: none / pop / word-reveal / typewriter. Owner approved typewriter for v1 on 16 Oct 2026 (earlier plan had it deferred to v2).
+2. The Motion drawer shows for **both captions and titles** (Inspector → Text tab).
+3. Default `duration` = 0.18 s, accepted for now. Tune after T2 is accepted.
 
 **Track 2 exit:** a caption track that looks like the CapCut Pro reference, without the inspector, once T2 is accepted.
 
@@ -233,6 +237,12 @@ scale_from = 1.15   # pop only: starting scale of each word
 - **Plan status:** fixed in plan. **Code status:** not started. `captionmap.rs` does the inverse (remaps words through a cut), so about 80% of the machinery exists.
 - **Needs:** T2 accepted (deleting a word is guesswork at ±300 ms), T7.
 - **Tests first:** deleting one word ripples audio, picture, and captions together; deleting a sentence keeps the sync matrix; one undo restores everything.
+- **Decided (owner, 16 Oct 2026):**
+  - Gap after a delete is **closed (ripple)**: later audio and picture move left.
+  - Changing a word's text (typo fix) is **text only**. The video is not cut and the word's timing is kept. Owner: do not add cut-on-retype, because it risks new bugs in a working path.
+  - Existing timeline remove-selection stays as it is. E1 adds word-level delete on top of it. It does not replace it.
+  - **Control (owner, 16 Oct 2026):** one checkbox, **"Potong video saat kata dihapus"** (Cut video when a word is deleted). On: deleting a word ripples audio, picture and captions. Off: only the word's text is removed, nothing else changes. The checkbox applies to both the Sections pane and the timeline caption row, through the same delete path (T7).
+  - Remove-selection on the timeline is unchanged.
 - **Done when:** the tests pass and the sync matrix passes for the delete path.
 
 ### E2. Filler-word removal (Indonesian)
@@ -259,6 +269,38 @@ scale_from = 1.15   # pop only: starting scale of each word
 - **Done when:** the tests pass and the sync matrix passes for the split path.
 
 ---
+
+### E5. Link / unlink audio and video (replaces Detach / Reattach)
+- **Owner decision (16 Oct 2026):** replace Detach / Reattach with Link / Unlink. Every video sits on the **video line**; its audio sits on the **audio line**; the two are linked. Lanes are typed V / A (D6). Reference: Adobe Premiere Pro (Link, Unlink, relink) and the owner's VTS, where audio, video and captions are separate.
+- **Parity item served:** audio on its own line, movable separately. Owner's reference, not a CapCut feature claim (not verified against CapCut in this session).
+- **Plan status:** fixed in plan (owner decision 16 Oct 2026). **Code status:** not started. Detach / Reattach exists today (`studio.rs` near lines 7151–7156 `sound_placement`, 9842–9855 context menu, 10495–10590 handlers); the model has `muted` and `detached_from` (`concat-project/src/model.rs` near lines 1356–1361).
+- **Current gap (verified by reading):** after Detach, the audio clip moves on its own and the link is only used by Reattach (`studio.rs` near line 4272). There is no lock that keeps video and audio moving together.
+- **Behaviour to build:**
+  - **Link:** select a video clip and an audio clip, right-click, Link. They form one group. Moving, trimming, splitting or deleting one acts on the group while linked.
+  - **Unlink:** right-click a linked clip, Unlink. Both clips stay on their lines and move independently. Link can be applied again at any time.
+  - **Linked selection:** selecting one clip of a group selects the group (as Premiere does) so a group move is one click.
+  - **Captions** (D7): each speaker's caption lane is linked to the video and to that speaker's audio. Moving the group moves its captions. Today captions follow the video clip (`captions_of`, `captionmap::remap`); with D7 they also follow the speaker's audio.
+  - **Remove** the Detach and Reattach menu items. Their replacement is Link / Unlink only.
+- **Lane typing (D6, typed):** a legacy untyped track needs a type on load. Rule to decide in the diff: type it by the clips on it; a track with both video and audio is split or flagged. Test with an old-project fixture.
+- **Import default (E5-b, decided by owner, 16 Oct 2026): yes.** Each imported video becomes two linked clips: video on V1, its audio on A1. The owner's words ("every video on the video line, audio on the audio line") read as: import always creates two linked clips. Confirm before coding.
+- **Migration (required):** projects saved with `detached_from` must load. Each detached pair becomes a linked group, and `muted` on the video is kept. Test with an old-project fixture.
+- **Needs:** T5 (captions must follow the group; `captions_of` is the identity this relies on). Place after E1 in plan order. Does not touch word timing, so it does not wait for T2.
+- **Tests first:**
+  1. Link video + audio; move the video; the audio moves by the same offset.
+  2. Unlink; move the video; the audio stays put.
+  3. Relink; the group moves again.
+  4. A caption follows its video clip through link, unlink and move.
+  5. An old project with `detached_from` loads as a linked group with the same timing and mute state.
+  6. One undo restores each link change.
+  7. Export audio of the clip still produces the same file.
+- **Done when:** tests 1–7 pass; the sync matrix (section 2) passes for move, trim and split on a linked group; the Detach / Reattach menu items are gone from the code and the menu.
+
+### E6. Select one whole lane with one shortcut
+- **Owner decision (16 Oct 2026):** shortcut **Shift + L** selects every clip on the current lane, from the first to the last, and no other lane. The user does not have to zoom out or hold Shift while dragging to the end.
+- **Plan status:** fixed in plan (owner decision 16 Oct 2026). **Code status:** not started. The gesture today is zoom out, or Shift-drag to the end. I did not find a lane-select command in the code I read (`studio.rs`, `timeline/lanes.slint`); verify before coding.
+- **Check before coding:** Shift + L must not clash with an existing shortcut. Confirm the keymap in the diff. Confirm which lane counts as "current" (the lane under the playhead, or the last lane clicked).
+- **Tests first:** Shift + L on V2 selects every clip on V2 and nothing on V1 or A1; a second press or Escape clears it; one undo restores the selection; a locked lane is skipped or refused (decide in the diff).
+- **Done when:** the tests pass and the shortcut is listed in the shortcut help.
 
 ## 5. Track 4 — finishing (vertical and export)
 
@@ -299,7 +341,23 @@ scale_from = 1.15   # pop only: starting scale of each word
 
 ### P3. Speaker labels (diarisation)
 - **Plan status:** fixed in plan (scope decision pending). **Code status:** absent.
-- **Needs:** owner decision: how many speakers, and whether tags are editable.
+- **Owner decision (16 Oct 2026):** a speaker is a **label**, not a lane. The label lives on the audio clip, on each transcript word, and on each caption. It does not add a lane.
+- **Speaker count (owner confirmed 16 Oct 2026):** the count is **detected automatically**, not forced. No fixed cap; tested up to 4. No empty speaker slots in the UI. (A forced 2 with one speaker splits one voice into two speakers.)
+- **Recording setup (owner, 16 Oct 2026): each person has their own track.** So the speaker is the track, and no detection is needed for the main case. Speaker labels go on the audio clip of each track, on its transcript words, and on its captions. Each track is transcribed on its own, so overlapping speech keeps both voices. Caption order across tracks needs a merge step.
+- **Owner (16 Oct 2026): most recordings are one mixed stream.** So auto-detection is **required**, not a fallback. The per-track path above covers only files that arrive already separated.
+- **Engine choice (open):** sherpa-onnx or speakrs. Decide by a test on the 5-minute corpus against the owner's ground truth. Check disk before adding the dependency (see Disk footprint).
+- **Overlap handling for now (owner, 16 Oct 2026):** manual. Overlap is not detected automatically at first. The user assigns speakers by hand.
+- **Speaker captions on lanes (D7, owner 16 Oct 2026):** each speaker gets a caption lane. The per-word colour idea is dropped. Words still carry the speaker label, so each caption goes to the lane of its speaker. Manual route: select words and assign a speaker, and the words move to that speaker's lane. Depends on T7 (one writer for text and words), E1, and E4. Colour (owner clarified, 16 Oct 2026): colour belongs to the **speaker**, not to single words. Every caption of a speaker takes that speaker's colour as a whole, through the label. With one lane per speaker, the lane carries the same colour. Link groups: **one group per speaker** (owner, 16 Oct 2026): the video stays linked to every speaker group, and each speaker's audio and caption lane are linked together. Moving one speaker's captions does not move the others.
+- **Scope boundary (added 16 Oct 2026):** with auto-detection off, no speaker processing runs. Manual speaker assignment is separate from detection and still works, and it creates the same speaker lanes. Changes that are NOT speaker-only and apply to every user: lane typing (D6), link/unlink replacing Detach/Reattach (E5), word timing (T2/T3), caption identity (T5), and word delete (E1). Single-speaker editing keeps one V lane for video and captions and one A lane for audio, linked, as the default.
+- **Opt-in (owner confirmed, 16 Oct 2026):** detection runs only when the user asks (for example a "Detect speakers" button). It never runs on import. When the feature is off, the editing flow is unchanged: no speaker labels, no extra processing, and no effect on captions, cuts, or export. This covers single-speaker editing and simple tasks.
+- **Open scope question:** labels only (on words, captions, and the clip), or also one audio lane per speaker (A1 Host, A2 Guest)? Per-speaker lanes depend on detection (or per-track files) and are a second opt-in layer, not part of the first version.
+- **Existing code hint (checked 16 Oct 2026):** `model.rs` `Clip.audio_stream` lets a clip play one of several audio streams of one file. So one file with several audio streams may already work. Confirm in the app before planning import.
+- **Auto-detection (16 Oct 2026): feasible, required for mixed recordings, not built.** Audio-only diarization (who spoke when) runs locally after transcription. Candidates: `speakrs` (Rust, ONNX Runtime, claims pyannote-level accuracy, crates.io v0.5.0); sherpa-onnx offline diarization (pyannote segmentation 3.0 + CAM++, no Python). The owner names each detected speaker once (for example SPEAKER_00 → Host). No per-line labelling.
+- **Limits (stated, not measured here):** overlapping speech (two people talking at once) is hard. One speaker per word is lossy in those places. Audio-only detection does not use video, so "who is on screen" is out of scope.
+- **Effort estimate:** M for basic auto labels (one diarization pass, map speaker turns to words by time, split captions at speaker changes, rename once). L if overlap handling and polish are needed. A new native dependency is added (ONNX Runtime and models), so its crate placement needs a decision like D4.
+- **Accuracy test (next step, owner):** the owner labels about 2–3 minutes of the 5-minute corpus once, as ground truth. This is for testing only, not for daily use. Needed to choose the engine.
+- **Disk footprint (checked 16 Oct 2026, partly):** sherpa-onnx path = pyannote segmentation 3.0 (about 6.6–7 MB) + CAM++ embedding (about 28 MB) = about 35 MB of models, plus the ONNX Runtime library (size not checked). speakrs model sizes were not checked. The bigger disk cost is usually Cargo build output (`target/`) for the new crates, not the models. Models can be stored outside `target/`, in the app data folder.
+- **Prerequisite (answered by owner, 16 Oct 2026):** one track per person. Open next: are these separate audio files, or one file with several audio streams?
 - **Approach:** a local diarisation model after transcription; output stored as a speaker tag per word or cue.
 - **Tests first:** on a two-speaker corpus episode, turns are assigned; one manual correction is kept.
 
@@ -415,6 +473,8 @@ Parked. The per-word machinery is what Track 1 is still fixing. Full design: the
 
 **Not in scope:** redesigning the panel layout. Only scrolling.
 
+**Investigation result (16 Oct 2026, code reading, not run):** see `04-findings/ui-1-panel-scroll-investigation.md`. Summary: Keyframes and Meters have no scroll at all (H1). The strongest code-level suspect is that `PaneScroll` measures content height from `preferred-height`, which can be smaller than what is drawn, so overflow reads as 0 and the bar and wheel never appear (H2, unconfirmed). Commit `f1426c9` (15 Oct) changed `PaneScroll` but does not remove scrolling by reading. The owner runs the protocol in the findings file before any fix.
+
 ## 11. Plan status summary
 
 | Item | Plan | Code |
@@ -431,11 +491,13 @@ Parked. The per-word machinery is what Track 1 is still fixing. Full design: the
 | C2 presets | fixed | 2 close presets exist |
 | C3 karaoke wiring | fixed | renderer wired |
 | C4 case transform | fixed | absent |
-| C5 motion | D3 selected (a), schema pending | absent |
+| C5 motion | D3 selected (a), schema v1 approved 16 Oct (4 modes, typewriter included) | absent |
 | E1 transcript edit | fixed | not started |
 | E2 filler removal | fixed | not started |
 | E3 waveform / word-edge drag | fixed | not started |
 | E4 Enter-split | fixed | not built |
+| E5 link / unlink audio and video (replaces Detach / Reattach) | fixed (owner 16 Oct) | not started; Detach / Reattach exists |
+| E6 select one lane with Shift + L | fixed (owner 16 Oct) | not started |
 | V1 auto-reframe | fixed | not started |
 | V2 presets + loudness | fixed | absent |
 | V3 ducking | fixed | absent |

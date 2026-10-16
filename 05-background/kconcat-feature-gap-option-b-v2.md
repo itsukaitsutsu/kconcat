@@ -49,7 +49,7 @@ Effort: S = a weekend · M = a few weeks · L = months.
 | # | Feature | CapCut Pro | kconcat | Effort | Notes |
 |---|---|---|---|---|---|
 | C1 | Uppercase / case transform in style | ✅ | ❌ | S (per roadmap C4) | Preset can uppercase without changing source text. |
-| C2 | Caption motion (pop / typewriter / word-reveal) | ✅ | ❌ confirmed absent | M | Blocked on motion-schema decision (roadmap C5). |
+| C2 | Caption motion (pop / typewriter / word-reveal) | ✅ | ❌ confirmed absent | M | Schema v1 approved 16 Oct (4 modes incl. typewriter); code not started (roadmap C5). |
 | C3 | Waveform under caption row + word-edge drag | ✅ | ❌ | M | Roadmap E3. |
 | C4 | Animation (reported as existing) | ✅ | 🟡 **unverified** | — | Owner reports it; repo check found no caption motion. Needs a visual check in the app. |
 

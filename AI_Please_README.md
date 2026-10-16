@@ -9,9 +9,10 @@
 ## 1. Where the discussion stands
 
 - **Option B (the feature list vs CapCut Pro):** re-checked and fixed in `05-background/kconcat-feature-gap-option-b-v2.md`. It is ranked for **long-form podcast editing** with **short-clip output**.
-- **Option C (caption styles end to end):** BELUM dibahas (not yet). Caption motion is confirmed absent. D3 is selected as (a), `[motion]` in `preset.toml`; the schema is not yet written.
+- **Option C (caption styles end to end):** BELUM dibahas (not yet). Caption motion is confirmed absent. D3 is selected as (a), `[motion]` in `preset.toml`; schema v1 approved 16 Oct (modes none / pop / word-reveal / typewriter; Motion drawer for captions and titles; duration 0.18 s).
 - **Option D:** open.
 - **#15 "Tuning ASR Indonesia":** approved with condition (16 Oct 2026): T8 and a WER output on T1, only where they serve the goal of getting closer to CapCut Pro. Fine-tuning is not approved.
+- **UI-1 (panel scroll):** investigated by code reading, not run. Strongest suspect: `PaneScroll` measures height from `preferred-height`, so overflow can read as 0 (H2). Keyframes and Meters have no scroll at all (H1). Owner runs the protocol in `04-findings/ui-1-panel-scroll-investigation.md` before any fix.
 - **Languages:** Indonesian is the priority (T8, E2). English (X1) and Japanese (X2) are additional features, added after Track 1 exit, per owner (16 Oct 2026).
 - **D4 (snapper location):** selected B: new pure crate `concat-timing`, no dependencies, so its tests run in the sandbox.
 - **D5 (harness location):** selected B. Cache made once in `concat-speech`; metric runner and WER in `concat-timing` (sandbox).
@@ -65,7 +66,7 @@ Rule: a plan item is **fixed** once its definition, approach, target and order a
 - **A8 / E4 (Enter-split):** fixed in plan; order after T7. Code: not built (Enter unwired at `1aece2d`).
 - **A2 / E1 (transcript editing):** fixed in plan; depends on T2/T3. Code: not built.
 - **C1 (word chunking):** fixed in plan as already built. Code: built.
-- **C5 (caption motion):** plan open (schema decision pending). Code: absent.
+- **C5 (caption motion):** plan fixed (schema v1 approved 16 Oct). Code: absent.
 
 Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
 
@@ -89,7 +90,7 @@ Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
 ## 6. Open items
 
 - **T1 metric runner** — the prerequisite for measuring word-timing work. Still not started. This is the first code task when coding resumes.
-- **Motion schema decision** (roadmap C5 blocker) — three options: a `[motion]` block in `preset.toml`, inspector-only, or an effect package.
+- **Motion schema decision:** DONE. Option (a), `[motion]` in `preset.toml`, schema v1 approved 16 Oct 2026.
 - **Caption pipeline map** — transcription → `captionmap` → placement → reveal → render → export, with file:line per hop.
 - **#15 decision** — add Track-1 T8 and the WER output on T1, or not.
 - **Verify** B-roll / multi-clip and caption animation in the running app.
