@@ -1,10 +1,10 @@
 # B. Caption styles — what already works, what's actually missing
 
-*Option B, first item from the shortlist. Verified against your tree at `1aece2d`. This doc corrects two of my own earlier claims — one item on the shortlist is already done.*
+*Verified against your tree at `1aece2d`. This doc corrects three of my own earlier claims — two items on the shortlist are already done. The third correction (word chunking) landed on a second pass the same day; see §1 and §3.*
 
 ---
 
-## 1. Stop here: three things I listed as gaps already exist
+## 1. Stop here: four things I listed as gaps already exist
 
 I checked before writing. Correcting myself:
 
@@ -13,6 +13,7 @@ I checked before writing. Correcting myself:
 | **"Caption style library missing"** | ❌ wrong — **32 text presets already ship** (`concat.atomic`, `concat.bold-caption`, `concat.clean`, `concat.impact`, `concat.lower-third`, `concat.pixel`, `concat.retro`, `concat.blackletter`, …) | `crates/concat/text-presets/` |
 | **"One-click apply style to track missing"** | ❌ wrong — it exists, and defaults **on** | `studio.rs:963` `apply_all_captions`, `studio.rs:3550`, `studio.rs:5279` |
 | **"No karaoke/highlight"** | ❌ wrong — the renderer is built and tested: one overlay title per heard word, each with its own picture | `titles.rs:367`, `titles.rs:520`, test `a_word_timed_caption_gets_one_highlight_per_heard_word` |
+| **"No word-chunking"** | ❌ wrong — **four layout modes ship**: Engine (as transcribed), Readable lines, Burst (3 words), One word at a time — plus a **Re-split** button | `ui/dialogs/captions.slint:78`, `:615`; `GroupPolicy::for_preset` `captionmap.rs:597–627`; `resplit_drafts` `panes/captions.rs:596` |
 
 And the style system itself is far richer than I assumed — `TextStyle` (`model.rs:980`) already carries:
 
@@ -51,10 +52,10 @@ id, name, font, offsetY, language, order, sample
 | 2 | Presets carry no motion (pop, typewriter, bounce, word-reveal) | small–medium | needs one schema field + something to apply it |
 | 3 | No uppercase/transform option | small | CapCut styles are usually ALL CAPS; not in `TextStyle` |
 | 4 | Presets are one flat list of 32; captions deserve a group | small | add a `kind`/`group` tag and a tab |
-| 5 | **No word-chunking** (CapCut shows 1–3 words at a time) | medium | biggest visual difference; it's segmentation, not styling |
+| 5 | ~~No word-chunking~~ — **wrong, it exists**: four layout modes + Re-split (§1). It only reads badly while the word times it cuts on are off | — | **validation after A**, not a build: re-split the same video as *Burst* and compare |
 | 6 | Preset card shows `sample = "Aa"` — fine for titles, weak for captions | small | a caption sample line reads better |
 
-**Gap 5 deserves emphasis.** CapCut's captions look "fast" not because of font or colour but because **a sentence is split into one-to-three-word groups**, each flashing briefly. Your engine already splits and remaps cues through cuts (`captionmap.rs`, `sections.rs`) — so chunking a cue into N-word pieces is the same machinery pointed at a different problem. This is probably the single highest-value item in B, and it depends on **A** (chunk boundaries are only readable if word times are right).
+**What deserves emphasis is the opposite of what I first wrote.** Chunking is not a gap — it ships (§1): Burst already limits a cue to 3 words / 18 characters / 2.5 s and breaks on a 0.35 s pause (`captionmap.rs:597–627`). What is missing is the *timing* those boundaries cut on — with estimated words the cut lands in the wrong place, and on a 0.4–2.5 s cue that error is 15–60 % of what the viewer sees. So the highest-value item in B is not a build at all: it is **running A and watching Burst become readable**. The next thing to *build* here is item 1 of the table above — the caption-shaped presets.
 
 ---
 
@@ -97,22 +98,22 @@ Option 1 is the closest to CapCut and the smallest user-facing change. Option 3 
 ## 6. Order of work, and why
 
 ```
-A  (word timing)  ──►  karaoke and chunking become readable
-                            │
+A  (word timing)  ──►  karaoke becomes readable
+                            │   and Burst / One-word chunking becomes readable
+                            │   (validation only — those modes ship today, §1)
                             ▼
-B5 (word chunking)  ────────┘   the visual difference people notice
-B1 (8 caption presets + kind tag)
+B1 (8 caption presets + kind tag)   the next visual difference people notice
 B3 (uppercase transform)
 B2 (motion — after the schema decision in §5)
 ```
 
-**B5 before B1** is deliberate: a perfect preset on a five-second cue looks nothing like CapCut. One-to-three words at a time is what makes it *look* right; the font is secondary.
+**There is no B5 left to schedule** — chunking ships, so all it needs is A (§3). B1 is next: with Burst and One-word layouts already available, a caption-shaped preset is the remaining visual difference between kconcat and CapCut, and it is pure data. The one ordering rule that survives: **validate Burst immediately after A**, before styling, because the chunk boundary is what a preset is styling.
 
 ---
 
 ## 7. Exit criteria
 
 - `kconcat.pop-bold` applied to a generated caption track produces a CapCut-shaped caption with **no inspector use**
-- a sentence splits into 1–3-word groups with a configurable max, and karaoke highlights stay aligned through the split
+- after A, the same video re-split as **Burst** reads correctly and karaoke highlights stay aligned through the split — those modes ship today (§1); this is a check, not a build
 - a second language stacks with one click, no manual `offset_y`
 - a test asserts that `highlightColor` round-trips through `preset.toml` (this is the one field the whole karaoke path hangs on)

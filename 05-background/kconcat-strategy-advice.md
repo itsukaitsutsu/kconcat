@@ -40,7 +40,7 @@ I checked what's in the tree. This list is grounded, not guessed.
 | Gap | Effort | Why it matters |
 |---|---|---|
 | **Text-based editing** — delete words in the transcript, video ripples to match | Medium — you're ~80% there | See §3. This is the flagship |
-| **Caption style presets** — 6–10 built as preset folders, one-click apply across a track | Small | CapCut's most-used caption feature; the preset system is already built |
+| **Caption-preset files** — 6–10 caption-shaped preset folders (the per-track "one-click apply" already ships, verified) | Small | CapCut's most-used caption feature; the preset system is already built — only the caption-shaped *data* is missing |
 | **Auto-reframe** — 16:9 → 9:16 following the speaker | Small-ish | Feed the RVM mask centroid per frame, smooth it, drive crop keyframes. CapCut **removed this from its free plan in April 2026** |
 | **Platform export presets** — TikTok/Reels/Shorts/YouTube with aspect, bitrate, loudness targets | Very small | There are none in the tree. Removes the last reason to open CapCut for a simple export |
 | **Waveform word-boundary dragging** | Small | The correction UX that makes people *trust* the timing |
@@ -101,7 +101,7 @@ You have **0 releases, no installable build, red CI at HEAD**, a Windows-only bu
 | 1–3 | Green CI at HEAD, delete the junk, tag `v0.1.0-kconcat`, publish one downloadable build, write a real README ("Concat + linked captions + silence trim") |
 | 4–8 | **Word-onset snapping** (Level 1 from the sync doc) + tests. Measure: words >80 ms off, before and after |
 | 9–12 | **Text-based editing** — transcript view, delete-word → ripple cut, using `captionmap` + `sections` |
-| 13–16 | **Caption style presets** — 6–10 shipped as `text-presets/` folders, one-click apply. Plus platform export presets |
+| 13–16 | **Caption-preset files** — 6–10 shipped as `text-presets/` folders (per-track apply already ships). Plus platform export presets |
 | 17–21 | **Auto-reframe** from the RVM mask centroid; smooth, drive crop keyframes |
 | 22–25 | Open the upstream PRs: `subtitle.rs`, `sections.rs`, `captionmap.rs`, then the word-timing fix |
 | 26–30 | Record one 3-minute demo: paste a 20-minute talking-head video, get a captioned, silence-trimmed vertical short, fully offline. That video is your README |

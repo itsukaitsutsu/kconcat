@@ -18,7 +18,7 @@ instead of the task.
 | `AGENTS.md` | Rules (lives in the repo) | **Yes** — at the start of every coding session |
 | `kconcat-roadmap.md` | Map: what, order, why, done-when | **Yes** — the one file that gives the whole picture |
 | `A-word-timing-level1.md` | Manual: how, parameters, traps | **Yes** — only when the task is T2/T3 |
-| `B-caption-styles.md` | Manual: how, presets, schema decision | **Yes** — only when the task is C1–C5 |
+| `B-caption-styles.md` | Manual: how, presets, schema decision | **Yes** — only when the task is C1 (validation only) or C2–C5 |
 | `working-agreements.md` | Rules for the assistant | No — it is for the human side |
 | `kconcat-audit-2026-10-16.md` | Findings, with evidence | Only §4 as a bug report (`caption-identity-bug.patch`) |
 | `kconcat-feature-gap.md`, `kconcat-strategy-advice.md`, `opencut-vs-kconcat-vs-capcut.md`, `caption-sync-fix-plan.md` | Background and discussion | No — reasoning trail, kept for the owner |
@@ -26,6 +26,15 @@ instead of the task.
 Rule of thumb: **one fact lives in one file; other files point at it, they do
 not repeat it.** Merging two files is only ever right when the same fact would
 otherwise sit in both.
+
+## Checkpoint packaging
+
+- The checkpoint's front page is named **`AI_Please_README.md`**, not
+  `README.md`, so an agent session opens it first. Same name every time.
+- Ship checkpoints as a zip with a dated folder:
+  `kconcat-checkpoint-YYYY-MM-DD/`.
+- Keep the workspace clean between sessions: delete repo clones and toolchains
+  (they are re-creatable); keep only the checkpoint folder and its zip.
 
 ## Rules for the assistant
 
@@ -46,7 +55,10 @@ otherwise sit in both.
 6. **Deepen local AI, never add cloud AI.** Offline is the whole point. Local
    models (Whisper, TTS, matting) yes; cloud generation no.
 7. **Verify before claiming.** Say which command or file:line a claim rests on.
-   If something was not tested, say so plainly.
+   If something was not tested, say so plainly. Calling a feature *missing*
+   needs the three checks in `AGENTS.md` § "Before you say a feature is
+   missing" — the UI path, the handler, and a comparator grep — or the label
+   stays "not verified".
 
 ## What "closer to CapCut" means here
 
@@ -59,7 +71,7 @@ Everything outside that sentence is out of scope.
 ## Open threads
 
 - `kconcat-feature-gap.md` §6 — the 12-item shortlist (captions first: word
-  timing, style presets, one-click apply, auto-reframe, platform export presets)
+  timing, Enter-split, caption presets, auto-reframe, platform export presets)
 - `caption-sync-fix-plan.md` — why words drift, and the fix ladder (Level 1:
   snap each word to the real voice onset, ~150 lines, no new models)
 - `kconcat-audit-2026-10-16.md` — the caption-identity bug, reproduced with
@@ -74,3 +86,7 @@ Everything outside that sentence is out of scope.
 - Everything linking FFmpeg is unverified in-sandbox (no FFmpeg dev libs)
 - One real bug found: a caption that keeps none of its words through an
   autotrim silently stops being a caption
+- One missing feature found: Enter does not split a caption at the caret
+  (build plan: roadmap §E4)
+- One suspected defect, reasoned from the code and not yet tested: an inline
+  text edit in Sections leaves `clip.words` stale

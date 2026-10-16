@@ -243,6 +243,40 @@ Not because the AI is bad at Rust — your modules are well written. Four specif
 
 ---
 
+## 9. Second pass (same day): two more findings on the Sections path
+
+Both come from reading the path a user actually takes, after the owner reported
+the first one.
+
+**a) Enter does nothing on a caption row — the split-at-caret feature is absent,
+not broken.** The Sections row editor is a single-line `Field`
+(`concat/ui/primitives/modal.slint:615`), and `Field` binds `input.edited`
+(`:634`) and never declares `accepted` — while `accepted` is a callback this same
+UI uses elsewhere (`ui/primitives/number-field.slint:138`,
+`ui/timeline/tabs.slint:159`). So Enter has nothing to fire. The text is already
+committed per keystroke by the handler behind the row
+(`concat/src/panes/sections.rs:327` → `edit_row_text` `:680`), which writes
+`style.content` and stops.
+
+For contrast, splitting exists for **time** (`Command::SplitClips`,
+`concat-project/src/commands/mod.rs:513`) — and it clones text *and* words whole
+into the tail instead of re-partitioning them, so it is not a half-built version
+of this feature; the direction is opposite (time → text instead of text → time).
+CapCut, and VTS per the owner, split the caption at the caret. Design:
+`kconcat-roadmap.md` §E4.
+
+**b) Suspected: an inline text edit orphans the caption's words.**
+`edit_row_text` (`concat/src/panes/sections.rs:680–743`) replaces `style.content`
+through `Command::UpdateClip` and never touches `clip.words`. The karaoke
+overlay is built from those words through `locate_words`
+(`concat-project/src/captionmap.rs:241–259`), which searches each word's text
+forward in the content and returns `None` when it is not there — so a word whose
+text was edited away can no longer be highlighted. **Reasoned from the code path
+only; no test has been run.** Consequence for §E4: any split-at-caret must
+partition `words` together with the text, or it will create the same mismatch.
+
+---
+
 ### Files with this audit
 - `caption-identity-bug.patch` — 3 tests, applies in your repo root: `git apply caption-identity-bug.patch`
   (1 expected failure — the identity bug; 1 expected pass proving the ghost still follows trims; 1 expected failure — the caption vanishing from the Sections panel)

@@ -64,6 +64,26 @@ Each of these has already been broken once. Treat them as hard rules.
   overlap is fine *because it was made a separate, named path* — copy that
   pattern: new path, new doc comment, its own test.
 
+## Before you say a feature is missing
+
+Five "missing" claims in one session turned out to be "already built". A module
+name is not evidence, and neither is the absence of the word you happened to
+search for. Say *missing* only after reading all three:
+
+1. **The UI path** — the widget and the callback that would carry the action.
+   (`Field` in `ui/primitives/modal.slint` binds `edited` and never declares
+   `accepted`, so Enter on a caption row has nothing to fire.)
+2. **The handler** — what the callback writes, to the end of the function. One
+   that stops after `style.content` is not a split feature.
+3. **A comparator grep** — the sibling machinery, before concluding: the command
+   enum in `commands/mod.rs`, and words like `split`, `caret`,
+   `cursor-position`, `accepted`. "Split exists for *time*" is not "split exists
+   for *text*" — direction and granularity decide whether it is the same thing.
+
+Miss one of the three and the honest label is **"not verified"** — never
+"missing". And when a note and the code disagree, the code is right; fix the
+note in the same pass.
+
 ## Definition of done
 
 A change is done when all of these hold:
