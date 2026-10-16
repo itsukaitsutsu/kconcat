@@ -73,9 +73,10 @@ Stabilisation (unless you film handheld), stickers and overlays, templates, musi
 
 1. **A1** word timing (T1 harness → T2 → T3)
 2. **T5** caption identity (stored, not derived), so cuts stop orphaning captions
-3. **C1 validation** on the same episode with Burst mode
-4. **A8** Enter-split (E4)
-5. **A2** transcript editing (E1), with A7 filler removal on the same machinery
+3. **T7** one writer for text and words (added 16 Oct; needed before A8 and A2)
+4. **C1 validation** on the same episode with Burst mode
+5. **A8** Enter-split (E4)
+6. **A2** transcript editing (E1), with A7 filler removal on the same machinery
 6. **A4 + A5** loudness and platform presets (cheap, high visible value)
 7. **A9 + A10** caption presets and karaoke wiring (C2, C3)
 8. **A6** auto-ducking (V3)

@@ -9,9 +9,13 @@
 ## 1. Where the discussion stands
 
 - **Option B (the feature list vs CapCut Pro):** re-checked and fixed in `05-background/kconcat-feature-gap-option-b-v2.md`. It is ranked for **long-form podcast editing** with **short-clip output**.
-- **Option C (caption styles end to end):** partly superseded. Caption motion is confirmed absent, so C5 needs a schema decision before any preset is written.
+- **Option C (caption styles end to end):** BELUM dibahas (not yet). Caption motion is confirmed absent. D3 is selected as (a), `[motion]` in `preset.toml`; the schema is not yet written.
 - **Option D:** open.
-- **#15 "Tuning ASR Indonesia":** still awaiting the owner's yes/no for the proposed Track-1 T8 and a WER output on T1.
+- **#15 "Tuning ASR Indonesia":** approved with condition (16 Oct 2026): T8 and a WER output on T1, only where they serve the goal of getting closer to CapCut Pro. Fine-tuning is not approved.
+- **Languages:** Indonesian is the priority (T8, E2). English (X1) and Japanese (X2) are additional features, added after Track 1 exit, per owner (16 Oct 2026).
+- **D4 (snapper location):** selected B: new pure crate `concat-timing`, no dependencies, so its tests run in the sandbox.
+- **D5 (harness location):** selected B. Cache made once in `concat-speech`; metric runner and WER in `concat-timing` (sandbox).
+- **D1 (timing reference):** closed. The 30 s Whisper sync clip is the reference.
 
 ---
 
@@ -51,6 +55,20 @@
 
 ---
 
+## 4b. Plan fixes recorded in the .md (16 Oct 2026)
+
+Rule: a plan item is **fixed** once its definition, approach, target and order are written in the .md files. Code status is tracked separately.
+
+- **A1 (word timing):** fixed in plan — T1 harness, T2 onset snapping, T3 ZCR + spectral flux, T4 script-aware tokenisation, each with a target. Code: not built.
+- **T5 (caption identity):** fixed in plan. Code: not built.
+- **T7 (one writer for text and words):** fixed in plan, added this session; must precede E4 and A2. Code: not built.
+- **A8 / E4 (Enter-split):** fixed in plan; order after T7. Code: not built (Enter unwired at `1aece2d`).
+- **A2 / E1 (transcript editing):** fixed in plan; depends on T2/T3. Code: not built.
+- **C1 (word chunking):** fixed in plan as already built. Code: built.
+- **C5 (caption motion):** plan open (schema decision pending). Code: absent.
+
+Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
+
 ## 5. What was found (carried forward)
 
 **Confirmed bug (reproduced with three tests, `04-findings/caption-identity-bug.patch`):** a caption from an imported `.srt`/`.vtt` loses its identity when a trim removes every word inside it. The clip stops being a caption. With "Burn captions" off, it can still be burned in. Identity is derived, not stored, and the check is duplicated in six places across three crates.
@@ -83,14 +101,17 @@
 
 ```
 AI_Please_README.md                                  → this file (read first)
-02-map/kconcat-roadmap-addendum-2026-10-16.md        → addendum: Track 5 (long-form podcast), revised order
+02-map/kconcat-roadmap-v2-execution.md               → roadmap v2: execution spec, decisions D1–D5, plan status
 05-background/kconcat-feature-gap-option-b-v2.md     → fixed Option B list, ranked for podcasts
 ```
 
-The original roadmap (`02-map/kconcat-roadmap.md`) and feature-gap doc (`05-background/kconcat-feature-gap.md`) stay as they are. Merge the addendum and v2 files in a separate step, after the owner has read them.
+`02-map/kconcat-roadmap-v2-execution.md` replaces the original roadmap and the addendum once the owner approves. The original `kconcat-roadmap.md` in the repo stays as it is until then.
 
 ---
 
 ## 8. Next action
 
-No code work is queued. Discussion continues on the Option B list (owner to answer the questions in `kconcat-feature-gap-option-b-v2.md` §3), then the #15 yes/no.
+- Owner approves or changes roadmap v2 and its decisions D1–D5 (§1 of the roadmap).
+- Then the first execution task is **T1** (harness and baseline), and no code is changed before the baseline is saved.
+- T8 needs the owner's corrected transcript of the 30 s clip before its first step.
+- Open for discussion: Option B questions (`kconcat-feature-gap-option-b-v2.md` §3).

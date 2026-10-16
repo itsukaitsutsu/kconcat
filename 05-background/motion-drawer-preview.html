@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kconcat — Motion drawer (D3-a) — mockup</title>
+<style>
+  /* Self-contained: no external fonts, scripts or images. */
+  :root {
+    --bg: #15161a; --panel: #1d1f25; --panel2: #23262e; --line: #33363f;
+    --fg: #e8e8ec; --dim: #9a9ca6; --accent: #5b8cff; --hl: #ffd400;
+    --new: #ff7a59; --ok: #3ccf91;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; }
+  header h1 { font-size: 15px; margin: 0; }
+  header span { color: var(--dim); }
+  .mock { background: #3a2a14; color: #ffcf8a; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+  main { display: grid; grid-template-columns: 1fr 360px; height: calc(100vh - 44px); }
+
+  /* ---- left: preview + timeline ---- */
+  .stage { display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
+  .frame { position: relative; width: 100%; max-width: 900px; aspect-ratio: 16 / 9; margin: 0 auto;
+           background: linear-gradient(160deg, #2b3a55, #111418 70%); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .frame .label { position: absolute; top: 10px; left: 12px; color: var(--dim); font-size: 12px; }
+  .caption { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%);
+             width: 84%; text-align: center; font-size: clamp(16px, 2.6vw, 30px); font-weight: 800;
+             text-shadow: 0 2px 6px #000; line-height: 1.25; }
+  .word { display: inline-block; margin: 0 .12em; transition: none; }
+  .word.hidden { opacity: 0; }
+  .word.active.hl { color: var(--hl); }
+
+  .transport { display: flex; align-items: center; gap: 10px; max-width: 900px; width: 100%; margin: 0 auto; }
+  button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 5px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .time { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 110px; }
+  .timeline { max-width: 900px; width: 100%; margin: 0 auto; }
+  .lane { position: relative; max-width: 900px; width: 100%; height: 56px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
+  .lane .mark { position: absolute; top: 0; height: 100%; width: 0; }
+  .lane .true { border-left: 2px solid #8a8f9c; }
+  .lane .shown { border-left: 2px solid var(--hl); }
+  .lane .link { position: absolute; top: 24px; height: 8px; background: #6b5d1e; }
+  .lane .lbl { position: absolute; font-size: 10px; color: var(--dim); white-space: nowrap; }
+  .lane .cur { position: absolute; top: 0; height: 100%; width: 2px; background: var(--accent); }
+  .table { max-width: 900px; width: 100%; margin: 6px auto 0; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .table span { display: inline-block; min-width: 118px; }
+  .legend { max-width: 900px; width: 100%; margin: 0 auto; color: var(--dim); font-size: 12px; }
+
+  /* ---- right: inspector ---- */
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs div { flex: 1; text-align: center; padding: 10px 0; color: var(--dim); }
+  .tabs div.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
+  .drawer { border-bottom: 1px solid var(--line); }
+  .drawer h3 { margin: 0; padding: 10px 14px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .drawer h3 small { color: var(--dim); font-weight: normal; }
+  .drawer .body { padding: 0 14px 12px; color: var(--dim); }
+  .drawer.closed .body { display: none; }
+  .drawer.motion { background: #20232b; box-shadow: inset 3px 0 0 var(--new); }
+  .badge { background: var(--new); color: #111; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 8px; font-weight: 700; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 6px 0 10px; }
+  .seg button { flex: 1; border: 0; border-radius: 0; background: var(--panel); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0 2px; color: var(--fg); }
+  .row span:last-child { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .switch { display: flex; justify-content: space-between; align-items: center; color: var(--fg); margin: 6px 0; }
+  .note { font-size: 12px; margin-top: 8px; }
+  pre { background: #101216; border: 1px solid var(--line); border-radius: 5px; padding: 10px; margin: 8px 0 0; color: #cfd3dc; font-size: 12px; white-space: pre-wrap; }
+  .hidden-row { display: none; }
+  .placement { margin: 14px; padding: 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--dim); font-size: 12px; }
+  .placement b { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>kconcat · Motion drawer (D3-a)</h1>
+  <span>Inspector → Text tab → new <b>Motion</b> drawer</span>
+  <span class="mock">MOCKUP — not the real UI. Timings are sample values.</span>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="frame" id="frame">
+      <div class="label">Preview · 16:9 · caption track</div>
+      <div class="caption" id="caption"></div>
+    </div>
+
+    <div class="transport">
+      <button id="play">▶ Play</button>
+      <button id="reset">⟲ Reset</button>
+      <input type="range" id="scrub" min="0" max="6" step="0.01" value="0">
+      <span class="time" id="time">0.00 / 6.00 s</span>
+    </div>
+
+    <div class="lane" id="lane"></div>
+    <div class="legend">
+      Grey line = where the word was spoken. Yellow line = where the caption shows it, after the timing error. Blue line = playhead.
+    </div>
+    <div class="table" id="table"></div>
+
+    <div class="legend">
+      Playback runs the same caption under the chosen motion mode. The highlight (karaoke colour) is separate and stays on.
+      Move <b>Timing error</b> to see what ±200–500 ms of Whisper error does to the words.
+    </div>
+  </section>
+
+  <aside>
+    <div class="tabs">
+      <div>Adjust</div><div class="on">Text</div><div>Sound</div><div>Effects</div>
+    </div>
+
+    <div class="placement">
+      <b>Where this lives:</b> the Text tab already has five drawers (Content, Typography, Stroke, Layout, Position). Motion is the sixth, highlighted here.
+    </div>
+
+    <div class="drawer closed"><h3>Content <small>▸</small></h3><div class="body">Words, one per line.</div></div>
+    <div class="drawer closed"><h3>Typography <small>▸</small></h3><div class="body">Font, size, colour, highlight colour (karaoke).</div></div>
+    <div class="drawer closed"><h3>Stroke <small>▸</small></h3><div class="body">Outline width and colour.</div></div>
+    <div class="drawer closed"><h3>Layout <small>▸</small></h3><div class="body">Box, plate, padding, max width.</div></div>
+    <div class="drawer closed"><h3>Position <small>▸</small></h3><div class="body">Placement on the frame.</div></div>
+
+    <div class="drawer motion" id="motion-drawer">
+      <h3>Motion <span class="badge">PROPOSED</span> <small>▾</small></h3>
+      <div class="body">
+        <div class="seg" id="mode">
+          <button data-v="none" class="on">None</button>
+          <button data-v="pop">Pop</button>
+          <button data-v="word-reveal">Word reveal</button>
+        </div>
+
+        <div class="row"><span>Duration per word</span><span id="dur-v">0.18 s</span></div>
+        <input type="range" id="dur" min="0.05" max="0.6" step="0.01" value="0.18">
+
+        <div class="row" id="scale-row"><span>Start scale (pop)</span><span id="scale-v">1.15</span></div>
+        <input type="range" id="scale" min="1" max="1.5" step="0.01" value="1.15">
+
+        <div class="row"><span>Timing error (simulated)</span><span id="err-v">0 ms</span></div>
+        <input type="range" id="err" min="0" max="500" step="10" value="0">
+
+        <div class="switch"><span>Highlight (karaoke colour)</span><input type="checkbox" id="hl" checked></div>
+        <div class="switch"><span>Raw shifts (ignore word order)</span><input type="checkbox" id="raw"></div>
+
+        <div class="note">Open question: should this drawer show for captions only, or for titles too?</div>
+        <pre id="toml"></pre>
+      </div>
+    </div>
+
+    <div class="drawer closed"><h3>Effects <small>▸</small></h3><div class="body">Preset stack (paid effect packages).</div></div>
+  </aside>
+</main>
+
+<script>
+  // Sample caption: words with start/end in seconds (mock values).
+  const WORDS = [
+    ["Halo", 0.20, 0.55], ["semua,", 0.60, 1.05], ["selamat", 1.15, 1.60], ["datang", 1.62, 2.05],
+    ["di", 2.10, 2.22], ["podcast", 2.25, 2.80], ["kami", 2.85, 3.15], ["hari", 3.30, 3.62],
+    ["ini.", 3.66, 4.10], ["Kita", 4.60, 4.90], ["bahas", 4.95, 5.35], ["timing.", 5.40, 5.90]
+  ];
+  const TOTAL = 6.0;
+
+  // Deterministic pseudo-random error per word, in [-1, 1].
+  // Symmetric pseudo-random value in [-1, 1]: some words early, some late.
+  const jitter = i => {
+    const f = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+    return (f - Math.floor(f)) * 2 - 1;
+  };
+
+  const state = { mode: "none", dur: 0.18, scale: 1.15, err: 0, hl: true, raw: false, t: 0, playing: false };
+
+  const caption = document.getElementById("caption");
+  const frame = document.getElementById("frame");
+  const els = WORDS.map(([text]) => {
+    const s = document.createElement("span");
+    s.className = "word";
+    s.textContent = text;
+    caption.appendChild(s);
+    return s;
+  });
+
+  // Shifted [start, end] for every word, in order.
+  // Whisper keeps words in order inside a segment, so by default a shifted
+  // word cannot start before the word before it (and ends before the next one
+  // starts). "Raw" turns that rule off, to show what breaks without it.
+  function computeTimes() {
+    const out = [];
+    const MIN = 0.02;
+    WORDS.forEach(([, s0, e0], i) => {
+      const shift = (state.err / 1000) * jitter(i);
+      let s = Math.max(0, s0 + shift);
+      let e = Math.max(s + MIN, e0 + shift);
+      if (!state.raw && i > 0) {
+        const prevEnd = out[i - 1][1];
+        s = Math.max(s, prevEnd);
+        e = Math.max(s + MIN, e);
+      }
+      out.push([s, e]);
+    });
+    return out;
+  }
+
+  function render() {
+    const T = computeTimes();
+    const t = state.t;
+    let activeIdx = -1;
+    WORDS.forEach((_, i) => {
+      const [s, e] = T[i];
+      const el = els[i];
+      const started = t >= s;
+      const finished = t > e;
+      if (started && !finished) activeIdx = i;
+
+      el.classList.toggle("active", started && !finished);
+      el.classList.toggle("hl", state.hl);
+
+      // Visibility per mode.
+      if (state.mode === "word-reveal") {
+        el.classList.toggle("hidden", !started);
+      } else {
+        el.classList.toggle("hidden", false);
+      }
+
+      // Scale per mode.
+      if (state.mode === "pop" && started) {
+        const k = Math.min(1, (t - s) / state.dur);
+        const ease = 1 - Math.pow(1 - k, 3);
+        const scale = state.scale + (1 - state.scale) * ease;
+        el.style.transform = `scale(${scale.toFixed(3)})`;
+        el.style.opacity = (0.2 + 0.8 * ease).toFixed(3);
+      } else if (state.mode === "pop") {
+        el.style.transform = "scale(1)";
+        el.style.opacity = "0";
+      } else if (state.mode === "word-reveal") {
+        // Inline opacity overrides the .hidden class, so set it here.
+        el.style.transform = "scale(1)";
+        el.style.opacity = started ? "1" : "0";
+      } else {
+        el.style.transform = "scale(1)";
+        el.style.opacity = "1";
+      }
+
+      // Highlight: only the active word gets the accent when highlight is on.
+      if (!state.hl) el.style.color = "";
+    });
+    els.forEach((el, i) => {
+      el.style.color = (state.hl && i === activeIdx) ? "var(--hl)" : "";
+    });
+
+    document.getElementById("time").textContent = `${t.toFixed(2)} / ${TOTAL.toFixed(2)} s`;
+    document.getElementById("scrub").value = t;
+    document.getElementById("scale-row").classList.toggle("hidden-row", state.mode !== "pop");
+    document.getElementById("scale").style.display = state.mode === "pop" ? "" : "none";
+    drawLane();
+    updateToml();
+  }
+
+  function drawLane() {
+    const T = computeTimes();
+    const lane = document.getElementById("lane");
+    const table = document.getElementById("table");
+    const pct = x => (x / TOTAL) * 100;
+    let html = `<div class="cur" style="left:${pct(state.t)}%;"></div>`;
+    let rows = "";
+    WORDS.forEach(([text, s0], i) => {
+      const [s1] = T[i];
+      const a = pct(s0), b = pct(s1);
+      html += `<div class="mark true" style="left:${a}%;"></div>`;
+      html += `<div class="mark shown" style="left:${b}%;"></div>`;
+      html += `<div class="link" style="left:${Math.min(a, b)}%; width:${Math.abs(b - a)}%;"></div>`;
+      rows += `<span>${text}: ${(s1 - s0 >= 0 ? "+" : "")}${Math.round((s1 - s0) * 1000)} ms</span> `;
+    });
+    lane.innerHTML = html;
+    table.innerHTML = state.err === 0 ? "No timing error: shown = spoken." : "Shift per word (shown minus spoken): " + rows;
+  }
+
+  function updateToml() {
+    const lines = ["[motion]", `mode = "${state.mode}"`, `duration = ${state.dur.toFixed(2)}`];
+    if (state.mode === "pop") lines.push(`scale_from = ${state.scale.toFixed(2)}`);
+    else lines.push(`# scale_from applies to pop only`);
+    lines.push(`# highlight stays in style.highlightColor (karaoke colour)`);
+    document.getElementById("toml").textContent = lines.join("\n");
+  }
+
+  // Playback loop.
+  let last = null;
+  function tick(now) {
+    if (state.playing) {
+      if (last !== null) state.t += (now - last) / 1000;
+      if (state.t >= TOTAL) { state.t = TOTAL; state.playing = false; document.getElementById("play").textContent = "▶ Play"; }
+      render();
+    }
+    last = now;
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  document.getElementById("play").onclick = () => {
+    if (state.t >= TOTAL) state.t = 0;
+    state.playing = !state.playing;
+    last = null;
+    document.getElementById("play").textContent = state.playing ? "❚❚ Pause" : "▶ Play";
+  };
+  document.getElementById("reset").onclick = () => { state.t = 0; state.playing = false; document.getElementById("play").textContent = "▶ Play"; render(); };
+  document.getElementById("scrub").oninput = e => { state.t = parseFloat(e.target.value); render(); };
+
+  document.querySelectorAll("#mode button").forEach(b => b.onclick = () => {
+    document.querySelectorAll("#mode button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    state.mode = b.dataset.v;
+    render();
+  });
+  document.getElementById("dur").oninput = e => { state.dur = parseFloat(e.target.value); document.getElementById("dur-v").textContent = state.dur.toFixed(2) + " s"; render(); };
+  document.getElementById("scale").oninput = e => { state.scale = parseFloat(e.target.value); document.getElementById("scale-v").textContent = state.scale.toFixed(2); render(); };
+  document.getElementById("err").oninput = e => { state.err = parseFloat(e.target.value); document.getElementById("err-v").textContent = state.err + " ms"; render(); };
+  document.getElementById("hl").onchange = e => { state.hl = e.target.checked; render(); };
+  document.getElementById("raw").onchange = e => { state.raw = e.target.checked; render(); };
+
+  // Accordion for the other drawers (Motion stays open).
+  document.querySelectorAll(".drawer h3").forEach(h => h.onclick = () => h.parentElement.classList.toggle("closed"));
+
+  render();
+</script>
+</body>
+</html>
