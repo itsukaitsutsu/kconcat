@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 
-//! Where a clip may go: no clip ever covers another on its lane.
+//! Where a clip may go: ordinary clips never cover another on their lane.
 //!
-//! Lanes exist so two pieces of media never share a span of one lane. A
-//! clip can sit beside another, between two, or anywhere a lane is empty;
-//! it never lands on top of one. Every command that places, moves or
-//! lengthens a clip asks these, and so does the window's drag, so what the
-//! drag shows is what the drop does.
+//! Lanes exist so ordinary pieces of media never share a span. Captions are
+//! deliberately different: two caption clips may overlap on one caption lane,
+//! which preserves imported overlapping subtitle cues and lets an editor stack
+//! captions intentionally. A caption still cannot cover an ordinary title,
+//! picture, sound, shape, or layer on that lane.
 
 use std::collections::HashSet;
 
@@ -35,6 +35,25 @@ impl Timeline {
         })
     }
 
+    /// Whether a *caption* at `[start, start + duration)` may land on
+    /// `track_id`. Captions may cover other captions, but never an ordinary
+    /// clip on the same lane.
+    pub fn is_caption_free(
+        &self,
+        track_id: &str,
+        start: f64,
+        duration: f64,
+        ignore: &[&str],
+    ) -> bool {
+        let end = start + duration;
+        !self.clips.iter().any(|clip| {
+            clip.track_id == track_id
+                && !ignore.contains(&clip.id.as_str())
+                && !clip.is_caption()
+                && covers(start, end, clip.start, clip.start + clip.duration)
+        })
+    }
+
     /// The start nearest `start` where `duration` fits on `track_id`
     /// without covering anything but `ignore`: `start` itself when it is
     /// clear, otherwise the closest gap before or after, never before zero.
@@ -46,13 +65,39 @@ impl Timeline {
         duration: f64,
         ignore: &[&str],
     ) -> f64 {
+        self.nearest_start_where(track_id, start, duration, |at| {
+            self.is_free(track_id, at, duration, ignore)
+        })
+    }
+
+    /// The start nearest `start` where a caption fits: it can land over
+    /// another caption, but not over an ordinary clip. This is intentionally
+    /// separate from [`Self::nearest_free_start`] so titles retain the usual
+    /// no-overlap placement rule.
+    pub fn nearest_caption_start(
+        &self,
+        track_id: &str,
+        start: f64,
+        duration: f64,
+        ignore: &[&str],
+    ) -> f64 {
+        self.nearest_start_where(track_id, start, duration, |at| {
+            self.is_caption_free(track_id, at, duration, ignore)
+        })
+    }
+
+    /// Shared candidate search behind ordinary and caption placement. Every
+    /// place a blocked range can begin or end is considered, so the returned
+    /// legal point is the closest one to `start`.
+    fn nearest_start_where(
+        &self,
+        track_id: &str,
+        start: f64,
+        duration: f64,
+        is_free: impl Fn(f64) -> bool,
+    ) -> f64 {
         let start = start.max(0.0);
-        let others = self
-            .clips
-            .iter()
-            .filter(|clip| clip.track_id == track_id && !ignore.contains(&clip.id.as_str()));
-        // Every place a gap can begin: the wanted start, the lane's start,
-        // just after a clip, or just before one.
+        let others = self.clips.iter().filter(|clip| clip.track_id == track_id);
         let mut candidates = vec![start, 0.0];
         for clip in others {
             candidates.push(clip.start + clip.duration);
@@ -60,19 +105,21 @@ impl Timeline {
         }
         candidates
             .into_iter()
-            .filter(|&at| at >= 0.0 && self.is_free(track_id, at, duration, ignore))
+            .filter(|&at| at >= 0.0 && is_free(at))
             .min_by(|a, b| (a - start).abs().total_cmp(&(b - start).abs()))
             .unwrap_or(start)
     }
 
     /// `moves` as they may land: every clip shifted in time by the one
-    /// amount nearest zero that leaves none of them covering a clip that
-    /// stays put, so a group keeps its shape and lands in the nearest gap
-    /// that holds all of it. An unknown clip is dropped, and an unknown
-    /// track leaves its clip on the lane it is on. None when the moved
-    /// clips would cover each other, which no shift in time can fix.
+    /// amount nearest zero that leaves none of them covering an ordinary
+    /// clip that stays put, so a group keeps its shape and lands in the
+    /// nearest gap that holds all of it. Caption pairs are the deliberate
+    /// exception: they may overlap on a caption lane. An unknown clip is
+    /// dropped, and an unknown track leaves its clip on the lane it is on.
+    /// None when two ordinary clips in the moved group would cover each
+    /// other, which no shared shift can fix.
     pub fn resolve_moves(&self, moves: &[ClipMove]) -> Option<Vec<ClipMove>> {
-        let wanted: Vec<(ClipMove, f64)> = moves
+        let wanted: Vec<(ClipMove, f64, bool)> = moves
             .iter()
             .filter_map(|wanted| {
                 let clip = self.clip(&wanted.clip_id)?;
@@ -88,23 +135,25 @@ impl Timeline {
                         track_id,
                     },
                     clip.duration,
+                    clip.is_caption(),
                 ))
             })
             .collect();
         if wanted.is_empty() {
             return Some(Vec::new());
         }
-        for (i, (a, a_len)) in wanted.iter().enumerate() {
-            for (b, b_len) in &wanted[i + 1..] {
+        for (i, (a, a_len, a_caption)) in wanted.iter().enumerate() {
+            for (b, b_len, b_caption) in &wanted[i + 1..] {
                 if a.track_id == b.track_id
                     && covers(a.start, a.start + a_len, b.start, b.start + b_len)
+                    && !(*a_caption && *b_caption)
                 {
                     return None;
                 }
             }
         }
 
-        let moving: HashSet<&str> = wanted.iter().map(|(m, _)| m.clip_id.as_str()).collect();
+        let moving: HashSet<&str> = wanted.iter().map(|(m, _, _)| m.clip_id.as_str()).collect();
         let staying: Vec<_> = self
             .clips
             .iter()
@@ -112,14 +161,15 @@ impl Timeline {
             .collect();
         let earliest = wanted
             .iter()
-            .map(|(m, _)| m.start)
+            .map(|(m, _, _)| m.start)
             .fold(f64::INFINITY, f64::min);
         let fits = |shift: f64| {
             earliest + shift >= -TOUCH
-                && wanted.iter().all(|(m, len)| {
+                && wanted.iter().all(|(m, len, caption)| {
                     let start = m.start + shift;
                     !staying.iter().any(|clip| {
                         clip.track_id == m.track_id
+                            && !(*caption && clip.is_caption())
                             && covers(start, start + len, clip.start, clip.start + clip.duration)
                     })
                 })
@@ -127,7 +177,7 @@ impl Timeline {
         // Every shift that butts one moved clip against one that stays,
         // either side, plus none and the one that lands the group at zero.
         let mut shifts = vec![0.0, -earliest];
-        for (m, len) in &wanted {
+        for (m, len, _) in &wanted {
             for clip in staying.iter().filter(|clip| clip.track_id == m.track_id) {
                 shifts.push(clip.start + clip.duration - m.start);
                 shifts.push(clip.start - len - m.start);
@@ -140,7 +190,7 @@ impl Timeline {
         Some(
             wanted
                 .into_iter()
-                .map(|(m, _)| ClipMove {
+                .map(|(m, _, _)| ClipMove {
                     start: (m.start + shift).max(0.0),
                     ..m
                 })

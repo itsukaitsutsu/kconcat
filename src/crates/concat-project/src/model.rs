@@ -1502,6 +1502,13 @@ impl Clip {
         }
     }
 
+    /// Whether this text clip is a generated or imported caption rather
+    /// than a hand-made title or lower third. Captions may share a track
+    /// and overlap in time; ordinary clips keep the normal no-overlap rule.
+    pub fn is_caption(&self) -> bool {
+        self.kind == ClipKind::Text && (self.caption_of.is_some() || self.words.is_some())
+    }
+
     /// Pulls every number back into the range a command would have held
     /// it to: the floors and ceilings in [`ranges`], the rotation wrapped,
     /// non-finite values replaced by their neutral, the crop and the cutout

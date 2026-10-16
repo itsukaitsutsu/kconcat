@@ -146,16 +146,13 @@ impl ImportCaptionsPane {
                         if has_existing_text || top_track_busy {
                             commands.push(Command::AddTrack { bottom: false });
                         }
-                        for (idx, cue) in placed.iter().enumerate() {
-                            let next_start = placed
-                                .get(idx + 1)
-                                .map(|next| next.start)
-                                .unwrap_or(f64::INFINITY);
-                            let duration = if next_start > cue.start + 0.05 {
-                                cue.duration.min(next_start - cue.start).max(0.05)
-                            } else {
-                                cue.duration.max(0.05)
-                            };
+                        for cue in &placed {
+                            // SRT/VTT permits simultaneous cues (for example,
+                            // speaker labels and a translation). Keep each
+                            // source duration exactly: caption lanes allow
+                            // caption-on-caption overlap, so there is no need
+                            // to shorten this cue to the next one's start.
+                            let duration = cue.duration.max(0.05);
                             let words = concat_project::captionmap::estimate_words(
                                 &cue.text,
                                 cue.start,

@@ -1067,20 +1067,13 @@ impl CaptionsPane {
             .collect();
         let caption_commands: Vec<Command> = valid_drafts
             .iter()
-            .enumerate()
-            .map(|(idx, cue)| {
-                let next_start = valid_drafts
-                    .get(idx + 1)
-                    .map(|next| next.start)
-                    .unwrap_or(f64::INFINITY);
-                let end = if next_start > cue.start + 0.05 {
-                    cue.end.min(next_start)
-                } else {
-                    cue.end
-                };
-                let duration = (end - cue.start).max(0.05);
+            .map(|cue| {
+                // Preserve concurrent draft cues rather than cutting one at
+                // the next cue's start. They can occupy the same caption
+                // track and remain separately editable on the timeline.
+                let duration = (cue.end - cue.start).max(0.05);
                 let words = if cue.edited {
-                    concat_project::captionmap::estimate_words(&cue.text, cue.start, end)
+                    concat_project::captionmap::estimate_words(&cue.text, cue.start, cue.end)
                 } else {
                     cue.words.clone()
                 };

@@ -986,18 +986,12 @@ impl SectionsPane {
             .collect();
         let row_commands: Vec<Command> = kept_rows
             .iter()
-            .enumerate()
-            .map(|(idx, row)| {
+            .map(|row| {
                 let start = row.timeline_start;
-                let next_start = kept_rows
-                    .get(idx + 1)
-                    .map(|next| next.timeline_start)
-                    .unwrap_or(f64::INFINITY);
-                let end = if next_start > start + 0.05 {
-                    row.timeline_end.min(next_start)
-                } else {
-                    row.timeline_end
-                };
+                // Caption sections are allowed to overlap. Preserve their
+                // complete ranges rather than cutting this row at the next
+                // caption row's start.
+                let end = row.timeline_end;
                 let text = row.section.text.trim().to_owned();
                 let words = concat_project::captionmap::estimate_words(&text, start, end);
                 crate::panes::captions::caption_clip_on_track(
@@ -1028,22 +1022,18 @@ impl SectionsPane {
             .collect();
         valid_ext
             .iter()
-            .enumerate()
-            .filter_map(|(idx, cue)| {
+            .filter_map(|cue| {
                 let c_start = cue.start.max(src_start);
                 let c_end = cue.end.min(src_end);
                 if c_end <= c_start {
                     return None;
                 }
                 let tl_start = clip.start + (c_start - src_start) / speed;
-                let mut tl_end = clip.start + (c_end - src_start) / speed;
-                if let Some(next_cue) = valid_ext.get(idx + 1) {
-                    let next_tl_start =
-                        clip.start + (next_cue.start.max(src_start) - src_start) / speed;
-                    if next_tl_start > tl_start + 0.05 {
-                        tl_end = tl_end.min(next_tl_start);
-                    }
-                }
+                // Keep an external SRT/VTT cue's full clipped range. Files
+                // can contain concurrent lines, and captions now coexist on
+                // the same caption track instead of forcing one to end when
+                // another begins.
+                let tl_end = clip.start + (c_end - src_start) / speed;
                 let text = cue.text.trim().to_owned();
                 let words = concat_project::captionmap::estimate_words(&text, tl_start, tl_end);
                 Some(crate::panes::captions::caption_clip_on_track(

@@ -79,6 +79,10 @@ pub(super) fn apply(
             let duration = duration
                 .unwrap_or(DEFAULT_TEXT_DURATION)
                 .max(MIN_CLIP_DURATION);
+            // Generated/imported captions may overlap one another on one
+            // caption lane. Hand-made text remains an ordinary title, which
+            // keeps the timeline's usual no-overlap placement behaviour.
+            let is_caption = caption_of.is_some() || words.is_some();
             let timeline = project.active_mut();
             let track_id = match track_id {
                 Some(ref id) if id == "__top__" => timeline
@@ -88,6 +92,14 @@ pub(super) fn apply(
                     .unwrap_or_else(|| fresh_track(timeline, mint)),
                 Some(id) if timeline.track(&id).is_some() => id,
                 Some(_) => return Err(CommandError::TrackGone),
+                // Captions choose the first overlay lane without an ordinary
+                // clip over this span, so an overlapping imported cue remains
+                // on the same subtitle lane rather than being shifted or
+                // forced onto a fresh track.
+                None if is_caption && above => first_caption_track_above(timeline, start, duration)
+                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                None if is_caption => first_caption_track(timeline, start, duration)
+                    .unwrap_or_else(|| fresh_track(timeline, mint)),
                 // Every lane above the video is taken: a new one at the top
                 // for the words to land on.
                 None if above => first_free_track_above(timeline, start, duration)
@@ -95,7 +107,11 @@ pub(super) fn apply(
                 None => first_free_track(timeline, start, duration)
                     .unwrap_or_else(|| fresh_track(timeline, mint)),
             };
-            let start = timeline.nearest_free_start(&track_id, start, duration, &[]);
+            let start = if is_caption {
+                timeline.nearest_caption_start(&track_id, start, duration, &[])
+            } else {
+                timeline.nearest_free_start(&track_id, start, duration, &[])
+            };
             let id = mint.next("c");
             let mut clip = Clip::blank(
                 id.clone(),
@@ -194,9 +210,10 @@ pub(super) fn apply(
 
         Command::MoveClips { moves } => {
             let timeline = project.active_mut();
-            // Onto another clip is never where a move lands: the group goes
-            // to the nearest gap that holds it, and a move whose own clips
-            // would cover each other stays where it was.
+            // An ordinary clip goes to the nearest gap that holds it. Two
+            // captions are the intentional exception: they can land on top
+            // of one another on a caption lane, as overlapping subtitle cues
+            // are valid and must retain their original timings.
             let Some(moves) = timeline.resolve_moves(&moves) else {
                 return Ok(Outcome::default());
             };
@@ -1227,6 +1244,17 @@ fn first_free_track(timeline: &Timeline, start: f64, duration: f64) -> Option<St
         .map(|track| track.id.clone())
 }
 
+/// A caption may share a span with another caption, but not an ordinary
+/// clip. This is the lower-lane counterpart to
+/// [`first_caption_track_above`].
+fn first_caption_track(timeline: &Timeline, start: f64, duration: f64) -> Option<String> {
+    timeline
+        .tracks
+        .iter()
+        .find(|track| timeline.is_caption_free(&track.id, start, duration, &[]))
+        .map(|track| track.id.clone())
+}
+
 /// A new, empty lane at the top, for a clip with nowhere else to go.
 fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
     let id = mint.next("t");
@@ -1237,6 +1265,34 @@ fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
         extra: Default::default(),
     });
     id
+}
+
+/// First lane above all ordinary clips over `[start, start + duration)` that
+/// a caption may use. Existing captions on that lane are allowed to overlap,
+/// preserving the timing of cues that overlap in an imported subtitle file.
+fn first_caption_track_above(timeline: &Timeline, start: f64, duration: f64) -> Option<String> {
+    let end = start + duration;
+    let floor = timeline
+        .tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, track)| {
+            timeline.clips.iter().any(|clip| {
+                clip.track_id == track.id
+                    && !clip.is_caption()
+                    && clip.start < end
+                    && start < clip.start + clip.duration
+            })
+        })
+        .map(|(row, _)| row + 1)
+        .max()
+        .unwrap_or(0);
+    timeline
+        .tracks
+        .iter()
+        .skip(floor)
+        .find(|track| timeline.is_caption_free(&track.id, start, duration, &[]))
+        .map(|track| track.id.clone())
 }
 
 /// First free lane *above* the highest one occupied over `[start, start +

@@ -5469,4 +5469,91 @@ mod tests {
         );
         assert_eq!(editor.project().active().captions_of(&clip_id).len(), 3);
     }
+
+    #[test]
+    fn captions_can_overlap_on_one_track_without_allowing_titles_to_cover_them() {
+        let (mut editor, _, source) = fixture();
+        let add_caption = |editor: &mut Editor, start, duration| {
+            editor
+                .apply(Command::AddTextClip {
+                    track_id: None,
+                    above: true,
+                    start,
+                    style: Some(TextStyle {
+                        content: "Caption".to_owned(),
+                        ..TextStyle::default()
+                    }),
+                    duration: Some(duration),
+                    offset_y: None,
+                    caption_of: Some(source.clone()),
+                    words: None,
+                })
+                .expect("adds caption")
+                .created_id
+                .expect("caption id")
+        };
+
+        let first = add_caption(&mut editor, 0.0, 4.0);
+        let second = add_caption(&mut editor, 1.0, 4.0);
+        let timeline = editor.project().active();
+        let caption_track = timeline
+            .clip(&first)
+            .expect("first caption")
+            .track_id
+            .clone();
+        assert_eq!(
+            timeline.clip(&second).expect("second caption").track_id,
+            caption_track,
+            "an imported overlapping cue remains on the existing caption track"
+        );
+        assert!(
+            (timeline.clip(&second).expect("second caption").start - 1.0).abs() < 1e-6,
+            "caption placement preserves its requested overlap rather than shifting it"
+        );
+
+        editor
+            .apply(Command::MoveClips {
+                moves: vec![ClipMove {
+                    clip_id: first.clone(),
+                    start: 2.0,
+                    track_id: caption_track.clone(),
+                }],
+            })
+            .expect("moves caption over another caption");
+        assert!(
+            (editor
+                .project()
+                .active()
+                .clip(&first)
+                .expect("moved caption")
+                .start
+                - 2.0)
+                .abs()
+                < 1e-6,
+            "a dragged caption may overlap another caption on its track"
+        );
+
+        let title = editor
+            .apply(Command::AddTextClip {
+                track_id: Some(caption_track.clone()),
+                above: true,
+                start: 2.0,
+                style: Some(TextStyle {
+                    content: "Title".to_owned(),
+                    ..TextStyle::default()
+                }),
+                duration: Some(1.0),
+                offset_y: None,
+                caption_of: None,
+                words: None,
+            })
+            .expect("adds title")
+            .created_id
+            .expect("title id");
+        let title_start = editor.project().active().clip(&title).expect("title").start;
+        assert!(
+            (title_start - 2.0).abs() > 1e-6,
+            "an ordinary title still cannot cover captions on that lane"
+        );
+    }
 }
