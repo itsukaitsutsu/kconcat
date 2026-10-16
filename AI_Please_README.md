@@ -1,187 +1,96 @@
-# kconcat checkpoint — 16 October 2026
+# kconcat checkpoint — 16 October 2026 (v2)
 
-Session type: **discussion and analysis only.** No application code was changed.
-One helper script was written (`06-corpus/srt_report.py`); nothing in the repo
-was touched.
+**Session type: discussion and analysis only.** No application code was changed, and nothing in the repo was modified. This checkpoint and the two files it points to were written to the owner's workspace, not pushed to the repo.
 
-> **File naming:** this file is `AI_Please_README.md` on purpose — an agent
-> session should find and open it first. Use the same name for every future
-> checkpoint.
+> **File naming:** this file is `AI_Please_README.md` on purpose. An agent session should find and open it first. Use the same name for every future checkpoint.
 
 ---
 
-## Where the discussion stands (frozen 16 Oct 2026)
+## 1. Where the discussion stands
 
-- **Option B — the feature list** (what kconcat has vs CapCut, item by item):
-  **recorded in full** — `05-background/kconcat-feature-gap.md`, section "Option B
-  — your 15-item list, verified item by item". Each row carries its evidence and
-  its plan home; the ordered build list is that document's §6.
-- **Option C — caption styles end to end** (offered when this checkpoint was
-  frozen; not started): map exactly what stands between what the engine already
-  does — a per-word reveal the shader reads from a baked map
-  (`concat-core/src/shader.rs:222–234`, bound `:60–64`; baked per title in
-  `concat-host/src/titles.rs:795`) with the karaoke highlight overlay built on
-  top (`concat-host/src/titles.rs:390–402`), plus 32 TOML presets in
-  `crates/concat/text-presets/` (language-tagged, user-loadable,
-  `crates/concat/src/presets.rs:12–13`) — and CapCut-style one-click caption
-  styles.
-- **Option D — something else entirely.** Open.
-- **#15 "Tuning ASR Indonesia"** — answered with five sub-points (15a WER first ·
-  15b model bake-off · 15c prompt biasing already ships · 15d VAD/params · 15e self
-  fine-tune = optional, last). Its plan home — a Track-1 **T8**, plus a **WER
-  output on T1** — is proposed and still **waiting for the owner's yes/no**.
+- **Option B (the feature list vs CapCut Pro):** re-checked and fixed in `05-background/kconcat-feature-gap-option-b-v2.md`. It is ranked for **long-form podcast editing** with **short-clip output**.
+- **Option C (caption styles end to end):** partly superseded. Caption motion is confirmed absent, so C5 needs a schema decision before any preset is written.
+- **Option D:** open.
+- **#15 "Tuning ASR Indonesia":** still awaiting the owner's yes/no for the proposed Track-1 T8 and a WER output on T1.
 
 ---
 
-## Repo state at this checkpoint
+## 2. Owner context (this session)
+
+- Main use: **long-form podcasts** (60+ minutes), cut into short clips.
+- Reference style: **prof.zulys**-style captions, edited in **CapCut Pro**.
+- Goal: get **closer to CapCut Pro**. Being behind is accepted; closing the gap is the aim.
+- **Lower priority now:** B-roll and multi-clip (reported to exist, untested). Caption animation (reported to exist, not verified in the repo).
+
+---
+
+## 3. Repo state (as of this checkpoint)
 
 | | |
 |---|---|
 | Repository | `itsukaitsutsu/kconcat` |
-| HEAD | `1aece2d` ("plan to get closer", 16 Oct 2026 07:11 +0700) |
-| Verified in sandbox | `cargo test -p concat-project` → **252 passed, 0 failed** |
-| Verified | `cargo clippy -p concat-project --all-targets -- -D warnings` → clean |
-| Verified | `cargo fmt -p concat-project -- --check` → clean |
-| **Not verified** | every crate linking FFmpeg (`concat-media`, `concat-render`, `concat-export`, `concat-host`, the `concat` GUI) — no FFmpeg dev libraries in the sandbox |
+| `main` latest commit | `f047c91` ("please read") — docs under `01-rules/` through `06-corpus/` |
+| App source (`src/`) latest commit | `1aece2d` ("plan to get closer") |
+| Verified in sandbox | `cargo test -p concat-project` → 252 passed, 0 failed (from the earlier checkpoint) |
+| Not verified | every crate linking FFmpeg (`concat-media`, `concat-render`, `concat-export`, `concat-host`, the GUI) |
+
+**Path correction:** all code paths in the docs are relative to `src/`. Example: `src/crates/concat/ui/dialogs/captions.slint`.
 
 ---
 
-## What was decided this session
+## 4. Decisions made this session
 
-1. **Language: English** in chat and in every repo file. Indonesian only when
-   explicitly requested for one explanation.
-2. **Personal tool, not a public project.** No repo hygiene, CI, README, release
-   or licensing strategy advice. Working on your own schedule; this thread is for
-   discussion and depth.
-3. **Scope: simple tasks only** — captions, silence trim, captions-follow-the-cut,
-   export. Not Premiere/Resolve territory.
-4. **Local AI only.** Offline is the entire point; cloud AI is out.
-5. **Files stay separate, not merged.** Discussion material must not be handed to
-   a coding agent — it dilutes attention. See `01-rules/working-agreements.md`
-   for the "which file for what" table.
-6. **One fact lives in one file**; other files link, they do not repeat.
-7. **The test corpus is the existing 5-minute video**, not a new recording —
-   cached once so tuning costs seconds, measured with label-free metrics first.
+1. **Language:** English in chat and in every repo file.
+2. **Personal tool, not a public project.** No repo hygiene, CI, README, release or licensing advice.
+3. **Scope:** simple tasks — captions, silence trim, captions-follow-the-cut, export, plus long-form podcast editing and short-clip output.
+4. **Local AI only.** Cloud AI is out.
+5. **Discussion material stays out of coding sessions.** The `05-background/` folder is the owner's reasoning trail.
+6. **One fact lives in one file.** Other files link to it.
+7. **The test corpus is the existing 5-minute video.** Podcast tests will extend it to a full episode.
+8. **Priority for long-form:** word timing → transcript editing → loudness and platform presets → caption presets and karaoke → ducking → batch export → speaker labels → auto-reframe. B-roll and animation move down until verified.
 
 ---
 
-## What was found
+## 5. What was found (carried forward)
 
-**One confirmed bug**, reproduced with three tests
-(`04-findings/caption-identity-bug.patch`):
+**Confirmed bug (reproduced with three tests, `04-findings/caption-identity-bug.patch`):** a caption from an imported `.srt`/`.vtt` loses its identity when a trim removes every word inside it. The clip stops being a caption. With "Burn captions" off, it can still be burned in. Identity is derived, not stored, and the check is duplicated in six places across three crates.
 
-A caption created from an imported `.srt`/`.vtt` carries no `caption_of` link —
-its identity rests on word timings alone. When a trim keeps the cue but removes
-every word inside it, `commands/clips.rs:883` clears `words` to `None`, and the
-clip silently stops being a caption.
+**Suspected defect (reasoned from code, not tested):** an inline text edit in Sections rewrites `style.content` and leaves `clip.words` stale. The karaoke highlight then drops those words.
 
-Consequences, in order of severity:
+**Confirmed absent (16 Oct, this session):**
+- Caption motion. None of the 32 presets set it, and the caption dialog has no control for it.
+- Caption highlight in any preset (`highlight_color` is unset in all 32).
+- Case transform in the text style.
+- Platform export presets; loudness is applied only before transcription.
+- Speaker labels, auto-ducking, screen and webcam recording, vocal isolation, auto-reframe.
 
-1. **Export, worst case** — `is_caption_clip` (`export.rs:835`) no longer
-   recognises it, so with **"Burn captions" switched OFF the caption is still
-   burned into the video** (`export.rs:643`). The opposite of the setting.
-2. **Placement** — it loses the caption↔caption overlap allowance and starts
-   blocking caption lanes (`clips.rs:1282`).
-3. **Sections panel** — measured **1 caption section before the trim → 0 after**
-   (`sectionlist.rs:189`), so a later "Remove selected" no longer knows a
-   caption sits there.
-4. **Bulk caption edits** skip it (`studio.rs:3532`).
-
-**Root cause:** identity is *derived*, not stored, and the same predicate is
-duplicated in **six places across three crates**.
-
-**Verified as working** (tested, not assumed): a caption entirely inside a
-removed region is deleted cleanly with no orphan, and a cut through the middle of
-a caption splits it into two pieces that each keep their own words and text. A
-ghost also still follows a second trim correctly — it does not drift.
+**Confirmed present:** word chunking (four layout modes, Re-split), waveform drawing, Whisper translate-to-English, SRT/VTT import and export, captions that follow cuts, the 123 effect packages, the API and CLI.
 
 ---
 
-**Second pass, later the same day.** Five of my own "missing feature" claims
-turned out to be wrong — word chunking (four Auto-caption layout modes + a
-Re-split button), the preset library, per-track "apply to all", split/merge at
-the playhead and the karaoke renderer all ship. Evidence:
-`05-background/kconcat-feature-gap.md` §Corrections. In exchange, one genuinely
-missing thing and one suspected defect came out of the same pass:
+## 6. Open items
 
-- **Missing:** Enter does not split a caption at the caret into a new cue
-  (CapCut and VTS do). Build plan, with what already exists to build on:
-  `02-map/kconcat-roadmap.md` §E4.
-- **Suspected defect — reasoned from the code, not tested:** an inline text edit
-  in Sections writes `style.content` and leaves `clip.words` stale
-  (`concat/src/panes/sections.rs:680`), so `locate_words` can no longer find
-  those words and the karaoke highlight drops them.
-- **Third pass, same day — every remaining ❌/🟡 in the feature list re-checked
-  against `1aece2d`.** Two more rows were wrong: the timeline **does** draw
-  waveforms (`ui/primitives/wave.slint`), and Auto-caption **does** ship
-  Whisper's *translate to English*. Three rows were made exact (microphone-only
-  recording, `loudnorm` before transcription only, API jobs ≠ export queue).
-  Verified genuinely absent: stabilisation, auto-ducking, vocal isolation, beat
-  sync, filler removal, diarisation, auto-reframe, platform export presets.
+- **T1 metric runner** — the prerequisite for measuring word-timing work. Still not started. This is the first code task when coding resumes.
+- **Motion schema decision** (roadmap C5 blocker) — three options: a `[motion]` block in `preset.toml`, inspector-only, or an effect package.
+- **Caption pipeline map** — transcription → `captionmap` → placement → reveal → render → export, with file:line per hop.
+- **#15 decision** — add Track-1 T8 and the WER output on T1, or not.
+- **Verify** B-roll / multi-clip and caption animation in the running app.
+- **Podcast episode test** — a full-length episode in the corpus, for P5.
 
 ---
 
-## What is still open
-
-- **Tier 1 metric runner** — the one roadmap item usable without touching app
-  code, and the prerequisite for measuring word-timing work at all.
-  `06-corpus/srt_report.py` is a start but needs the audio and word timings.
-- **`whisper-cache.json` + `audio-16k.f32`** — not yet produced for the corpus.
-- **No baseline numbers yet**, because nothing has been measured.
-- **Motion schema decision** (C5 blocker) — where caption motion lives: preset
-  `.toml` block, inspector-only, or an effect package. Must be decided before
-  preset files are written, because it changes their shape.
-- **Caption pipeline map** — transcription → `captionmap` → placement → reveal →
-  render → export, with a `file:line` per hop.
-- **Decision on #15** — whether to add the proposed Track-1 "T8" and the WER
-  output on T1 (see the option list near the top).
-
----
-
-## How to use this checkpoint in a coding session
-
-Feed the agent **only** what the task needs:
-
-| Task | Hand over |
-|---|---|
-| Any coding session | `01-rules/AGENTS.md` |
-| Whole picture | `02-map/kconcat-roadmap.md` |
-| Word timing (T2/T3) | `01-rules/AGENTS.md` + `03-manuals/A-word-timing-level1.md` |
-| Caption display (C1–C5) | `01-rules/AGENTS.md` + `03-manuals/B-caption-styles.md` |
-| The identity bug (T5) | `01-rules/AGENTS.md` + `04-findings/caption-identity-bug.patch` |
-| Human decisions, tone, file layout | `01-rules/working-agreements.md` — keep it, do not paste it at an agent |
-| Continuing the *discussion* (no code) | the whole checkpoint — start with this file, then `05-background/kconcat-feature-gap.md` §Option B |
-
-**Do not** paste `05-background/` into a coding session. It is the reasoning
-trail and belongs to the owner.
-
----
-
-## Next action
-
-Start the execution session with the Tier 1 metric runner: decode the corpus
-audio once, cache the Whisper output once, then print onset plausibility,
-monotonicity violations, outliers and Δ versus baseline. Everything in Track 1 is
-unmeasurable until that exists.
-
-For a **discussion** session (no code), resume from the option list near the top
-of this file — Option C/D, or decide #15 → T8.
-
----
-
-## Folder map
+## 7. Files in this checkpoint
 
 ```
-AI_Please_README.md   → read this first
-01-rules/        AGENTS.md                    → goes in the repo root
-                 working-agreements.md        → for the owner, not for agents
-02-map/          kconcat-roadmap.md           → what, order, why, done-when
-03-manuals/      A-word-timing-level1.md      → how: word timing
-                 B-caption-styles.md          → how: caption display
-04-findings/     kconcat-audit-2026-10-16.md  → evidence, with file:line
-                 caption-identity-bug.patch   → 3 tests, git apply
-05-background/   reasoning trail: sync analysis, feature gap (the Option-B list), strategy,
-                 the three-way comparison with OpenCut and CapCut
-06-corpus/       user-video.srt               → the fixed test corpus
-                 srt_report.py                → cue-level structural report
+AI_Please_README.md                                  → this file (read first)
+02-map/kconcat-roadmap-addendum-2026-10-16.md        → addendum: Track 5 (long-form podcast), revised order
+05-background/kconcat-feature-gap-option-b-v2.md     → fixed Option B list, ranked for podcasts
 ```
+
+The original roadmap (`02-map/kconcat-roadmap.md`) and feature-gap doc (`05-background/kconcat-feature-gap.md`) stay as they are. Merge the addendum and v2 files in a separate step, after the owner has read them.
+
+---
+
+## 8. Next action
+
+No code work is queued. Discussion continues on the Option B list (owner to answer the questions in `kconcat-feature-gap-option-b-v2.md` §3), then the #15 yes/no.
