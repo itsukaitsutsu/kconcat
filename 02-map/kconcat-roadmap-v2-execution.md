@@ -1,8 +1,11 @@
 # kconcat roadmap v2 — execution spec (16 Oct 2026)
 
 *Supersedes `02-map/kconcat-roadmap.md` and `kconcat-roadmap-addendum-2026-10-16.md` once the owner approves. Written so an AI coding session can execute one task at a time from this file plus `AGENTS.md`.*
+**Owner approval (16 Oct 2026): roadmap v2 APPROVED WITH CONDITION.** Each task must support sync or the move closer to CapCut Pro, and each task names its parity item or measurement. Tasks that do not meet this are not built.
 
 **Scope:** a long episode (a 10–120 min talking-head, screen, or podcast recording) becomes captioned, silence-trimmed, styled 45–90 s vertical shorts, plus one clean full export. Offline. Personal tool.
+
+**Scope change (owner, 16 Oct 2026):** editing is not limited to podcasts. Music editing is in scope too (Track 6, below). Each task still names its CapCut Pro parity item or measurement.
 
 ---
 
@@ -20,18 +23,20 @@
 
 ---
 
+**Naming (clarified 16 Oct 2026):** Option B (`05-background/kconcat-feature-gap-option-b-v2.md`) has Tier A, B, C, and D only. There is no Tier E. Roadmap v2 uses Track 1–6 with task IDs: T (Track 1, word timing), C (Track 2, caption display), E (Track 3, editing, E1–E6), V (Track 4, finishing), P (Track 5, long-form podcast), K (Track 6, extra editing, K1–K5). Each roadmap task names its Option B row or measurement.
+
 ## 1. Decisions (owner must settle; default applies if the owner says nothing)
 
 | ID | Question | Default until owner decides | Blocks |
 |---|---|---|---|
-| **D1** | **CLOSED (owner confirmed 16 Oct 2026).** Timing reference is the **30 s** Whisper sync clip. The 60 s figures in upstream docs (`A-word-timing-level1.md` §7, `caption-sync-fix-plan.md` §2) are not used for T2 acceptance. | 30 s | — |
+| **D1** | **CLOSED (owner confirmed 16 Oct 2026).** Timing reference is the **30 s** Whisper sync clip. Where 30 s comes from: the owner chose this clip, and Whisper's native window is also 30 s (a model fact). It is not a figure taken from the upstream docs. The 60 s figures in upstream docs (`A-word-timing-level1.md` §7, `caption-sync-fix-plan.md` §2) are not used for T2 acceptance. | 30 s | — |
 | **D2** | **APPROVED WITH CONDITION (owner, 16 Oct 2026).** Add T8 (Indonesian ASR tuning) and a WER output on T1, but only where they serve the goal: getting closer to CapCut Pro. Fine-tuning is not approved. | T8 and WER **approved**, scoped as in §2 T8. Fine-tune **not approved** unless the T8 bake-off shows the best model still fails. | T8 |
 | **D3** | **SELECTED (owner, 16 Oct 2026): (a) `[motion]` block in `preset.toml`.** Schema not yet written. C2 preset files wait for the schema, because (a) changes their shape. | (a) | C5, C2 (preset files) |
 | **D4** | **SELECTED (owner, 16 Oct 2026): B: new pure crate `concat-timing` (no dependencies).** Holds the snapper (T2/T3) and the energy helpers `rms` and `linear_from_db`, moved from `concat-media/src/silence.rs` so there is one copy. `concat-speech` calls it after `refine_segments_with_vad`. `concat-media` depends on it for the helpers. | B | T2, T3 |
 | **D5** | **SELECTED (owner, 16 Oct 2026): B.** Split in two. (1) The Whisper cache (`whisper-cache.json`) is made once by an example binary in `concat-speech`, on the owner's machine (it needs Whisper and FFmpeg). (2) The metric runner (Tier 1 table, WER) is an example binary in `concat-timing`, which reads the cache and `audio-16k.f32` and runs in the sandbox, using the same energy code as the snapper. | B | T1, T8 |
 | **D6** | **SELECTED (owner, 16 Oct 2026): typed lanes.** Timeline lanes are V (video, caption, image) or A (audio). Today a lane is untyped (`model.rs` `Track`: 'Deliberately untyped: any media goes on any track'). This changes that design. Legacy tracks need a rule to get a type on load. | typed | E5, P3, C5 (caption placement) |
 | **D7** | **SELECTED (owner, 16 Oct 2026): one caption lane per speaker, linked to video and audio.** Each speaker's captions sit on their own caption lane (typed V, per D6). Captions, video, and that speaker's audio are linked (E5). Replaces the per-word colour idea. Overlap is shown by two lanes at once, not by one shared lane. | selected | E5, P3, T5 (caption identity changes: a caption follows its speaker's audio, not only the video) |
-| **D8** | **SELECTED (owner, 16 Oct 2026): lane numbers with video on top.** V1 = video. Caption lane of speaker 1 = V2, speaker 2 = V3. Audio lanes: speaker 1 = A1, speaker 2 = A2. Each speaker's caption lane follows that speaker's audio (D7). | selected | E5, D7, T5 |
+| **D8** | **SELECTED (owner, 16 Oct 2026): lane numbers with video on top.** V1 = video. Caption lane of speaker 1 = V2, speaker 2 = V3. Audio lanes: speaker 1 = A1, speaker 2 = A2. Each speaker's caption lane follows that speaker's audio (D7). Without speaker detection (one speaker), captions sit on V2, above the video on V1 (owner, 16 Oct 2026). | selected | E5, D7, T5 |
 
 ---
 
@@ -176,6 +181,8 @@ Applies to: trim, autotrim, playhead split, Enter-split (E4), re-split (C1), inl
 - **Plan status:** fixed in plan. **Code status:** two caption-like presets exist (`concat.bold-caption`, `concat.lower-third`); none sets `highlight_color`, position, or motion.
 - **Needs:** none for the presets that do not use motion.
 - **Change:** eight caption-shaped presets (data only, under `src/crates/concat/text-presets/`), tagged as a group so they are not mixed with title looks. Names and parameters: `03-manuals/B-caption-styles.md` §4.
+- **Decided (owner, 16 Oct 2026, A9):** no separate `kconcat.indonesian` variant. Caption size is a fraction of frame height (`TextStyle`: cap height, stroke, spacing), so the same preset fits any sequence size. Only size, not design, would change for Indonesian, and that is handled by the sequence frame. No HTML preview for A9.
+- **Decided (owner, 16 Oct 2026, A9):** all **eight presets ship** as selectable presets. The user picks one from the list; no per-setting tuning needed. Pop-bold and karaoke show their highlight only after C3. Preview (mock, not browser-verified): `05-background/caption-presets-preview.html`.
 - **Test first:** a preset with `highlight_color` round-trips through `preset.toml`.
 - **Done when:** applying one preset to a caption track gives a caption-shaped result without the inspector.
 
@@ -184,6 +191,7 @@ Applies to: trim, autotrim, playhead split, Enter-split (E4), re-split (C1), inl
 - **Needs:** C2, T2 (karaoke is only as good as the timings).
 - **Test first:** a karaoke preset produces one highlight per heard word (the existing renderer test `a_word_timed_caption_gets_one_highlight_per_heard_word` covers the renderer).
 - **Done when:** picking a karaoke preset works without the Advanced settings.
+- **Decided (owner, 16 Oct 2026, A10):** the highlight is a feature the user can switch on or off, for **all** presets. It is the existing highlight option (the same one the Motion drawer shows, not gated by `highlightable`), not a new feature. Presets with a highlight in the manual (pop-bold, karaoke, upper-tight) start with it on; the user can turn it off. Every other preset can turn it on. Confirmed by owner (16 Oct 2026, Tier C approved). Quality still depends on T2.
 
 ### C4. Uppercase / text transform
 - **Plan status:** fixed in plan. **Code status:** absent (`TextStyle` has no transform field; `to_uppercase` hits are UI labels only).
@@ -249,7 +257,16 @@ scale_from = 1.15   # pop only: starting scale of each word
 - **Plan status:** fixed in plan. **Code status:** not started. English-only in CapCut.
 - **Needs:** E1.
 - **List (starting):** eee, anu, kayak, gitu, apa ya, terus. Owner may add or remove words; record the final list in the manual.
-- **Done when:** a one-click pass removes them inside a selected caption run, and leaves them alone when they are meaningful. Test with at least one negative case.
+- **Decided (owner, 16 Oct 2026, A7):**
+  - **Filter, optional, labelled.** Filler words are grouped under labels (two tiers: a strong group, such as eee, anu, ehm; a weaker group, such as kayak, gitu, terus, apa ya). The user ticks which groups to apply. Nothing is removed unless ticked.
+  - **Where it lives:** in the remove-selection flow, as an option next to the existing "silent detected" option. Remove-selection already exists (A2); filler adds one more option there.
+  - **Video effect: follows the A2 checkbox** "Potong video saat kata dihapus". On: the video is cut and the gap closes (ripple). Off: only the text goes.
+  - **Exact grouping** of the two tiers is fixed in the manual (`03-manuals`), with the final word list.
+- **Left out and why:**
+  - Always cutting video: not chosen; it would break the A2 rule that the user controls the cut.
+  - Text only, always: not chosen; the user asked for the same behaviour as A2.
+  - One fixed list with no option: not chosen; owner wants the user to decide, because meaningful words such as "terus" can be lost.
+- **Done when:** a one-click pass removes the ticked groups inside a selected caption run, and leaves them alone when they are meaningful. Test with at least one negative case.
 
 ### E3. Waveform under the caption row + word-edge drag
 - **Plan status:** fixed in plan. **Code status:** the timeline waveform exists (`src/crates/concat/ui/primitives/wave.slint`). Caption-row waveform and word-edge drag do not.
@@ -259,10 +276,14 @@ scale_from = 1.15   # pop only: starting scale of each word
 ### E4. Enter splits a caption at the caret
 - **Plan status:** fixed in plan. **Code status:** not built. Enter is unwired: the caption row editor binds `edited` only (`src/crates/concat/ui/primitives/modal.slint` near lines 615 and 634; `Field` does not declare `accepted`). The handler `edit_row_text` (`sections.rs` near line 680) writes `style.content` and stops.
 - **Needs:** T7 (the single writer), T2 for the boundary to land on the right word. Without T2 it is no worse than the character-proportional estimate already in use.
+- **Decided (owner, 16 Oct 2026, A8):**
+  - **Where:** Enter works in **both** places: the caption text editor and the Sections pane.
+  - **Split time comes from the audio, not from the text.** The cut point is the audio boundary at the caret's word (the word start from the snapped audio timing, T2/T3). The owner rejected a split estimated from text length. No character-proportional split is used for the time.
+  - Not built: no fallback to text length. If no audio timing exists for the word, the split is refused with a message, not guessed.
 - **Approach:**
   - Forward `accepted(text, byte-offset)` from the field (or a caption-only variant).
   - Map the caret to the word it falls in.
-  - Split time = that word's start (real words) or the proportional estimate (no words).
+  - Split time = that word's start from the audio (T2/T3 snapped timing). No text-length estimate.
   - One `Batch` of `UpdateClip` (head: shortened text and duration, words before the caret) plus `AddTextClip` (tail: remaining text, words from the caret). One undo step.
   - Existing pieces: caret readable via `cursor-position-byte-offset`, precedent at `src/crates/concat/ui/dialogs/speech.slint` near line 364; time split `Command::SplitClips` (`commands/mod.rs` near line 513) for the time axis only; the trim-path text rule (`commands/clips.rs` near lines 840–885).
 - **Tests first:** Enter mid-caption gives two rows with the right text and boundary; one undo restores; the karaoke highlight of both halves lands on the spoken words.
@@ -282,7 +303,7 @@ scale_from = 1.15   # pop only: starting scale of each word
   - **Captions** (D7): each speaker's caption lane is linked to the video and to that speaker's audio. Moving the group moves its captions. Today captions follow the video clip (`captions_of`, `captionmap::remap`); with D7 they also follow the speaker's audio.
   - **Remove** the Detach and Reattach menu items. Their replacement is Link / Unlink only.
 - **Lane typing (D6, typed):** a legacy untyped track needs a type on load. Rule to decide in the diff: type it by the clips on it; a track with both video and audio is split or flagged. Test with an old-project fixture.
-- **Import default (E5-b, decided by owner, 16 Oct 2026): yes.** Each imported video becomes two linked clips: video on V1, its audio on A1. The owner's words ("every video on the video line, audio on the audio line") read as: import always creates two linked clips. Confirm before coding.
+- **Import default (E5-b, decided by owner, 16 Oct 2026): yes.** Each imported video becomes two linked clips: video on V1, its audio on A1. **Confirmed by owner (16 Oct 2026):** migrate from the combined model (video and audio in one clip) to the Premiere model (video and audio separate, but linked). Old projects with combined clips: the split rule is decided in the diff (D6 legacy rule), with an old-project fixture test.
 - **Migration (required):** projects saved with `detached_from` must load. Each detached pair becomes a linked group, and `muted` on the video is kept. Test with an old-project fixture.
 - **Needs:** T5 (captions must follow the group; `captions_of` is the identity this relies on). Place after E1 in plan order. Does not touch word timing, so it does not wait for T2.
 - **Tests first:**
@@ -313,16 +334,56 @@ scale_from = 1.15   # pop only: starting scale of each word
 ### V2. Platform export presets + loudness
 - **Plan status:** fixed in plan. **Code status:** absent. Export has three quality cards (`src/crates/concat/ui/dialogs/export.slint` near line 137). `loudnorm` is used before transcription only.
 - **Targets:** TikTok, Reels, Shorts, YouTube: aspect, bitrate, and **−14 LUFS integrated, ±1 LU**.
+- **Decided (owner, 16 Oct 2026, A4 poin 1):** loudness normalisation runs **only when a platform preset is chosen**. A normal export keeps the level the user set.
+- **Decided (owner, 16 Oct 2026, A4 poin 2, option D):** a **per-clip toggle** with target **−14 LUFS**. The toggle works on one selected clip. The preset rule above still applies to the whole export. CapCut's per-clip toggle targets −23 LUFS (CapCut's own page); this project uses −14.
 - **Tests first:** an exported fixture measures −14 LUFS ±1 LU; each preset yields the right aspect.
 - **Done when:** one menu choice produces an upload-ready file.
+
+**A4 decisions, aligned with Premiere Pro (owner, 16 Oct 2026):**
+- **Poin 3, true peak:** Maximum True Peak **−1 dBTP**, paired with the −14 LUFS target. Premiere's default recommendation (Larry Jordan, Premiere Loudness Meter article).
+- **Poin 4, where normalisation runs:** on the **final mix (Master)** for a platform preset. Premiere measures and sets loudness on the Master track (Adobe help: Normalize Mix Track). The per-clip toggle (option D) is separate.
+- **Poin 5, test:** the exported file measures **Integrated −14 LUFS ±1 LU** and **true peak ≤ −1 dBTP**. Premiere shows Integrated on the Master meter; ±1 LU is this roadmap's tolerance.
+- **Poin 6, done:** one menu choice on a platform preset produces a file that passes poin 5.
+- **Found in code (16 Oct 2026, not in the earlier plan):** the effect `concat.loudness` ("Normalize Loudness", kind audio) already exists. It normalises one clip with FFmpeg `loudnorm`. Its target range is −30 to −12 dB (LUFS), default −23, and its true-peak limit is −1.5 dBTP. Decision A4 uses −14 LUFS and −1 dBTP. **Decided (owner, 16 Oct 2026): reuse this effect.** Change its default to −14 LUFS and its true-peak limit to −1 dBTP (A4 point 3). The per-clip toggle (option D) is this effect, switched on per clip. Test: point 5 (exported file at −14 LUFS ±1 LU, true peak ≤ −1 dBTP).
+- **Poin 7, gain (Premiere model):**
+  - **Audio Gain per clip** in dB, set or adjusted by a value (Premiere: Clip > Audio Options > Audio Gain). Not built. The data model has `volume` as a linear factor (1.0 = unity); no dB gain field was found.
+  - **Track volume** per lane (Premiere: Audio Track Mixer). Not built. The `Track` struct has only `visible` and `muted`.
+  - **Clip volume keyframes** stay as they are (`KeyProperty::Volume`).
+  - Sources: Adobe help "Adjusting volume levels" and Premiere Audio Gain help page. CapCut parity not checked here.
+
+**A5 decisions (owner, 16 Oct 2026):**
+- **Poin 1, platforms (decided):** four presets are enough: TikTok, Reels, Shorts, YouTube. No others are added now.
+- **Poin 2, size per preset (proposed, not yet confirmed):** TikTok, Reels, Shorts = 9:16, 1080×1920. YouTube = 16:9, 1920×1080. Source: third-party CapCut guides agree on these sizes; CapCut has no named platform presets, only manual settings.
+- **Poin 3, frame rate (decided, owner 16 Oct 2026):** the list is "same as source" (default), **23.976, 24, 25, 29.97, 30, 50, 59.94, 60 fps**. Decimal rates are added as explicit options. Source of the base list: a third-party guide on CapCut Desktop (24, 25, 30, 50, 60 fps plus the source rate); the NTSC decimal rates are added by owner decision.
+- **Poin 4, bitrate (decided, owner 16 Oct 2026):** bitrate is **editable**, as in Adobe Premiere Pro. Premiere's fields, checked in third-party guides (not Adobe's own page): **Bitrate Encoding** (VBR 1-pass, VBR 2-pass, or CBR), **Target Bitrate** and **Maximum Bitrate** in Mbps. Guides suggest a maximum of about 1.5–2× the target. kconcat adopts the same three fields. The preset sets the default values (1080p at 30 fps: about 8–16 Mbps target; at 60 fps: about 12–24 Mbps). The user can type any value. Left out: a fixed-only bitrate, which the owner rejected.
+- **Poin 5, codec and audio (decided, owner 16 Oct 2026):** the video codec is **not changed**; kconcat already has its codec (H.264 in MP4 is the current default). Audio gets **several options** that the user picks from: AAC at 128, 192, and 320 kbps, sample rate 48 kHz, stereo. Premiere's usual audio setting is AAC, 48 kHz, stereo, and 320 kbps (third-party guides). Check the existing export code for audio settings before the diff.
+- **A5 status (16 Oct 2026):** poin 1–6 decided. Build waits for the diff.
+- **Sequence settings (checked 16 Oct 2026, owner question "bisa seperti Premiere?"):** already in kconcat. Each timeline (tab) has its own frame size, frame rate, and colour space (`VideoSettings` in `model.rs`; `project.slint` dialog). Frame size options: 1920×1080, 3840×2160, 1080×1920, 1080×1080, 1440×1080, 2560×1080, Custom. Frame rate options: 10, 20, 23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60 fps, Custom. The rate is stored as a fraction (29.97 = 30000/1001). Colour: SDR, HDR HLG, HDR PQ.
+  - **Gap vs Premiere (owner decision, 16 Oct 2026): none.** The existing per-timeline frame size and rate are enough. Premiere's sequence presets and per-sequence audio settings are not added; no task added.
+  - **Export and sequence are separate, as in Premiere.** A platform preset sets the export frame, not the sequence. A 16:9 sequence exported as 9:16 needs the reframe in V1; without it the frame is letterboxed.
 
 ### V3. Auto ducking
 - **Plan status:** fixed in plan. **Code status:** absent.
 - **Tests first:** a music bed drops under speech and returns after; the change is reversible.
+- **Decided (owner, 16 Oct 2026, A6):**
+  - **Speech signal: both, chosen per clip.** Route A: audio analysis, as in Premiere (Sensitivity slider). Route B: word timing from the transcript (no extra analysis; accuracy follows T2/T3). The user picks the route for each music clip. Both routes must pass the test above.
+  - **Defaults: kept, editable.** Duck Amount −12 dB, Fade 500 ms. The user can change both. The defaults stay as a reference point.
+  - **Output: volume keyframes on the music clip**, as in Premiere (Generate Keyframes). This keeps the result editable and reversible.
+  - **Labels:** music clips are tagged Music and speech clips Dialogue, as in Premiere (Duck Against = Dialogue). Tag names are not yet decided in code.
+- **Left out and why:**
+  - Audio analysis only: not chosen by owner; the transcript route is cheaper where word timing is good.
+  - Transcript only: not chosen by owner; it fails for speech without words (for example, a music intro with no transcript).
+  - Automatic ducking on export, without a control: CapCut's auto-ducking was reported by users as too strong, with no simple off switch (Reddit, not official). kconcat does not copy that; the user always has the choice.
+- **CapCut parity:** partly. CapCut has automatic ducking (user reports only; not verified in CapCut's official docs in this session).
 
 ### V4. Batch export queue
 - **Plan status:** fixed in plan. **Code status:** API jobs only (`src/crates/concat-server/src/lib.rs` near line 20).
-- **Done when:** five shorts export in one pass without babysitting.
+- **Decided (owner, 16 Oct 2026, A11):**
+  - **Queue runs as a separate process, like Adobe Media Encoder.** Editing can continue while the queue runs. The queue is in the app, fed from the export dialog.
+  - **Failure: the queue continues.** A failed item is marked, and the rest run.
+  - **Order: the user chooses.** The user can move items up or down before or during the run, and pick which one encodes first.
+  - **Left out and why:** (a) a queue in the same process, which blocks editing; (b) batch export with no queue, which cannot be reordered or reused. Both were offered to the owner and not chosen.
+- **Done when:** five shorts export in one pass without babysitting, with the order the user chose, and a failed item does not stop the rest.
 
 ### V5. Stabilisation — optional
 - Only if you film handheld. Not scheduled.
@@ -351,6 +412,8 @@ scale_from = 1.15   # pop only: starting scale of each word
 - **Scope boundary (added 16 Oct 2026):** with auto-detection off, no speaker processing runs. Manual speaker assignment is separate from detection and still works, and it creates the same speaker lanes. Changes that are NOT speaker-only and apply to every user: lane typing (D6), link/unlink replacing Detach/Reattach (E5), word timing (T2/T3), caption identity (T5), and word delete (E1). Single-speaker editing keeps one V lane for video and captions and one A lane for audio, linked, as the default.
 - **Opt-in (owner confirmed, 16 Oct 2026):** detection runs only when the user asks (for example a "Detect speakers" button). It never runs on import. When the feature is off, the editing flow is unchanged: no speaker labels, no extra processing, and no effect on captions, cuts, or export. This covers single-speaker editing and simple tasks.
 - **Open scope question:** labels only (on words, captions, and the clip), or also one audio lane per speaker (A1 Host, A2 Guest)? Per-speaker lanes depend on detection (or per-track files) and are a second opt-in layer, not part of the first version.
+- **Owner decision (16 Oct 2026):** check in the app first whether one file with several audio streams works, before choosing between separate files and one multi-stream file. Not decided yet.
+- **Tag editability (owner, 16 Oct 2026): yes, editable.** Speaker tags on words, captions, and clips can be changed by the user.
 - **Existing code hint (checked 16 Oct 2026):** `model.rs` `Clip.audio_stream` lets a clip play one of several audio streams of one file. So one file with several audio streams may already work. Confirm in the app before planning import.
 - **Auto-detection (16 Oct 2026): feasible, required for mixed recordings, not built.** Audio-only diarization (who spoke when) runs locally after transcription. Candidates: `speakrs` (Rust, ONNX Runtime, claims pyannote-level accuracy, crates.io v0.5.0); sherpa-onnx offline diarization (pyannote segmentation 3.0 + CAM++, no Python). The owner names each detected speaker once (for example SPEAKER_00 → Host). No per-line labelling.
 - **Limits (stated, not measured here):** overlapping speech (two people talking at once) is hard. One speaker per word is lossy in those places. Audio-only detection does not use video, so "who is on screen" is out of scope.
@@ -361,20 +424,96 @@ scale_from = 1.15   # pop only: starting scale of each word
 - **Approach:** a local diarisation model after transcription; output stored as a speaker tag per word or cue.
 - **Tests first:** on a two-speaker corpus episode, turns are assigned; one manual correction is kept.
 
-### P4. Screen and webcam recording
-- **Plan status:** fixed in plan. **Code status:** microphone only (`src/crates/concat-host/src/record.rs`).
-- **Done when:** a screen-plus-webcam take lands as two synced clips.
+### P4. Audio recording, one track per microphone (scope changed by owner, 16 Oct 2026)
+- **Plan status:** fixed in plan. **Code status:** microphone only, one input (`src/crates/concat-host/src/record.rs`).
+- **Decided (owner, 16 Oct 2026):**
+  - **Audio only.** Screen recording is not needed and is dropped from P4. Webcam video is not recorded either; the webcam's own audio is not a source.
+  - **More than one microphone: one track per microphone.** This matches P3 (one track per person). Recording with one microphone stays the same.
+- **Left out and why:** screen recording and screen-plus-webcam two-clip takes. Owner said screen recording is not needed.
+- **Test first:** two microphones record at once; each lands on its own track; the tracks start at the same time and stay in sync for a 5-minute take (sync check in the diff).
+- **Done when:** one take with two microphones gives two audio tracks, one per microphone, that stay in sync.
 
 ### P5. Long-form end-to-end check
 - **Done when:** a 60-minute episode becomes three 60-second vertical clips and one full export, offline, start to finish. Count manual corrections; if the count rises after a track closes, something regressed.
 
 ### P6. Verify before planning
 - **Multi-clip / B-roll:** owner reports it exists; untested. Verify in the running app before any task.
-- **Caption animation:** owner reports it exists; the repo check found no caption motion (C5). Verify in the running app.
+- **Caption animation:** owner confirmed 16 Oct 2026 that no animation exists. The work is caption motion (C5), not a verify task.
+
+
+### P7. Denoise: already in the app (checked 16 Oct 2026); verify, do not build
+- **Plan status:** owner decision (16 Oct 2026): add denoise, not vocal isolation.
+- **Code status (checked 16 Oct 2026, correction):** the effect already exists. `src/crates/concat-effects/packages/concat.denoise` is "Noise Reduction", kind `audio`, category Clean. It runs FFmpeg `afftdn` with a Strength parameter (0–100%, default 50). The same folder has `concat.enhance-voice` (Enhance Voice: high-pass 80 Hz, `afftdn`, de-esser, compressor, limiter, Amount 0–100%, default 60). Earlier this task was written as "new build". That was wrong: the feature exists.
+- **Work now:** verify in the running app. Apply Noise Reduction to one audio clip from the owner's room. Check the transcript still has the same words, and export keeps the speech natural.
+- **CapCut parity item:** "Reduce noise" in the Audio controls of a clip (third-party guides). kconcat already has a strength control, which covers the open question about a strength slider.
+- **Test:** on the noisy room clip, measure the noise level before and after. The same spoken words must still be in the transcript, and the word error rate must not get worse. Acceptance numbers are set after the baseline is measured.
+- **Left out and why:** vocal isolation (separates the voice from other sounds; large effort; not needed for steady noise, per owner). Enhance Voice already covers part of the cleanup; no new separation tool.
+- **Done when:** the verify test passes on the room clip, and the result is recorded in the roadmap.
+
+
+### D2. LUT file import (decided, owner, 16 Oct 2026)
+- **Plan status:** owner decision: add LUT import (.cube). **Code status:** not checked yet. The effect library (123 packages) has colour grades under "filter" (e.g. `concat.teal-orange`), but no LUT file loader was found in the files read. The diff checks first.
+- **CapCut parity item:** custom LUT import. CapCut Desktop imports .cube (and .3dl) through Adjustment → LUT → Import (third-party CapCut guides, Oct 2026; CapCut's own help not checked).
+- **Test first:** load one .cube file, apply it to one clip, and compare the grade with the LUT off and on. Exported frame matches the LUT preview.
+- **Done when:** the user can import a .cube file, apply it to a clip, set its intensity, and the export keeps the look.
+- **Do not:** change the 123 existing packages.
+
+
+### D3. Caption translation beyond English (owner open; storage question answered 16 Oct 2026)
+- **Plan status:** open. Owner said yes to adding more languages, pending the choice of model.
+- **Code status:** Whisper translate gives English only (Option B D3). No second translation model is in the app.
+- **Storage (third-party figures, not measured here):**
+  - **Opus-MT, one model per language direction:** about 300 MB each. English to Indonesian and Indonesian to English are two models (about 600 MB). Each extra language adds about 300 MB per direction.
+  - **NLLB-200 distilled 600M, one model for about 200 languages:** about 2.3–2.5 GB in full precision. The INT8 ONNX build is about 1.1 GB (encoder 415 MB plus decoder 729 MB).
+  - **Whisper translate (already in the app):** no extra storage for English output.
+- **Answer to the owner's question:** yes, it adds storage. The size depends on the choice: about 300 MB per language direction (Opus-MT), or about 1.1 GB once for many languages (NLLB INT8).
+- **Decided (owner, 16 Oct 2026): import, not bundled.** The app ships with English only (Whisper translate, no extra file). Other languages need a translation model file that the user imports. The model choice works like the Whisper model choice: a settings list with an import option, and a default of English. Storage for other languages is paid by the user only when they import one.
+  - **Existing pattern (checked 16 Oct 2026):** Settings → Transcriber has a Whisper models folder, an installed list, and a "Get model" download. The caption dialog has a 99-language list for speech recognition. A translation model slot follows the same pattern.
+  - **Guide:** `02-map/guide-d3-translation-languages.md` (UI states, tests, decisions for the diff).
+  - **Open for the diff:** which model formats the engine can load (Opus-MT and NLLB need converting to a format the app reads). Support one format first; reject a wrong file with a message.
+- **Test first (after the choice):** one caption track translated into the chosen language; check word count and line breaks in the caption layout.
+- **CapCut parity item:** caption translation (Option B D3: CapCut has it; kconcat translates to English only). Measurement: a bilingual caption output with one preset (clean-bilingual, C2).
+
+---
+
+## 6b. Track 6 — extra editing, music and video (owner added, 16 Oct 2026)
+
+Added by owner. Each item comes from the Option B Tier D5 list and is not yet in the plan order. Guide: `02-map/guide-d5-extra-editing.md`. Plan order: after P6. Local AI only (standing rule): every AI item runs on the owner's machine, and its model file size is measured in the diff.
+
+### K1. Beat sync (music)
+- **CapCut parity item:** cut or place clips on music beats (Option B D5).
+- **Needs:** a beat detector (local, no model needed for a first version).
+- **Test first:** on a music clip with known tempo, the detected beats match a hand count within a tolerance set after a baseline.
+- **Done when:** the user can snap cuts to beats on one timeline.
+
+### K2. Flicker removal
+- **CapCut parity item:** remove light flicker, for example 50/60 Hz lamps (Option B D5).
+- **Test first:** on a flickering test clip, the brightness variation drops by a measured amount. Number set after a baseline.
+- **Done when:** the flicker removal effect is applied to one clip, and the test clip is less flickery.
+
+### K3. Camera tracking
+- **CapCut parity item:** follow a moving subject and attach a graphic or crop to it (Option B D5).
+- **Needs:** a local tracker. First choice OpenCV VitTrack (0.68 MiB); backup NanoTrack v2 (1.70 MiB). See guide §6.
+- **Test first:** on a clip with a known moving object, the tracked point stays on the object within a tolerance set after a baseline.
+- **Done when:** a track can drive a crop or a graphic on one clip.
+
+### K4. AI colour correction (local)
+- **CapCut parity item:** automatic colour fix (Option B D5). The existing filters and curves already do manual correction.
+- **Needs:** a local model. Undecided; candidates in guide §6 (learned 3D LUT, perception WB). Public weights and licence to be checked.
+- **Test first:** on a colour-cast test clip, the cast drops by a measured amount. Number set after a baseline.
+- **Done when:** one button applies a correction that the user can undo, and the user can adjust its strength.
+
+### K5. AI text remover (local)
+- **CapCut parity item:** remove on-screen text such as watermarks (Option B D5).
+- **Needs:** a local inpainting model. First choice MI-GAN (about 29.5 MB); backup LaMa (198–208 MB). See guide §6.
+- **Test first:** on a clip with a known text area, the text is gone and the area around it is not visibly damaged.
+- **Done when:** the user can mark an area and remove the text in it.
 
 ---
 
 ## 7. Out of scope — permanently
+
+- **Video upscaling to 4K (D4, owner decision 16 Oct 2026: no).** Not built. Source material is 1080p; the targets are 1080×1920 and 1920×1080. Revisit only if the owner asks for 4K output from 1080p sources.
 
 Templates, music / sticker / font libraries, cloud AI (including generated video), collaboration, cloud sync, mobile parity, 130-language counts, colour-grading depth, release and marketing work. Also: **no in-house cloud AI of any kind** (`AGENTS.md` and `working-agreements.md`).
 
@@ -403,11 +542,13 @@ Templates, music / sticker / font libraries, cloud AI (including generated video
 
 ## 9. Open questions (answer before the task named)
 
+- **UI for E1–E6, V1–V5, P3, D2, K1–K5 is not specified yet.** Each item gets a UI section (placement, labels, states) and is checked in the running app before it is built. Design text in `.md` is a draft until then.
+
 - D3(a) `[motion]` schema fields (§3, C5), D5 (harness location) — §1.
 - T8: owner's corrected transcript of the 30 s clip (needed before step 1 of T8).
 - Which of the episodes are two-speaker, for P3?
-- Is the room noisy enough that vocal isolation moves up? (D-track, not scheduled.)
-- Do you record remote guests, which raises P4?
+- Room noise: answered (owner, 16 Oct 2026): sometimes noisy. Denoise is added as P7; vocal isolation is not planned.
+- Remote guests: skipped by owner (16 Oct 2026). Not a priority; no task added. Guest audio that comes from outside kconcat enters as imported files.
 
 ---
 
@@ -503,7 +644,9 @@ Parked. The per-word machinery is what Track 1 is still fixing. Full design: the
 | V3 ducking | fixed | absent |
 | V4 batch queue | fixed | API only |
 | P3 speaker labels | fixed (scope open) | absent |
-| P4 screen / webcam | fixed | mic only |
-| P6 B-roll / animation | verify | owner-reported |
+| P4 audio recording, one track per mic | fixed (owner 16 Oct: audio only) | one mic input |
+| P6 B-roll / animation | verify (B-roll only) | animation: none, built as C5 |
+| P7 Denoise | verify only (exists: `concat.denoise`) | exists |
+| K1–K5 Track 6 (beat sync, flicker, tracking, AI colour, AI text remover) | added by owner 16 Oct; after P6 | not built |
 
-**Order (fixed):** T1 → T2 → T3 → T4 (parallel) → T5 → T6 → T7 → C1 validation → E4 → E1 → E2 → V2 (loudness first) → C2 → C3 → C4 → V3 → V4 → P3 → V1 → C5 (after D3) → E3 → P4 → P6. **T8 runs in parallel after T1. X1 and X2 (§10b) come after Track 1 exit.** **UI-1 (§10c, panel scroll) can run in parallel with Track 1, since it touches no word-timing code.**
+**Order (fixed):** T1 → T2 → T3 → T4 (parallel) → T5 → T6 → T7 → C1 validation → E4 → E1 → E2 → V2 (loudness first) → C2 → C3 → C4 → V3 → V4 → P3 → V1 → C5 (after D3) → E3 → P4 → P7 → P6. **T8 runs in parallel after T1. X1 and X2 (§10b) come after Track 1 exit.** **UI-1 (§10c, panel scroll) can run in parallel with Track 1, since it touches no word-timing code.**

@@ -25,7 +25,7 @@
 - Main use: **long-form podcasts** (60+ minutes), cut into short clips.
 - Reference style: **prof.zulys**-style captions, edited in **CapCut Pro**.
 - Goal: get **closer to CapCut Pro**. Being behind is accepted; closing the gap is the aim.
-- **Lower priority now:** B-roll and multi-clip (reported to exist, untested). Caption animation (reported to exist, not verified in the repo).
+- **Lower priority now:** B-roll and multi-clip (reported to exist, untested). Caption animation: owner confirmed 16 Oct 2026 that it does not exist; it is built as caption motion (roadmap C5).
 
 ---
 
@@ -81,7 +81,7 @@ Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
 - Caption highlight in any preset (`highlight_color` is unset in all 32).
 - Case transform in the text style.
 - Platform export presets; loudness is applied only before transcription.
-- Speaker labels, auto-ducking, screen and webcam recording, vocal isolation, auto-reframe.
+- Speaker labels, auto-ducking, screen and webcam recording, auto-reframe. Denoise already exists (`concat.denoise`); P7 is verify only. Vocal isolation is not planned.
 
 **Confirmed present:** word chunking (four layout modes, Re-split), waveform drawing, Whisper translate-to-English, SRT/VTT import and export, captions that follow cuts, the 123 effect packages, the API and CLI.
 
@@ -93,7 +93,7 @@ Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
 - **Motion schema decision:** DONE. Option (a), `[motion]` in `preset.toml`, schema v1 approved 16 Oct 2026.
 - **Caption pipeline map** — transcription → `captionmap` → placement → reveal → render → export, with file:line per hop.
 - **#15 decision** — add Track-1 T8 and the WER output on T1, or not.
-- **Verify** B-roll / multi-clip and caption animation in the running app.
+- **Verify** B-roll / multi-clip in the running app. Caption animation is not verified; it does not exist (see roadmap C5).
 - **Podcast episode test** — a full-length episode in the corpus, for P5.
 
 ---
@@ -103,6 +103,9 @@ Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
 ```
 AI_Please_README.md                                  → this file (read first)
 02-map/kconcat-roadmap-v2-execution.md               → roadmap v2: execution spec, decisions D1–D5, plan status
+02-map/guide-tier-c-caption-look.md                 → guide for Tier C (caption look): numbering map, order, decisions, tests
+02-map/guide-d3-translation-languages.md             → guide for D3 (translation languages): import model, UI states, tests
+02-map/guide-d5-extra-editing.md                       → guide for D5 (K1–K5): beat sync, flicker, tracking, AI colour, AI text remover
 05-background/kconcat-feature-gap-option-b-v2.md     → fixed Option B list, ranked for podcasts
 ```
 
@@ -112,7 +115,7 @@ AI_Please_README.md                                  → this file (read first)
 
 ## 8. Next action
 
-- Owner approves or changes roadmap v2 and its decisions D1–D5 (§1 of the roadmap).
+- Roadmap v2 APPROVED WITH CONDITION (owner, 16 Oct 2026): each task must support sync or the move closer to CapCut Pro. Decisions D1–D8 stand (§1 of the roadmap).
 - Then the first execution task is **T1** (harness and baseline), and no code is changed before the baseline is saved.
 - T8 needs the owner's corrected transcript of the 30 s clip before its first step.
 - Open for discussion: Option B questions (`kconcat-feature-gap-option-b-v2.md` §3).

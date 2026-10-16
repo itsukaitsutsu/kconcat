@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kconcat · Delapan preset caption (A9)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #15161a; color: #e8e8ea; }
+  header { padding: 16px 20px 8px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  header p { margin: 0; color: #9a9ca3; font-size: 13px; line-height: 1.5; }
+  .wrap { display: grid; grid-template-columns: 240px 1fr; gap: 16px; padding: 12px 20px 24px; }
+  .list { display: flex; flex-direction: column; gap: 6px; }
+  .list button {
+    text-align: left; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    background: #22242a; color: #e8e8ea; border: 1px solid #2f3139; font: inherit; font-size: 13px;
+  }
+  .list button.on { border-color: #6ea8ff; background: #1d2a3f; }
+  .list button small { display: block; color: #8c8f98; font-size: 11px; margin-top: 2px; }
+  .stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .frame {
+    position: relative; width: 100%; max-width: 720px; aspect-ratio: 16 / 9;
+    background: linear-gradient(135deg, #3a4a3e 0%, #6b5a45 45%, #2a3550 100%);
+    border-radius: 6px; overflow: hidden; border: 1px solid #2f3139;
+  }
+  .frame::after {
+    content: "gambar latar (contoh)"; position: absolute; left: 10px; top: 8px;
+    font-size: 11px; color: rgba(255,255,255,.45);
+  }
+  .cap { position: absolute; left: 50%; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; }
+  .line { display: block; }
+  .word { border-radius: 4px; padding: 0 .08em; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; max-width: 720px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #2a2c33; }
+  th { color: #9a9ca3; font-weight: 600; }
+  .note { font-size: 12px; color: #9a9ca3; line-height: 1.5; max-width: 720px; }
+  @media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>kconcat · Delapan preset caption (A9)</h1>
+  <p>Pengguna memilih satu preset dari daftar, tanpa mengatur sendiri. Ukuran teks dihitung dari tinggi frame, jadi preset ikut ukuran sekuens. Contoh ini memakai nilai dari manual <code>B-caption-styles.md</code> §4. Ini perkiraan visual, bukan hasil render. Font asli bisa berbeda.</p>
+</header>
+
+<div class="wrap">
+  <div class="list" id="list"></div>
+
+  <div class="stage">
+    <div class="frame" id="frame"><div class="cap" id="cap"></div></div>
+    <div class="note" id="note"></div>
+    <table>
+      <thead><tr><th>Preset</th><th>Berat</th><th>Ukuran</th><th>Stroke</th><th>Plat</th><th>Highlight</th><th>Posisi (y)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// Values from 03-manuals/B-caption-styles.md §4 (size, stroke, plate and highlight are fractions or hex).
+// pos: vertical centre as a fraction of frame height. size: cap height as a fraction of frame height.
+const PRESETS = [
+  { id: "kconcat.pop-bold", w: 900, size: 0.075, stroke: 0.014, strokeColor: "#000", plate: null, hl: "#ffd21f", pos: 0.42, upper: false, hlNote: "dipakai C3" , desc: "tebal, stroke hitam, highlight kuning" },
+  { id: "kconcat.boxed", w: 800, size: 0.068, stroke: 0, strokeColor: null, plate: { color: "#000000cc", r: 0.02 }, hl: null, pos: 0.44, upper: false, desc: "kotak gelap di belakang teks" },
+  { id: "kconcat.karaoke", w: 900, size: 0.078, stroke: 0.012, strokeColor: "#000", plate: null, hl: "#39ff88", pos: 0.42, upper: false, hlNote: "dipakai C3", desc: "tebal, highlight hijau" },
+  { id: "kconcat.minimal", w: 600, size: 0.055, stroke: 0, strokeColor: null, plate: null, hl: null, pos: 0.45, upper: false, desc: "tipis, tanpa stroke atau kotak" },
+  { id: "kconcat.hard-shadow", w: 900, size: 0.074, stroke: 0.010, strokeColor: "#000", plate: null, hl: null, shadow: true, pos: 0.42, upper: false, desc: "tebal dengan bayangan keras" },
+  { id: "kconcat.upper-tight", w: 800, size: 0.062, stroke: 0.008, strokeColor: "#000", plate: null, hl: "#ffffff", inverse: true, pos: 0.40, upper: true, desc: "huruf kapital, highlight dibalik" },
+  { id: "kconcat.low-third-cap", w: 700, size: 0.050, stroke: 0, strokeColor: null, plate: { color: "#00000099", r: 0.01 }, hl: null, pos: 0.62, upper: false, desc: "lebih rendah, plat abu gelap" },
+  { id: "kconcat.clean-bilingual", w: 600, size: 0.052, stroke: 0.006, strokeColor: "#000", plate: null, hl: null, pos: 0.50, upper: false, stacked: true, desc: "dua baris, untuk dua bahasa" }
+];
+
+const SAMPLE = "saya pergi ke pasar hari ini";
+const SAMPLE2 = "I went to the market today";
+const HL_WORD = "pasar";
+
+let current = 0;
+const frame = document.getElementById("frame");
+const cap = document.getElementById("cap");
+const list = document.getElementById("list");
+const rows = document.getElementById("rows");
+const note = document.getElementById("note");
+
+function pct(v) { return (v * 100).toFixed(1).replace(".", ",") + "%"; }
+
+function render(p) {
+  // Frame height in CSS px is taken from the rendered box, so every value scales with the frame.
+  const H = frame.clientHeight || 360;
+  const fontPx = (p.size * H) / 0.72;            // cap height ~0.72 of the em, rough
+  const stroke = p.stroke * H;
+  const text = p.upper ? SAMPLE.toUpperCase() : SAMPLE;
+
+  const words = text.split(" ").map(w => {
+    const isHl = w.toLowerCase() === HL_WORD;
+    let style = "";
+    if (isHl && p.hl) {
+      if (p.inverse) style = `background:${p.hl};color:#000;`;
+      else style = `color:${p.hl};`;
+    }
+    return `<span class="word" style="${style}">${w}</span>`;
+  }).join(" ");
+
+  let inner = words;
+  if (p.stacked) {
+    const t2 = p.upper ? SAMPLE2.toUpperCase() : SAMPLE2;
+    inner = `<span class="line">${words}</span><span class="line" style="opacity:.92">${t2}</span>`;
+  }
+
+  // Outline: eight copies of the text shadow at the stroke width.
+  const shadows = [];
+  if (p.strokeColor && stroke > 0) {
+    const s = stroke.toFixed(1) + "px";
+    const c = p.strokeColor;
+    shadows.push(`${s} 0 0 ${c}`, `-${s} 0 0 ${c}`, `0 ${s} 0 ${c}`, `0 -${s} 0 ${c}`,
+                 `${s} ${s} 0 ${c}`, `-${s} -${s} 0 ${c}`, `${s} -${s} 0 ${c}`, `-${s} ${s} 0 ${c}`);
+  }
+  if (p.shadow) {
+    const d = (0.012 * H).toFixed(1) + "px";
+    shadows.push(`${d} ${d} 0 #000`);
+  }
+
+  cap.style.top = (p.pos * 100) + "%";
+  cap.style.fontFamily = "Montserrat, Arial, sans-serif";
+  cap.style.fontWeight = String(p.w);
+  cap.style.fontSize = fontPx.toFixed(1) + "px";
+  cap.style.color = "#fff";
+  cap.style.lineHeight = "1.2";
+  cap.style.textShadow = shadows.length ? shadows.join(", ") : "none";
+  if (p.plate) {
+    cap.style.background = p.plate.color;
+    cap.style.borderRadius = (p.plate.r * H).toFixed(1) + "px";
+    cap.style.padding = (0.012 * H).toFixed(1) + "px " + (0.03 * H).toFixed(1) + "px";
+  } else {
+    cap.style.background = "none";
+    cap.style.borderRadius = "0";
+    cap.style.padding = "0";
+  }
+  cap.innerHTML = inner;
+}
+
+function build() {
+  list.innerHTML = "";
+  PRESETS.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.className = i === current ? "on" : "";
+    b.innerHTML = `${p.id.replace("kconcat.", "")}<small>${p.desc}</small>`;
+    b.onclick = () => { current = i; build(); render(PRESETS[i]); note.textContent = noteFor(PRESETS[i]); };
+    list.appendChild(b);
+  });
+  rows.innerHTML = PRESETS.map(p => `
+    <tr>
+      <td>${p.id}</td>
+      <td>${p.w}</td>
+      <td>${pct(p.size)} tinggi</td>
+      <td>${p.stroke ? pct(p.stroke) + " " + p.strokeColor : "-"}</td>
+      <td>${p.plate ? "ya" : "-"}</td>
+      <td>${p.hl ? p.hl + (p.inverse ? " (dibalik)" : "") : "-"}</td>
+      <td>${pct(p.pos)}</td>
+    </tr>`).join("");
+}
+
+function noteFor(p) {
+  let s = "Preset ini tidak butuh gerak atau karaoke." ;
+  if (p.hlNote) s = "Highlight kata baru bekerja penuh setelah C3 (karaoke). Tanpa C3, teks tetap tampil dengan warna dasar.";
+  if (p.inverse) s = "Highlight dibalik: kata yang disorot tampil di kotak putih dengan teks hitam. Ini tafsiran dari nama 'inverse' di manual.";
+  if (p.stacked) s = "Dua baris: baris kedua adalah terjemahan. Di kconcat ini dibuat dengan posisi offset_y +0,10 pada preset yang sama.";
+  return s;
+}
+
+window.addEventListener("resize", () => render(PRESETS[current]));
+build();
+requestAnimationFrame(() => { render(PRESETS[current]); note.textContent = noteFor(PRESETS[current]); });
+</script>
+</body>
+</html>
