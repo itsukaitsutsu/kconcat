@@ -318,6 +318,7 @@ export component App inherits Window {
     callback captions-new-blank-captions();
     callback captions-open-subtitle-file();
     callback captions-draft-text-changed(index: int, text: string);
+    callback captions-draft-text-accepted(index: int, text: string, caret: int);
     callback captions-draft-start-changed(index: int, value: float);
     callback captions-draft-end-changed(index: int, value: float);
     callback captions-draft-delete(index: int);
@@ -635,6 +636,12 @@ export component App inherits Window {
                 Editor.step-frames(event.modifiers.shift ? 10 : 1);
                 return accept;
             }
+            // E6: use the last selected clip's lane as the current lane.
+            // Keep this in the fallback scope so a text field still owns L.
+            if (event.modifiers.shift && event.text.to-lowercase() == "l") {
+                Editor.shortcut("select-lane");
+                return accept;
+            }
             if (event.modifiers.shift) {
                 return reject;
             }
@@ -931,6 +938,9 @@ export component App inherits Window {
         new-blank-captions => { root.captions-new-blank-captions(); }
         open-subtitle-file => { root.captions-open-subtitle-file(); }
         draft-text-changed(index, text) => { root.captions-draft-text-changed(index, text); }
+        draft-text-accepted(index, text, caret) => {
+            root.captions-draft-text-accepted(index, text, caret);
+        }
         draft-start-changed(index, value) => { root.captions-draft-start-changed(index, value); }
         draft-end-changed(index, value) => { root.captions-draft-end-changed(index, value); }
         draft-delete(index) => { root.captions-draft-delete(index); }

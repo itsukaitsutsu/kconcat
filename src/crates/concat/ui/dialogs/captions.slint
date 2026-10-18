@@ -113,6 +113,7 @@ export component CaptionsDialog inherits Modal {
     callback new-blank-captions();
     callback open-subtitle-file();
     callback draft-text-changed(index: int, text: string);
+    callback draft-text-accepted(index: int, text: string, caret: int);
     callback draft-start-changed(index: int, value: float);
     callback draft-end-changed(index: int, value: float);
     callback draft-delete(index: int);
@@ -720,6 +721,9 @@ export component CaptionsDialog inherits Modal {
                                 value: cue.text;
                                 placeholder: I18n.t("captions.captionText");
                                 edited(text) => { root.draft-text-changed(index, text); }
+                                accepted(text, caret) => {
+                                    root.draft-text-accepted(index, text, caret);
+                                }
                             }
                             Button {
                                 label: "×";

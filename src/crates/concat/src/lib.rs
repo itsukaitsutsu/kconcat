@@ -1712,6 +1712,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             text.to_string(),
         )));
     }));
+    app.on_captions_draft_text_accepted(on_window!(
+        |state, index: i32, text: SharedString, caret: i32| {
+            state.handle(Msg::Captions(CaptionsMsg::DraftTextAccepted(
+                index,
+                text.to_string(),
+                caret,
+            )));
+        }
+    ));
     app.on_captions_draft_start_changed(on_window!(|state, index: i32, value: f32| {
         state.handle(Msg::Captions(CaptionsMsg::DraftStartChanged(index, value)));
     }));

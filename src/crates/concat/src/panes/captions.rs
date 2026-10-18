@@ -22,7 +22,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use concat_project::Command;
-use concat_project::captionmap::{CaptionLayoutPreset, Cue};
+use concat_project::captionmap::{CaptionLayoutPreset, Cue, WordSource};
 use concat_project::model::TextStyle;
 use concat_speech::transcribe::Segment;
 use slint::{SharedString, VecModel};
@@ -84,6 +84,8 @@ pub enum CaptionsMsg {
     OpenSubtitleFile,
     SubtitleFilePicked(PathBuf),
     DraftTextChanged(i32, String),
+    /// Enter in a review row: split at the audio-timed word under the caret.
+    DraftTextAccepted(i32, String, i32),
     DraftStartChanged(i32, f32),
     DraftEndChanged(i32, f32),
     DraftDelete(i32),
@@ -122,6 +124,10 @@ struct CaptionDraft {
     start: f64,
     end: f64,
     words: Vec<concat_project::captionmap::Word>,
+    /// True only when word boundaries came from the audio, not from text estimates.
+    audio_timed: bool,
+    /// A split preserves its original word times even though it is a draft edit.
+    preserve_words: bool,
     edited: bool,
 }
 
@@ -363,6 +369,9 @@ impl CaptionsPane {
                 self.load_subtitle_file(studio, &path);
             }
             CaptionsMsg::DraftTextChanged(index, text) => self.edit_draft_text(index, text),
+            CaptionsMsg::DraftTextAccepted(index, text, caret) => {
+                self.accept_draft_text(index, text, caret);
+            }
             CaptionsMsg::DraftStartChanged(index, value) => self.edit_draft_start(index, value),
             CaptionsMsg::DraftEndChanged(index, value) => self.edit_draft_end(index, value),
             CaptionsMsg::DraftDelete(index) => self.delete_draft(index),
@@ -522,8 +531,43 @@ impl CaptionsPane {
         }
         if let Some(draft) = self.drafts.get_mut(idx) {
             draft.text = text;
+            draft.preserve_words = false;
             draft.edited = true;
             self.message.clear();
+        }
+    }
+
+    fn accept_draft_text(&mut self, row: i32, text: String, caret: i32) {
+        let Ok(index) = usize::try_from(row) else {
+            return;
+        };
+        if index >= self.drafts.len() {
+            return;
+        }
+
+        // The TextInput can emit `accepted` before its last `edited` callback
+        // reaches the model. Commit only a genuinely changed value; an
+        // unsuccessful Enter must not mark untouched ASR captions as edited.
+        if self.drafts[index].text != text {
+            self.edit_draft_text(row, text);
+        }
+        let Ok(caret) = usize::try_from(caret) else {
+            self.message = "Enter needs a caret inside a word with audio timing.".to_owned();
+            return;
+        };
+        let Some(draft) = self.drafts.get(index).cloned() else {
+            return;
+        };
+        match split_draft_at_caret(&draft, caret) {
+            Ok((head, tail)) => {
+                // One undo returns to the exact row state visible before Enter.
+                self.push_undo();
+                self.drafts.remove(index);
+                self.drafts.insert(index, head);
+                self.drafts.insert(index + 1, tail);
+                self.message.clear();
+            }
+            Err(reason) => self.message = reason.to_owned(),
         }
     }
 
@@ -581,6 +625,8 @@ impl CaptionsPane {
             start,
             end: start + 2.0,
             words: Vec::new(),
+            audio_timed: false,
+            preserve_words: false,
             edited: true,
         });
         self.message.clear();
@@ -609,11 +655,16 @@ impl CaptionsPane {
                         start: d.start,
                         end: d.end,
                         text: d.text.clone(),
-                        words: if d.edited {
+                        words: if d.edited && !d.preserve_words {
                             concat_project::captionmap::estimate_words(&d.text, d.start, d.end)
                         } else {
                             d.words.clone()
                         },
+                        word_source: Some(if d.audio_timed && (!d.edited || d.preserve_words) {
+                            WordSource::Whisper
+                        } else {
+                            WordSource::Estimated
+                        }),
                         ..Cue::default()
                     })
                     .collect()
@@ -625,7 +676,9 @@ impl CaptionsPane {
                 text: cue.text,
                 start: cue.start,
                 end: cue.end,
+                audio_timed: matches!(cue.word_source, Some(WordSource::Whisper | WordSource::Whispercpp)),
                 words: cue.words,
+                preserve_words: false,
                 edited: false,
             })
             .collect();
@@ -665,6 +718,8 @@ impl CaptionsPane {
             start,
             end: start + 2.0,
             words: Vec::new(),
+            audio_timed: false,
+            preserve_words: false,
             edited: true,
         }];
         self.message.clear();
@@ -696,6 +751,7 @@ impl CaptionsPane {
                     end,
                     text: cue.text,
                     words,
+                    word_source: Some(WordSource::Estimated),
                     ..Cue::default()
                 }
             })
@@ -708,7 +764,9 @@ impl CaptionsPane {
                 text: cue.text,
                 start: cue.start,
                 end: cue.end,
+                audio_timed: matches!(cue.word_source, Some(WordSource::Whisper | WordSource::Whispercpp)),
                 words: cue.words,
+                preserve_words: false,
                 edited: false,
             })
             .collect();
@@ -827,11 +885,23 @@ impl CaptionsPane {
                     start,
                     end,
                 );
+                let word_source = Some(if concat_project::captionmap::clean_words(
+                    &heard,
+                    Some(start),
+                    Some(end),
+                ).0.is_empty() {
+                    WordSource::Estimated
+                } else if self.engine == 0 {
+                    WordSource::Whisper
+                } else {
+                    WordSource::Whispercpp
+                });
                 Some(Cue {
                     start,
                     end,
                     text,
                     words,
+                    word_source,
                     ..Cue::default()
                 })
             })
@@ -846,7 +916,9 @@ impl CaptionsPane {
                 text: cue.text,
                 start: cue.start,
                 end: cue.end,
+                audio_timed: matches!(cue.word_source, Some(WordSource::Whisper | WordSource::Whispercpp)),
                 words: cue.words,
+                preserve_words: false,
                 edited: false,
             })
             .collect();
@@ -1076,7 +1148,7 @@ impl CaptionsPane {
                 // the next cue's start. They can occupy the same caption
                 // track and remain separately editable on the timeline.
                 let duration = (cue.end - cue.start).max(0.05);
-                let words = if cue.edited {
+                let words = if cue.edited && !cue.preserve_words {
                     concat_project::captionmap::estimate_words(&cue.text, cue.start, cue.end)
                 } else {
                     cue.words.clone()
@@ -1582,6 +1654,65 @@ pub(crate) fn caption_clip_on_track(
 /// of broadcast subtitle hold, and what a reader takes in at a glance.
 const CAPTION_CHARS: usize = 42;
 
+fn split_draft_at_caret(
+    draft: &CaptionDraft,
+    caret: usize,
+) -> Result<(CaptionDraft, CaptionDraft), &'static str> {
+    if !draft.audio_timed {
+        return Err("This caption has estimated, not audio-timed, words; Enter cannot split it.");
+    }
+    let word_index = concat_project::captionmap::word_at_caret(&draft.text, &draft.words, caret)
+        .ok_or("Enter needs a timed word with text on both sides.")?;
+    let located = concat_project::captionmap::locate_words(&draft.text, &draft.words);
+    let range = located
+        .get(word_index)
+        .and_then(Option::as_ref)
+        .ok_or("Enter needs a timed word with text on both sides.")?;
+    let boundary = draft
+        .words
+        .get(word_index)
+        .map(|word| word.start)
+        .filter(|time| time.is_finite())
+        .ok_or("Enter needs a timed word with text on both sides.")?;
+    if !draft.start.is_finite()
+        || !draft.end.is_finite()
+        || boundary < draft.start + 0.05
+        || boundary > draft.end - 0.05
+    {
+        return Err("There is not enough audio time on both sides of this split.");
+    }
+    let head_text = draft.text[..range.start].trim_end().to_owned();
+    let tail_text = draft.text[range.start..].trim_start().to_owned();
+    if head_text.is_empty() || tail_text.is_empty() {
+        return Err("Enter must leave text on both sides of the split.");
+    }
+    let head_words = draft.words[..word_index].to_vec();
+    let tail_words = draft.words[word_index..].to_vec();
+    if head_words.is_empty() || tail_words.is_empty() {
+        return Err("Enter needs audio-timed words on both sides of the split.");
+    }
+    Ok((
+        CaptionDraft {
+            text: head_text,
+            start: draft.start,
+            end: boundary,
+            words: head_words,
+            audio_timed: true,
+            preserve_words: true,
+            edited: true,
+        },
+        CaptionDraft {
+            text: tail_text,
+            start: boundary,
+            end: draft.end,
+            words: tail_words,
+            audio_timed: true,
+            preserve_words: true,
+            edited: true,
+        },
+    ))
+}
+
 fn script_captions(text: &str) -> Vec<(String, f64)> {
     text.lines()
         .flat_map(sentences)
@@ -1657,11 +1788,94 @@ fn wrap_caption(sentence: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use concat_project::captionmap::Word;
     use concat_speech::transcribe::{HeardWord, Segment};
 
     use super::{
-        CaptionsPane, Subject, language_codes, language_labels, script_captions, source_label,
+        CaptionDraft, CaptionsPane, Subject, language_codes, language_labels,
+        script_captions, source_label, split_draft_at_caret,
     };
+
+    #[test]
+    fn enter_splits_a_draft_at_the_careted_words_audio_start() {
+        let draft = CaptionDraft {
+            text: "Halo dunia lagi".to_owned(),
+            start: 2.0,
+            end: 5.0,
+            words: vec![
+                Word { text: "Halo".to_owned(), start: 2.0, end: 2.8 },
+                Word { text: "dunia".to_owned(), start: 3.0, end: 4.0 },
+                Word { text: "lagi".to_owned(), start: 4.1, end: 4.8 },
+            ],
+            audio_timed: true,
+            preserve_words: false,
+            edited: false,
+        };
+        let (head, tail) = split_draft_at_caret(&draft, 7).expect("timed middle word");
+        assert_eq!(head.text, "Halo");
+        assert_eq!((head.start, head.end), (2.0, 3.0));
+        assert_eq!(head.words.len(), 1);
+        assert_eq!(tail.text, "dunia lagi");
+        assert_eq!((tail.start, tail.end), (3.0, 5.0));
+        assert_eq!(tail.words.len(), 2);
+    }
+
+    #[test]
+    fn enter_split_is_one_undo_step() {
+        let original = CaptionDraft {
+            text: "Halo dunia".to_owned(),
+            start: 0.0,
+            end: 2.0,
+            words: vec![
+                Word { text: "Halo".to_owned(), start: 0.0, end: 0.8 },
+                Word { text: "dunia".to_owned(), start: 1.0, end: 1.8 },
+            ],
+            audio_timed: true,
+            preserve_words: false,
+            edited: false,
+        };
+        let mut pane = CaptionsPane::default();
+        pane.drafts = vec![original.clone()];
+        pane.accept_draft_text(0, original.text.clone(), 7);
+        assert_eq!(pane.drafts.len(), 2);
+        assert_eq!(pane.drafts[0].text, "Halo");
+        assert_eq!(pane.drafts[1].text, "dunia");
+        pane.undo_draft();
+        assert_eq!(pane.drafts.len(), 1);
+        assert_eq!(pane.drafts[0].text, "Halo dunia");
+        assert_eq!((pane.drafts[0].start, pane.drafts[0].end), (0.0, 2.0));
+    }
+
+    #[test]
+    fn enter_refuses_a_draft_without_audio_word_timings() {
+        let draft = CaptionDraft {
+            text: "Halo dunia".to_owned(),
+            start: 0.0,
+            end: 2.0,
+            words: Vec::new(),
+            audio_timed: false,
+            preserve_words: false,
+            edited: true,
+        };
+        assert!(split_draft_at_caret(&draft, 2).is_err());
+    }
+
+    #[test]
+    fn enter_refuses_estimated_words_even_when_they_have_numeric_times() {
+        let draft = CaptionDraft {
+            text: "Halo dunia".to_owned(),
+            start: 0.0,
+            end: 2.0,
+            words: vec![
+                Word { text: "Halo".to_owned(), start: 0.0, end: 1.0 },
+                Word { text: "dunia".to_owned(), start: 1.0, end: 2.0 },
+            ],
+            audio_timed: false,
+            preserve_words: false,
+            edited: false,
+        };
+        assert!(split_draft_at_caret(&draft, 7).is_err());
+    }
 
     #[test]
     fn a_voice_is_named_by_its_file_and_where_it_starts() {

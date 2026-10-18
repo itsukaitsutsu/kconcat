@@ -94,6 +94,12 @@ export component PaneBody inherits VerticalLayout {
 // the scroller is worse than losing kinetic scrolling, and a wheel is what a
 // desktop editor is driven with anyway.
 export component PaneScroll inherits Rectangle {
+    // A scroll body inside PaneBody must take the height left below its
+    // header, not expand to the full preferred height of its content. Without
+    // stretch, the parent can clip the long content while PaneScroll itself
+    // measures no overflow, leaving the scrollbar hidden.
+    vertical-stretch: 1;
+
     /// A finger drags the column as well: a press that no control took -
     /// on a label, a note, a heading, the air between rows - scrolls. Not
     /// a Flickable, which would take the drag off a control as well; a

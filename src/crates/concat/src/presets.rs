@@ -209,6 +209,7 @@ impl PresetStyle {
             tracking: self.tracking.unwrap_or(0.0),
             max_width: self.max_width.unwrap_or(0.0).max(0.0),
             max_height: self.max_height.unwrap_or(0.0).max(0.0),
+            motion: base.motion,
             // The karaoke accent travels with the preset (C2/C3): the
             // three caption looks that the manual gives one ship with the
             // highlight on; everything else stays off until the user turns

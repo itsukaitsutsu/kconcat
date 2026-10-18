@@ -351,6 +351,7 @@ impl Painter {
             tracking: 0.0,
             max_width: 0.0,
             max_height: 0.0,
+            motion: concat_text::Motion::default(),
         };
         let fonts = concat_text::Fonts::new();
         let rendered = concat_text::render_frame(&fonts, &style, width, height)

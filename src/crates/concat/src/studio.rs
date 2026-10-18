@@ -10441,6 +10441,7 @@ impl Studio {
                 };
             }
             "select-all" => self.select_all(),
+            "select-lane" => self.select_current_lane(),
             // The phone's way out of the clip tools: nothing selected, the
             // way a press on an empty lane leaves it.
             "deselect" => {
@@ -10608,6 +10609,36 @@ impl Studio {
             }
             _ => {}
         }
+    }
+
+    /// Shift+L: the last selected clip identifies the current lane. A
+    /// second press clears the lane selection; a locked lane is not selected.
+    /// Linked mates on other lanes deliberately stay out of this selection.
+    pub fn select_current_lane(&mut self) {
+        let Some(track_id) = self
+            .selection
+            .last()
+            .and_then(|id| self.clip(id))
+            .map(|clip| clip.track_id.clone())
+        else {
+            return;
+        };
+        if self.locked(&track_id) {
+            return;
+        }
+        let ids = self.timeline().clips_on_track(&track_id);
+        if ids.is_empty() {
+            return;
+        }
+        self.flush_commit();
+        if self.selection.len() == ids.len()
+            && self.selection.iter().all(|id| ids.contains(id))
+        {
+            self.selection.clear();
+        } else {
+            self.selection = ids;
+        }
+        self.transition_selected = None;
     }
 
     /// Every clip on an unlocked lane.
