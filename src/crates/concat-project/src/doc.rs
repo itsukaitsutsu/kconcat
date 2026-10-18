@@ -243,7 +243,39 @@ fn settle_timeline(mut timeline: Timeline, media: &[MediaItem]) -> Option<Timeli
         })
         .map(Arc::new)
         .collect();
+    link_detached_pairs(&mut timeline);
     Some(timeline)
+}
+
+/// E5's migration: a project saved with `detached_from` loads as a linked
+/// group - the detached sound and its video share one `link_group` - so
+/// the pair that used to move apart now moves together, with the video's
+/// `muted` kept as it was. Only pairs with no group yet are touched, so a
+/// project saved after linking reads back exactly as written. The group id
+/// is derived from the video's id, which the mint already adopts, so it
+/// can never collide with a minted one.
+fn link_detached_pairs(timeline: &mut Timeline) {
+    let pairs: Vec<(String, String)> = timeline
+        .clips
+        .iter()
+        .filter(|sound| sound.link_group.is_none())
+        .filter_map(|sound| {
+            let video_id = sound.detached_from.as_deref()?;
+            let video = timeline.clips.iter().find(|clip| clip.id == video_id)?;
+            video
+                .link_group
+                .is_none()
+                .then(|| (sound.id.clone(), video.id.clone()))
+        })
+        .collect();
+    for (sound_id, video_id) in pairs {
+        let group = format!("g-{video_id}");
+        for clip in &mut timeline.clips {
+            if clip.id == sound_id || clip.id == video_id {
+                Arc::make_mut(clip).link_group = Some(group.clone());
+            }
+        }
+    }
 }
 
 /// One clip settled, or `None` for one with nowhere to live: no id, a

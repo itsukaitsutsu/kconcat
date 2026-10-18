@@ -1579,6 +1579,17 @@ pub struct Clip {
     /// until an edit stores a flag. `DOCUMENT_VERSION` does not move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption_flag: Option<bool>,
+    /// The link group this clip belongs to (E5, owner decision 16 Oct 2026:
+    /// Link / Unlink replaces Detach / Reattach). Clips sharing a group id
+    /// are one unit while linked: a move, a trim at a shared edge, a split
+    /// and a delete of one act on all of them - the Premiere model, video
+    /// on its line and its audio on the audio line, moving together.
+    /// `None` is an unlinked clip, which is every clip from before the
+    /// field; a saved `detached_from` pair is read as one group on load
+    /// (`doc::settle`), so old projects keep video and sound together.
+    /// `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_group: Option<String>,
     /// The transition on the cut into this clip, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
@@ -1694,6 +1705,7 @@ impl Clip {
             words: None,
             speaker: None,
             caption_flag: None,
+            link_group: None,
             transition_in: None,
             enhanced: None,
             text: None,
@@ -2425,6 +2437,69 @@ impl Timeline {
             .filter(|clip| clip.caption_of.as_deref() == Some(clip_id))
             .map(|clip| clip.id.clone())
             .collect()
+    }
+
+    /// The ids of every clip linked to this one (E5), itself included, in
+    /// timeline order - the linked selection: selecting one clip of a group
+    /// selects the group, so a group move is one click. Empty for an
+    /// unlinked clip and for an unknown id.
+    pub fn link_mates(&self, clip_id: &str) -> Vec<String> {
+        let Some(group) = self
+            .clip(clip_id)
+            .and_then(|clip| clip.link_group.as_deref())
+        else {
+            return Vec::new();
+        };
+        self.clips
+            .iter()
+            .filter(|clip| clip.link_group.as_deref() == Some(group))
+            .map(|clip| clip.id.clone())
+            .collect()
+    }
+
+    /// `ids` grown by every link mate of every clip in it (E5), without
+    /// duplicates, in timeline order. What the group commands and the UI's
+    /// linked selection both call, so the two can never disagree on what
+    /// "the group" is.
+    pub fn with_link_mates<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+        let mut groups: Vec<&str> = Vec::new();
+        let mut wanted: Vec<String> = Vec::new();
+        for id in ids {
+            if !wanted.iter().any(|have| have == id) {
+                wanted.push(id.to_owned());
+            }
+            if let Some(group) = self.clip(id).and_then(|clip| clip.link_group.as_deref())
+                && !groups.contains(&group)
+            {
+                groups.push(group);
+            }
+        }
+        for clip in &self.clips {
+            if clip
+                .link_group
+                .as_deref()
+                .is_some_and(|group| groups.contains(&group))
+                && !wanted.iter().any(|have| have == &clip.id)
+            {
+                wanted.push(clip.id.clone());
+            }
+        }
+        wanted
+    }
+
+    /// The ids of every clip on one lane, first to last (E6: Shift + L
+    /// selects the whole current lane and no other). The UI's selection is
+    /// its own state; this is the one place that decides what "the whole
+    /// lane" holds. Empty for an unknown track.
+    pub fn clips_on_track(&self, track_id: &str) -> Vec<String> {
+        let mut on_lane: Vec<&Clip> = self
+            .clips
+            .iter()
+            .map(Arc::as_ref)
+            .filter(|clip| clip.track_id == track_id)
+            .collect();
+        on_lane.sort_by(|a, b| a.start.total_cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
+        on_lane.into_iter().map(|clip| clip.id.clone()).collect()
     }
 
     /// Every caption on this timeline whose clip is gone.

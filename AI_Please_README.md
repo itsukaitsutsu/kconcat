@@ -6,6 +6,12 @@
 
 ---
 
+## 0. Latest checkpoint (read this first)
+
+**Checkpoint 10 — 18 Oct 2026 — `checkpoint-10-steps-E5-E6.md`.** E5 Link / Unlink (mechanism, migration of `detached_from`, 10 tests) and E6 whole-lane rule (`clips_on_track`, 1 test) are DONE in `concat-project`. Sweep: 529 passed / 0 failed, clippy + fmt clean. Remaining: T8 (needs owner transcript), K1–K5 (Track 6, not sandbox-provable), and the UI halves (owner's machine, §9). Full table: `02-map/kconcat-roadmap-v2-execution.md` §11.
+
+---
+
 ## 1. Where the discussion stands
 
 - **Option B (the feature list vs CapCut Pro):** re-checked and fixed in `05-background/kconcat-feature-gap-option-b-v2.md`. It is ranked for **long-form podcast editing** with **short-clip output**.

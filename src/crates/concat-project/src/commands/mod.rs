@@ -22,6 +22,7 @@ use crate::reframe::ReframePoint;
 
 mod audio;
 mod clips;
+mod links;
 mod speakers;
 pub use clips::why_not_merge;
 mod media;
@@ -828,6 +829,46 @@ pub enum Command {
         /// The video clip - or its detached sound.
         clip_id: String,
     },
+    /// Links clips into one group (E5): from then on a move, a split, a
+    /// delete, or a trim at an edge they share acts on all of them, and
+    /// selecting one selects the group. At least two existing picture or
+    /// sound clips are needed; a caption is refused (it already follows its
+    /// clip through `captionOf`). A clip already in a group brings its whole
+    /// group along, so linking is a merge, never a steal.
+    LinkClips {
+        /// The clips to link.
+        clip_ids: Vec<String>,
+    },
+    /// Dissolves the group of each named clip (E5). Every member stays
+    /// where it is on its own line and moves independently from then on;
+    /// Link can be applied again at any time. A clip in no group is a
+    /// tolerated no-op.
+    UnlinkClips {
+        /// Any member of each group to dissolve.
+        clip_ids: Vec<String>,
+    },
+    /// The widened form of a [`Command::TrimClip`] on a linked group (E5):
+    /// one trim per member whose edge sits at the dragged one. Made by
+    /// `links::widen`, never sent by the window; it is `#[doc(hidden)]`
+    /// so the wire shape stays what the window knows.
+    #[doc(hidden)]
+    #[serde(skip)]
+    LinkedTrim {
+        /// The per-member trims, the dragged clip first.
+        trims: Vec<(String, TrimEdge, f64, bool)>,
+    },
+    /// The widened form of a [`Command::SplitClips`] on a linked group
+    /// (E5): the split, then the tail pieces re-grouped so the head pair
+    /// and the tail pair are two groups, as Premiere does. Made by
+    /// `links::widen`, never sent by the window.
+    #[doc(hidden)]
+    #[serde(skip)]
+    LinkedSplit {
+        /// Every clip to cut, mates included.
+        clip_ids: Vec<String>,
+        /// Where to cut, in timeline seconds.
+        time: f64,
+    },
     /// Adds a lane, minting a "t" id: on top of the stack, or with
     /// `bottom` under every other lane. Absent is the top, which is what
     /// the command did before it could do anything else.
@@ -1023,6 +1064,13 @@ pub enum CommandError {
         /// The refusal sentence, shown to the user verbatim.
         reason: String,
     },
+    /// [`Command::LinkClips`] was refused: fewer than two clips, or a
+    /// caption among them (E5).
+    #[error("{reason}")]
+    CannotLink {
+        /// The refusal sentence, shown to the user verbatim.
+        reason: String,
+    },
     /// [`Command::RemoveTrack`] would have deleted the last track.
     #[error("A timeline needs at least one track.")]
     LastTrack,
@@ -1079,6 +1127,9 @@ impl IdMint {
             }
             for clip in &timeline.clips {
                 self.adopt(&clip.id);
+                if let Some(group) = &clip.link_group {
+                    self.adopt(group);
+                }
             }
         }
     }
@@ -1313,6 +1364,10 @@ pub fn apply(
     if command.has_non_finite() {
         return Err(CommandError::NotANumber);
     }
+    // E5: a move, split, delete or trim that names one clip of a link
+    // group acts on the group. The widening happens here, once, before the
+    // arm sees the command, so no arm needs to know groups exist.
+    let command = links::widen(project, command);
     match command {
         Command::Batch { commands } => {
             // All or nothing: apply to a staged copy and commit only a fully
@@ -1377,6 +1432,13 @@ pub fn apply(
         | Command::AutoReframe { .. }) => properties::apply(project, mint, command),
         command @ (Command::DetachAudio { .. } | Command::ReattachAudio { .. }) => {
             audio::apply(project, mint, command)
+        }
+        command @ (Command::LinkClips { .. } | Command::UnlinkClips { .. }) => {
+            links::apply(project, mint, command)
+        }
+        Command::LinkedTrim { trims } => links::apply_trims(project, mint, trims),
+        Command::LinkedSplit { clip_ids, time } => {
+            links::apply_split(project, mint, clip_ids, time)
         }
         command @ (Command::AddSpeaker { .. }
         | Command::AssignCaptionToSpeaker { .. }
