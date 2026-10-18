@@ -1889,6 +1889,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
         ));
     }));
+    app.on_sections_row_text_accepted(on_window!(
+        |state, index: i32, text: SharedString, caret: i32| {
+            state.handle(Msg::Sections(
+                crate::panes::sections::SectionsMsg::RowTextAccepted(
+                    index,
+                    text.to_string(),
+                    caret,
+                ),
+            ));
+        }
+    ));
     {
         let sections = app.global::<SectionsView>();
         sections.on_detect(on_window!(|state| {
@@ -2017,6 +2028,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 crate::panes::sections::SectionsMsg::RowTextEdited(index, text.to_string()),
             ));
         }));
+        sections.on_row_text_accepted(on_window!(
+            |state, index: i32, text: SharedString, caret: i32| {
+                state.handle(Msg::Sections(
+                    crate::panes::sections::SectionsMsg::RowTextAccepted(
+                        index,
+                        text.to_string(),
+                        caret,
+                    ),
+                ));
+            }
+        ));
         sections.on_list_scrolled(on_lanes!(|state, visible_index: i32| {
             state.handle(Msg::Sections(
                 crate::panes::sections::SectionsMsg::ListScrolled(visible_index),

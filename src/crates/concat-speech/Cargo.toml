@@ -7,6 +7,11 @@ license.workspace = true
 description = "Speech in and out: on-device transcription with whisper.cpp, and text to speech with Kokoro."
 
 [dependencies]
+# T4: the caption word-split (word_units/expand_units) is captionmap's rule,
+# and there is one copy of it - this crate follows it, not duplicates it.
+concat-project.workspace = true
+# Level 1 word-onset snapping (roadmap T2, D4-B): the pure snapper, no FFmpeg.
+concat-timing.workspace = true
 concat-host.workspace = true
 concat-media.workspace = true
 serde = { version = "1", features = ["derive"] }

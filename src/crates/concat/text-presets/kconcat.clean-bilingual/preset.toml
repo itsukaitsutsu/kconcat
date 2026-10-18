@@ -1,0 +1,16 @@
+# The stacking preset: the second language is the same look with offsetY +0.10 and nothing else changed (manual §4).
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.clean-bilingual"
+name = "Clean bilingual"
+language = "Latin"
+order = 108
+kind = "caption"
+offsetY = 0.5
+
+[style]
+content = "Clean bilingual"
+fontWeight = 600
+fontSize = 0.052
+strokeWidth = 0.006
+strokeColor = "#000000"
+shadow = false

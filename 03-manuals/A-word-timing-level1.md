@@ -119,6 +119,13 @@ Two extra signals, no new dependency, still offline:
 
 With ZCR alone, expect the mid-phrase column above to improve from "no change" to "some change". Full spectral flux is a Level-2-grade improvement without a model download, and it is the best value in this whole ladder. It is also the honest upper bound of "cheap": past this point, only a model helps.
 
+**Implemented record (T3, 18 Oct 2026) — the band edges this section asks to be recorded once chosen:**
+
+- Edges: **300–800, 800–1500, 1500–3000, 3000–6000 Hz** — the starting guess above, chosen as the implemented set. Code: `concat_timing::signals::BANDS`; four geometrically spaced Goertzel probes per band, band magnitude = probe mean, rectangular window, flux = Σ of positive band-magnitude deltas per 5 ms hop. Retuning is recorded here, per T8 step 3.
+- Hann weighting was measured and **rejected**: tapering the window does not remove the offset artifact below, because the step edge is in the signal, not the window.
+- **Offset gate (measured fix):** a flux rise counts only where frame energy is not falling (`e[i] ≥ e[i−1]`). Without it, sliding a window off the end of a loud burst makes band magnitudes oscillate (Dirichlet sidelobes of the signal's own sharp cut) and raw flux spikes at burst *offsets*: on the synthetic corpus, words after a gap snapped **130 ms early, into the previous burst's tail**. An offset is a decay; a consonant→vowel transition at equal loudness has flat energy. The gate separates them with no new tunable number. Regression test: `signals::tests::a_burst_offset_is_not_a_flux_rise`.
+- Thresholds (starting guesses, T8-tunable, in `signals::Wideband`): ZCR margin 0.10 crossings/sample above the local 20th-percentile floor; flux ≥ max(2 × local median flux, 0.0005). The flux floor's provenance: the equal-loudness 0.05-amplitude transition fixture peaks at ≈0.0016 raw flux; steady-state jitter is ≈1e-15.
+
 ---
 
 ## 4. How to measure it — this decides whether the work was real

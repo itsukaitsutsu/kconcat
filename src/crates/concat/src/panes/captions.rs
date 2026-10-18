@@ -1039,7 +1039,11 @@ impl CaptionsPane {
     /// Inserts draft cues onto the timeline and returns the linked `clip_id` (if any).
     /// When `replace_existing` is `false`, keeps all existing caption tracks and
     /// places the new captions on a fresh track above (`+ Add as new caption track`).
-    fn insert_drafts_inner(&mut self, studio: &mut Studio, replace_existing: bool) -> Option<String> {
+    fn insert_drafts_inner(
+        &mut self,
+        studio: &mut Studio,
+        replace_existing: bool,
+    ) -> Option<String> {
         let subject = self.subject.as_ref()?.clone();
         let clip_id = if !subject.clip_id.is_empty() {
             subject.clip_id.clone()
@@ -1476,11 +1480,7 @@ pub(crate) fn non_overlapping_caption_look(
     let existing_ids: std::collections::HashSet<String> = if clip_id.is_empty() {
         std::collections::HashSet::new()
     } else {
-        studio
-            .timeline()
-            .captions_of(clip_id)
-            .into_iter()
-            .collect()
+        studio.timeline().captions_of(clip_id).into_iter().collect()
     };
     let used_offsets: Vec<f64> = studio
         .timeline()
@@ -1488,7 +1488,9 @@ pub(crate) fn non_overlapping_caption_look(
         .iter()
         .filter(|c| {
             c.kind == concat_project::model::ClipKind::Text
-                && (existing_ids.is_empty() || existing_ids.contains(&c.id) || c.caption_of.is_some())
+                && (existing_ids.is_empty()
+                    || existing_ids.contains(&c.id)
+                    || c.caption_of.is_some())
         })
         .map(|c| c.offset_y)
         .collect();

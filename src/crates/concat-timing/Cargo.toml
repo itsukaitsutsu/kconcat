@@ -1,0 +1,20 @@
+[package]
+name = "concat-timing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Word timing: the energy snapper, its onset signals, and the metrics that decide whether a change helped. No dependencies, so its tests run anywhere."
+
+# Deliberately empty (D4-B): this crate is the one place the word-timing rules
+# live, and it must build and test with nothing installed - no FFmpeg, no GPU,
+# no model. The JSON the harness reads is a dev-dependency of the examples and
+# tests only; the library itself stays dependency-free.
+[dependencies]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

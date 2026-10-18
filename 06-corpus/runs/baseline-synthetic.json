@@ -1,0 +1,123 @@
+{
+  "audio": {
+    "channels": 1,
+    "duration_s": 30.0,
+    "file": "../06-corpus/fixtures/synthetic-30s.f32",
+    "sample_rate": 16000
+  },
+  "cache": "../06-corpus/fixtures/synthetic-cache.json",
+  "counts": {
+    "reverted": 0,
+    "snapped": 0,
+    "tied": 0
+  },
+  "delta": null,
+  "kind": "tier1-run",
+  "segments": [
+    {
+      "end": 3.4,
+      "start": 0.515,
+      "tier1": {
+        "monotonic_violations": 0,
+        "onset_rate": 1.0,
+        "outliers": 0,
+        "words": 6
+      },
+      "words": [
+        {
+          "end": 0.9,
+          "source": "whisper",
+          "start": 0.515,
+          "text": "jadi"
+        },
+        {
+          "end": 1.4,
+          "source": "whisper",
+          "start": 1.015,
+          "text": "kalau"
+        },
+        {
+          "end": 1.9,
+          "source": "whisper",
+          "start": 1.515,
+          "text": "kita"
+        },
+        {
+          "end": 2.4,
+          "source": "whisper",
+          "start": 2.015,
+          "text": "potong"
+        },
+        {
+          "end": 2.7,
+          "source": "whisper",
+          "start": 2.515,
+          "text": "di"
+        },
+        {
+          "end": 3.4,
+          "source": "whisper",
+          "start": 3.015,
+          "text": "kata"
+        }
+      ]
+    },
+    {
+      "end": 12.2,
+      "start": 5.015,
+      "tier1": {
+        "monotonic_violations": 2,
+        "onset_rate": 0.8,
+        "outliers": 2,
+        "words": 5
+      },
+      "words": [
+        {
+          "end": 5.3,
+          "source": "whisper",
+          "start": 5.015,
+          "text": "ini"
+        },
+        {
+          "end": 5.6,
+          "source": "whisper",
+          "start": 4.9,
+          "text": "sinkronnya"
+        },
+        {
+          "end": 8.5,
+          "source": "whisper",
+          "start": 6.015,
+          "text": "tetap"
+        },
+        {
+          "end": 6.9,
+          "source": "whisper",
+          "start": 6.515,
+          "text": "jaga"
+        },
+        {
+          "end": 12.2,
+          "source": "whisper",
+          "start": 12.0,
+          "text": "hantu"
+        }
+      ]
+    }
+  ],
+  "snap": false,
+  "tier1": {
+    "monotonic_violations": 2,
+    "onset_rate": 0.9090909090909091,
+    "outliers": 2,
+    "words": 11
+  },
+  "wer": {
+    "deletions": 0,
+    "errors": 1,
+    "insertions": 0,
+    "rate": 0.09090909090909091,
+    "reference_words": 11,
+    "substitutions": 1
+  }
+}

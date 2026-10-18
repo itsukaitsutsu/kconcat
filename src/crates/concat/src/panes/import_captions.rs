@@ -115,10 +115,8 @@ impl ImportCaptionsPane {
                             return;
                         }
                         let count = placed.len();
-                        let fallback_clip_id = target
-                            .as_ref()
-                            .map(|t| t.id.clone())
-                            .or_else(|| {
+                        let fallback_clip_id =
+                            target.as_ref().map(|t| t.id.clone()).or_else(|| {
                                 studio
                                     .timeline()
                                     .clips

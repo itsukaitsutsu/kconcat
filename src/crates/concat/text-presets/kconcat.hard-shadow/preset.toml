@@ -1,0 +1,16 @@
+# Stroke plus the shadow the manual's table names - the only preset of the eight that carries one.
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.hard-shadow"
+name = "Hard shadow"
+language = "Latin"
+order = 105
+kind = "caption"
+offsetY = 0.42
+
+[style]
+content = "Hard shadow"
+fontWeight = 900
+fontSize = 0.074
+strokeWidth = 0.01
+strokeColor = "#000000"
+shadow = true

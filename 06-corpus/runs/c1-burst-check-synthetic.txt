@@ -1,0 +1,21 @@
+before T2 Tier 1: words=11 onset_rate=0.9090909090909092 monotonic_violations=2 outliers=2 | wer={"deletions":0,"errors":1,"insertions":0,"rate":0.09090909090909093,"reference_words":11,"substitutions":1} | snapped=0 reverted=0 tied=0
+after T2  Tier 1: words=11 onset_rate=0.9090909090909092 monotonic_violations=1 outliers=0 | wer={"deletions":0,"errors":1,"insertions":0,"rate":0.09090909090909093,"reference_words":11,"substitutions":1} | snapped=0 reverted=0 tied=0
+after T2  delta: moved=1 mean_shift_s=0.0105 max_abs_shift_s=0.1150
+
+before T2 burst chunks (6):
+    0.515 -   1.900  (3 words, 1.38s)  jadi kalau kita
+    2.015 -   3.400  (3 words, 1.38s)  potong di kata
+    5.015 -   5.600  (2 words, 0.58s)  ini sinkronnya
+    6.015 -   8.500  (1 words, 2.49s)  tetap
+    8.500 -   8.550  (1 words, 0.05s)  jaga
+   12.000 -  12.200  (1 words, 0.20s)  hantu
+
+after T2  burst chunks (5):
+    0.515 -   1.900  (3 words, 1.38s)  jadi kalau kita
+    2.015 -   3.400  (3 words, 1.38s)  potong di kata
+    5.015 -   5.600  (2 words, 0.58s)  ini sinkronnya
+    6.015 -   6.900  (2 words, 0.89s)  tetap jaga
+   12.000 -  12.200  (1 words, 0.20s)  hantu
+
+chunk boundaries identical before/after T2: no (timings inside the chunks follow the snapped words)
+burst checks: PASS (<=3 words, <=18 chars, <=2.5 s, ordered, non-overlapping, no word lost)

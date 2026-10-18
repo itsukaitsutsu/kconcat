@@ -10,6 +10,7 @@ license = "AGPL-3.0-or-later"  # + plugin exception, see LICENSE-EXCEPTIONS.md
 
 [workspace.dependencies]
 concat-core = { path = "crates/concat-core" }
+concat-timing = { path = "crates/concat-timing" }
 concat-media = { path = "crates/concat-media" }
 concat-project = { path = "crates/concat-project" }
 concat-render = { path = "crates/concat-render" }

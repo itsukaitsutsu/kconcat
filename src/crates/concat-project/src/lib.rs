@@ -24,13 +24,18 @@
 pub mod captionmap;
 pub mod commands;
 pub mod doc;
+pub mod duck;
 pub mod editor;
+pub mod filler;
 pub mod model;
 pub mod placement;
+pub mod queue;
+pub mod reframe;
 pub mod sectionlist;
 pub mod sections;
 pub mod speed;
 pub mod subtitle;
+pub mod takes;
 
 pub use commands::{Command, CommandError, Outcome, why_not_merge};
 pub use doc::{DOCUMENT_VERSION, DocumentSettings, document_version, from_document, to_document};
@@ -39,6 +44,57 @@ pub use model::Project;
 
 #[cfg(test)]
 mod tests {
+    /// T5 migration, prescribed: a project file saved before the stored
+    /// caption flag loads and derives identity exactly as before - word
+    /// timings or a caption-run link still make a caption, neither is still
+    /// a plain title - and once a document stores the flag, the flag wins
+    /// over any derivation.
+    #[test]
+    fn a_document_without_the_caption_flag_derives_identity_as_before() {
+        use crate::captionmap::Word;
+        use crate::model::{Clip, ClipKind};
+
+        let mut clip = Clip::blank("c1", "t1", ClipKind::Text, "halo dunia", 2.0, 2.0);
+        clip.words = Some(vec![Word {
+            text: "halo".to_owned(),
+            start: 3.5,
+            end: 3.7,
+        }]);
+
+        // The wire shape of an old document: the field simply is not there.
+        let value = serde_json::to_value(&clip).expect("serialises");
+        assert!(
+            value.get("captionFlag").is_none(),
+            "absent, like every pre-T5 file"
+        );
+        let loaded: Clip = serde_json::from_value(value).expect("loads");
+        assert_eq!(loaded.caption_flag, None);
+        assert!(loaded.is_caption(), "words derive a caption, as before");
+
+        // Neither words nor a link: a plain title, as before - and the
+        // document reader's tidy() changes none of it.
+        let title = Clip::blank("c2", "t1", ClipKind::Text, "judul", 0.0, 2.0);
+        let loaded: Clip =
+            serde_json::from_value(serde_json::to_value(&title).expect("serialises"))
+                .expect("loads");
+        assert!(!loaded.is_caption());
+        assert!(!loaded.tidy().is_caption());
+
+        // A stored flag outruns derivation in both directions: the ghost an
+        // autotrim leaves (words gone, flag kept) stays a caption, and a
+        // flag saying "title" is believed even with words present.
+        let mut ghost = clip.clone();
+        ghost.words = None;
+        ghost.caption_flag = Some(true);
+        assert!(
+            ghost.is_caption(),
+            "the stored identity survives losing the words"
+        );
+        let mut demoted = clip.clone();
+        demoted.caption_flag = Some(false);
+        assert!(!demoted.is_caption(), "the stored flag wins");
+    }
+
     use serde_json::json;
 
     use crate::commands::{ClipMove, ClipPatch, Command, NewMedia, TrackFlag, TrimEdge};

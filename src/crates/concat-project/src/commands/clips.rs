@@ -82,6 +82,9 @@ pub(super) fn apply(
             // Generated/imported captions may overlap one another on one
             // caption lane. Hand-made text remains an ordinary title, which
             // keeps the timeline's usual no-overlap placement behaviour.
+            // This is the birth of the clip's identity, the one place the
+            // inputs are read to make it (T5): from here on the stored flag
+            // decides, and `Clip::is_caption` is the only reader.
             let is_caption = caption_of.is_some() || words.is_some();
             let timeline = project.active_mut();
             let track_id = match track_id {
@@ -107,8 +110,20 @@ pub(super) fn apply(
                 None => first_free_track(timeline, start, duration)
                     .unwrap_or_else(|| fresh_track(timeline, mint)),
             };
+            // The lane's stored nudge applies at birth (T6): a regenerated
+            // caption run lands already corrected, because the correction
+            // belongs to the track, not to the run that was removed.
+            let nudge = if is_caption {
+                f64::from(
+                    timeline
+                        .track(&track_id)
+                        .map_or(0, |track| track.caption_nudge_ms),
+                ) / 1000.0
+            } else {
+                0.0
+            };
             let start = if is_caption {
-                timeline.nearest_caption_start(&track_id, start, duration, &[])
+                timeline.nearest_caption_start(&track_id, (start + nudge).max(0.0), duration, &[])
             } else {
                 timeline.nearest_free_start(&track_id, start, duration, &[])
             };
@@ -127,7 +142,18 @@ pub(super) fn apply(
             // that later dangles (its clip deleted) is Phase 1's
             // `captions_with_no_clip` case, not an error here.
             clip.caption_of = caption_of;
-            clip.words = words;
+            // The lane's nudge shifts the word timings with the cue, so the
+            // highlight stays on the text it belongs to.
+            clip.words = words.map(|mut words| {
+                if nudge != 0.0 {
+                    for word in &mut words {
+                        word.start = (word.start + nudge).max(0.0);
+                        word.end = (word.end + nudge).max(word.start);
+                    }
+                }
+                words
+            });
+            clip.caption_flag = Some(is_caption);
             clip.text = Some(style);
             timeline.clips.push(Arc::new(clip));
             Ok(Outcome {
@@ -372,6 +398,455 @@ pub(super) fn apply(
             })
         }
 
+        Command::MoveCaptionWordEdge {
+            clip_id,
+            word_index,
+            edge,
+            time,
+        } => {
+            let refuse = |reason: &str| -> Result<Outcome, CommandError> {
+                Err(CommandError::CannotMoveWordEdge {
+                    reason: reason.to_owned(),
+                })
+            };
+            // The drag lands on the millisecond grid the word timings
+            // already live on, so a saved document never carries a
+            // finer number than the one next to it.
+            let time = crate::sections::round_millis(time);
+            let timeline = project.active_mut();
+            let Some(index) = timeline.clips.iter().position(|clip| clip.id == clip_id) else {
+                return refuse("That caption no longer exists.");
+            };
+            let clip = Arc::make_mut(&mut timeline.clips[index]);
+            if !clip.is_caption() {
+                return refuse("Only a caption has heard words to drag.");
+            }
+            let cue_start = clip.start;
+            let cue_end = clip.start + clip.duration;
+            let Some(words) = clip.words.as_mut().filter(|words| !words.is_empty()) else {
+                return refuse(
+                    "This caption has no heard word timings, so there is no edge to drag.",
+                );
+            };
+            if words.get(word_index).is_none() {
+                return refuse("That word is past the end of the caption.");
+            }
+            // The drag's kindness rule: the edge is clamped, never
+            // refused. It stops at its neighbours - or at the cue's
+            // window for the first and last word, so a word is never
+            // heard outside its own caption - and it stops leaving the
+            // word its minimum width. No drag can overlap the heard
+            // order or thin a word out of existence.
+            let (lower, upper) = match edge {
+                WordEdge::Start => {
+                    let lower = if word_index > 0 {
+                        words[word_index - 1].end
+                    } else {
+                        cue_start
+                    };
+                    (lower, words[word_index].end - crate::captionmap::MIN_WORD)
+                }
+                WordEdge::End => {
+                    let upper = if word_index + 1 < words.len() {
+                        words[word_index + 1].start
+                    } else {
+                        cue_end
+                    };
+                    (words[word_index].start + crate::captionmap::MIN_WORD, upper)
+                }
+            };
+            // A pathological input - a word already thinner than the
+            // minimum, imported without a clean - must not invert the
+            // clamp and panic: the bounds simply meet.
+            let upper = upper.max(lower);
+            let wanted = time.clamp(lower, upper);
+            let moved = match edge {
+                WordEdge::Start => (words[word_index].start - wanted).abs() > 1e-9,
+                WordEdge::End => (words[word_index].end - wanted).abs() > 1e-9,
+            };
+            match edge {
+                WordEdge::Start => words[word_index].start = wanted,
+                WordEdge::End => words[word_index].end = wanted,
+            }
+            // A drag that lands where it started applied nothing, and
+            // the editor records no undo step for nothing.
+            Ok(Outcome {
+                created_id: None,
+                applied: moved,
+            })
+        }
+
+        Command::DeleteCaptionWord {
+            clip_id,
+            word_index,
+            cut_video,
+        } => {
+            let refuse = |reason: &str| -> Result<Outcome, CommandError> {
+                Err(CommandError::CannotDeleteWord {
+                    reason: reason.to_owned(),
+                })
+            };
+            // Everything the two paths need is read off the whole state
+            // first, as owned values, before anything is written.
+            let (word_span, owner_id, new_content) = {
+                let timeline = project.active();
+                let Some(clip) = timeline.clip(&clip_id) else {
+                    return refuse("That caption no longer exists.");
+                };
+                if !clip.is_caption() {
+                    return refuse("Only a caption has heard words to delete.");
+                }
+                let Some(words) = clip.words.as_ref().filter(|words| !words.is_empty()) else {
+                    return refuse(
+                        "This caption has no heard word timings, so there is no word to delete.",
+                    );
+                };
+                let Some(target) = words.get(word_index) else {
+                    return refuse("That word is past the end of the caption.");
+                };
+                if cut_video {
+                    // The clip whose time gets cut: the one the caption
+                    // follows, or - an imported cue may follow nothing - the
+                    // first picture or sound the word is heard over.
+                    let owner = clip
+                        .caption_of
+                        .as_deref()
+                        .and_then(|id| timeline.clip(id).map(|owner| owner.id.clone()))
+                        .or_else(|| {
+                            timeline
+                                .clips
+                                .iter()
+                                .find(|other| {
+                                    !other.is_caption()
+                                        && other.start < target.end - JOIN_EPSILON
+                                        && other.start + other.duration
+                                            > target.start + JOIN_EPSILON
+                                })
+                                .map(|other| other.id.clone())
+                        });
+                    let Some(owner) = owner else {
+                        return refuse(
+                            "There is no picture or sound under this word, so there is nothing to cut.",
+                        );
+                    };
+                    ((target.start, target.end), Some(owner), None)
+                } else {
+                    // Text only: the word comes out of the content at its
+                    // located bytes, so spacing and punctuation stay tidy,
+                    // and the single writer (T7) prunes its timing slot.
+                    let Some(style) = clip.text.as_ref() else {
+                        return refuse("This caption has no text to delete from.");
+                    };
+                    let Some(range) =
+                        crate::captionmap::locate_words(&style.content, words)[word_index].clone()
+                    else {
+                        return refuse(
+                            "The word is not in the caption's text, so there is nothing to delete.",
+                        );
+                    };
+                    let head = style.content[..range.start].trim_end();
+                    let tail = style.content[range.end..].trim_start();
+                    let content = if head.is_empty() {
+                        tail.to_owned()
+                    } else if tail.is_empty() {
+                        head.to_owned()
+                    } else {
+                        format!("{head} {tail}")
+                    };
+                    ((target.start, target.end), None, Some(content))
+                }
+            };
+
+            if let Some(content) = new_content {
+                let timeline = project.active_mut();
+                let Some(clip) = timeline.clip_mut(&clip_id) else {
+                    return refuse("That caption no longer exists.");
+                };
+                if let Some(style) = clip.text.as_mut() {
+                    style.content = content.clone();
+                }
+                clip.name = first_line(&content);
+                super::properties::reconcile_caption_words(clip);
+                return Ok(Outcome {
+                    created_id: None,
+                    applied: true,
+                });
+            }
+
+            // The cut path: the word's heard span comes out of the clip it
+            // follows, and AutotrimClip is the machine that cuts every lane
+            // at the same moments, closes the gap, and rebuilds the captions
+            // and their links over it - the remove-selection flow's own
+            // machinery, so a word delete ripples exactly like a selection
+            // delete (owner decision: the gap closes).
+            let owner_id = owner_id.expect("the cut path read an owner");
+            let kept = {
+                let owner = project
+                    .active()
+                    .clip(&owner_id)
+                    .expect("the owner was just read");
+                let owner_end = owner.start + owner.duration;
+                let mut kept = Vec::new();
+                if word_span.0 > owner.start {
+                    kept.push((owner.start, word_span.0.min(owner_end)));
+                }
+                if word_span.1 < owner_end {
+                    kept.push((word_span.1.max(owner.start), owner_end));
+                }
+                kept
+            };
+            let outcome = apply(
+                project,
+                mint,
+                Command::AutotrimClip {
+                    clip_id: owner_id,
+                    kept,
+                },
+            )?;
+            if !outcome.applied {
+                return refuse(
+                    "The word's timing does not sit inside the clip it follows, so there is nothing to cut.",
+                );
+            }
+            // The husk rule: a caption whose last heard word was just cut
+            // keeps no wordless shell. Its first piece holds the original
+            // id, so that is the one to look at; the sliver logic in
+            // AutotrimClip already dropped the other wordless pieces.
+            let timeline = project.active_mut();
+            if let Some(index) = timeline.clips.iter().position(|clip| clip.id == clip_id)
+                && timeline.clips[index].is_caption()
+                && timeline.clips[index].words.is_none()
+            {
+                timeline.clips.remove(index);
+            }
+            Ok(outcome)
+        }
+
+        Command::RemoveFillerWords {
+            clip_ids,
+            strong,
+            weak,
+            cut_video,
+        } => {
+            // The read pass: what the ticked tiers actually hit, per caption.
+            // A selection holds what the user marked, not only cues, so
+            // picture clips and unheard captions are skipped, not errors.
+            let mut targets: Vec<(String, Vec<usize>)> = Vec::new();
+            {
+                let timeline = project.active();
+                for id in clip_ids {
+                    let Some(clip) = timeline.clip(&id) else {
+                        continue;
+                    };
+                    if !clip.is_caption() {
+                        continue;
+                    }
+                    let Some(words) = clip.words.as_ref().filter(|words| !words.is_empty()) else {
+                        continue;
+                    };
+                    let indices = crate::filler::filler_indices(words, strong, weak);
+                    if !indices.is_empty() {
+                        targets.push((id.clone(), indices));
+                    }
+                }
+            }
+            if targets.is_empty() {
+                // A pass that hits nothing is not an edit: the undo history
+                // keeps no nothing-snapshot.
+                return Ok(Outcome::default());
+            }
+
+            if !cut_video {
+                // Text only: the words leave the content at their located
+                // bytes and their timing slots go with them, written
+                // together (T7's single-writer rule); every survivor keeps
+                // its heard time and the picture stands still.
+                let timeline = project.active_mut();
+                for (id, indices) in &targets {
+                    let Some(clip) = timeline.clip_mut(id) else {
+                        continue;
+                    };
+                    let (content, kept) = {
+                        let Some(style) = clip.text.as_ref() else {
+                            continue;
+                        };
+                        let Some(words) = clip.words.as_ref() else {
+                            continue;
+                        };
+                        let filler: std::collections::HashSet<usize> =
+                            indices.iter().copied().collect();
+                        let located = crate::captionmap::locate_words(&style.content, words);
+                        let mut out = String::new();
+                        let mut cursor = 0usize;
+                        for (index, range) in located.iter().enumerate() {
+                            if filler.contains(&index)
+                                && let Some(range) = range
+                            {
+                                out.push_str(&style.content[cursor..range.start]);
+                                cursor = range.end;
+                            }
+                        }
+                        out.push_str(&style.content[cursor..]);
+                        let content = out.split_whitespace().collect::<Vec<_>>().join(" ");
+                        let kept: Vec<crate::captionmap::Word> = words
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| !filler.contains(index))
+                            .map(|(_, word)| word.clone())
+                            .collect();
+                        (content, kept)
+                    };
+                    if let Some(style) = clip.text.as_mut() {
+                        style.content = content.clone();
+                    }
+                    clip.name = first_line(&content);
+                    clip.words = Some(kept);
+                }
+                return Ok(Outcome {
+                    created_id: None,
+                    applied: true,
+                });
+            }
+
+            // The cut path: every filler's heard span comes out of the clip
+            // it rides, through the remove-selection machinery (E1's path).
+            let mut spans: Vec<(f64, f64)> = Vec::new();
+            let mut owners: Vec<(f64, String)> = Vec::new();
+            let mut affected: Vec<String> = Vec::new();
+            let before_ids: std::collections::HashSet<String> = {
+                let timeline = project.active();
+                timeline.clips.iter().map(|clip| clip.id.clone()).collect()
+            };
+            {
+                let timeline = project.active();
+                for (id, indices) in &targets {
+                    let clip = timeline.clip(id).expect("read above");
+                    let words = clip.words.as_ref().expect("read above");
+                    for &index in indices {
+                        spans.push((words[index].start, words[index].end));
+                    }
+                    affected.push(id.clone());
+                    // The clip whose time gets cut: the one the caption
+                    // follows, else the first picture or sound any of its
+                    // filler words is heard over.
+                    let owner = clip
+                        .caption_of
+                        .as_deref()
+                        .and_then(|owner| timeline.clip(owner))
+                        .map(|owner| (owner.start, owner.id.clone()))
+                        .or_else(|| {
+                            indices.iter().find_map(|&index| {
+                                timeline.clips.iter().find_map(|other| {
+                                    (!other.is_caption()
+                                        && other.start < words[index].end - JOIN_EPSILON
+                                        && other.start + other.duration
+                                            > words[index].start + JOIN_EPSILON)
+                                        .then(|| (other.start, other.id.clone()))
+                                })
+                            })
+                        });
+                    let Some(owner) = owner else {
+                        return Err(CommandError::CannotDeleteWord {
+                            reason: "There is no picture or sound under a filler word, so there is nothing to cut.".to_owned(),
+                        });
+                    };
+                    owners.push(owner);
+                }
+                // An unselected caption riding the same cut is rebuilt by it
+                // too, so it is a husk candidate as well - but only one that
+                // carried heard words: an imported cue never had any, and
+                // must survive the cut it merely rode.
+                for clip in &timeline.clips {
+                    if clip.is_caption()
+                        && clip.words.is_some()
+                        && spans.iter().any(|&(start, end)| {
+                            clip.start < end - JOIN_EPSILON
+                                && clip.start + clip.duration > start + JOIN_EPSILON
+                        })
+                    {
+                        affected.push(clip.id.clone());
+                    }
+                }
+            }
+            spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut merged: Vec<(f64, f64)> = Vec::new();
+            for span in spans {
+                match merged.last_mut() {
+                    Some(last) if span.0 <= last.1 + JOIN_EPSILON => {
+                        last.1 = last.1.max(span.1);
+                    }
+                    _ => merged.push(span),
+                }
+            }
+            owners.sort_by(|a, b| a.0.total_cmp(&b.0));
+            owners.dedup_by(|a, b| a.1 == b.1);
+
+            // One autotrim per owner, left to right: kept = the owner's span
+            // minus the filler spans inside it. Every lane is cut at the
+            // same moments and the gaps close, exactly as a selection
+            // delete does.
+            for (_, owner_id) in &owners {
+                let kept = {
+                    let timeline = project.active();
+                    let Some(owner) = timeline.clip(owner_id) else {
+                        continue;
+                    };
+                    let owner_end = owner.start + owner.duration;
+                    let mut kept = Vec::new();
+                    let mut cursor = owner.start;
+                    for &(start, end) in &merged {
+                        if end <= owner.start + JOIN_EPSILON || start >= owner_end - JOIN_EPSILON {
+                            continue;
+                        }
+                        let start = start.max(cursor);
+                        let end = end.min(owner_end);
+                        if start - cursor >= MIN_CLIP_DURATION {
+                            kept.push((cursor, start));
+                        }
+                        cursor = cursor.max(end);
+                    }
+                    if owner_end - cursor >= MIN_CLIP_DURATION {
+                        kept.push((cursor, owner_end));
+                    }
+                    kept
+                };
+                apply(
+                    project,
+                    mint,
+                    Command::AutotrimClip {
+                        clip_id: owner_id.clone(),
+                        kept,
+                    },
+                )?;
+            }
+
+            // The husk sweep, scoped so it can only touch what this pass
+            // rebuilt: a caption that carried heard words and now has none
+            // goes (its first rebuilt piece keeps the original id), and a
+            // piece born by this cut with empty text goes - empty text
+            // shows nothing and highlights nothing. Captions that existed
+            // before keep whatever they had.
+            let timeline = project.active_mut();
+            timeline.clips.retain(|clip| {
+                if !clip.is_caption() {
+                    return true;
+                }
+                if !before_ids.contains(&clip.id)
+                    && clip
+                        .text
+                        .as_ref()
+                        .is_some_and(|style| style.content.trim().is_empty())
+                {
+                    return false;
+                }
+                !(affected.contains(&clip.id) && clip.words.is_none())
+            });
+            Ok(Outcome {
+                created_id: None,
+                applied: true,
+            })
+        }
+
         Command::SplitClips { clip_ids, time } => {
             let timeline = project.active_mut();
             let mut created = None;
@@ -439,6 +914,101 @@ pub(super) fn apply(
             Ok(Outcome {
                 created_id: created,
                 applied,
+            })
+        }
+
+        Command::SplitCaptionAtWord {
+            clip_id,
+            word_index,
+        } => {
+            let refuse = |reason: &str| -> Result<Outcome, CommandError> {
+                Err(CommandError::CannotSplitCaption {
+                    reason: reason.to_owned(),
+                })
+            };
+            let timeline = project.active_mut();
+            let Some(index) = timeline.clips.iter().position(|clip| clip.id == clip_id) else {
+                return refuse("That caption no longer exists.");
+            };
+            // Everything the two halves need is read off the whole clip
+            // first, as owned values, before either piece is written.
+            let clip: &Clip = &timeline.clips[index];
+            if !clip.is_caption() {
+                return refuse("Only a caption can split at a heard word.");
+            }
+            let Some(words) = clip.words.as_ref().filter(|words| !words.is_empty()) else {
+                return refuse(
+                    "This caption has no heard word timings, so there is nothing to split at.",
+                );
+            };
+            if word_index == 0 || word_index >= words.len() {
+                return refuse(
+                    "The caret leaves no word on one side, so there is no boundary to split at.",
+                );
+            }
+            let Some(style) = clip.text.as_ref() else {
+                return refuse("This caption has no text to split.");
+            };
+            let Some(range) =
+                crate::captionmap::locate_words(&style.content, words)[word_index].clone()
+            else {
+                return refuse(
+                    "The word is not in the caption's text, so there is no boundary to split at.",
+                );
+            };
+            // The cut lands on the word's heard start (T2/T3 timing), never
+            // on a text-length estimate, and the content splits at the byte
+            // where that word sits, so both halves keep the original
+            // punctuation and spacing.
+            let boundary = words[word_index].start;
+            let whole = clip.duration;
+            let head_duration = boundary - clip.start;
+            let tail_duration = clip.start + whole - boundary;
+            if head_duration < MIN_CLIP_DURATION || tail_duration < MIN_CLIP_DURATION {
+                return refuse(
+                    "The word sits too close to the caption's edge to leave two pieces.",
+                );
+            }
+            let head_text = style.content[..range.start].trim_end().to_owned();
+            let mut tail_style = style.clone();
+            tail_style.content = style.content[range.start..].trim_start().to_owned();
+            let head_words = words[..word_index].to_vec();
+            let tail_words = words[word_index..].to_vec();
+            let owner = clip.caption_of.clone();
+            let offset = boundary - clip.start;
+            // The tail is born as Enter needs it: the same lane and look, at
+            // the boundary, with the words from the caret on - their heard
+            // times stand as they are. The lane's nudge is not applied again:
+            // the boundary and the words already carry it (T6).
+            let mut tail = (*clip).clone();
+            tail.id = mint.next("c");
+            tail.start = boundary;
+            tail.duration = tail_duration;
+            tail.name = first_line(&tail_style.content);
+            tail.text = Some(tail_style);
+            tail.words = Some(tail_words);
+            tail.caption_of = owner;
+            tail.caption_flag = Some(true);
+            // The transition belongs to the original start, which the head
+            // keeps; the way in belongs to the head and the way out to the
+            // tail (the SplitClips rule).
+            tail.transition_in = None;
+            tail.fade_in = 0.0;
+            tail.rewindow_keys(whole, offset, whole);
+            let tail_id = tail.id.clone();
+            let head = timeline.clip_at_mut(index);
+            if let Some(style) = head.text.as_mut() {
+                style.content = head_text.clone();
+            }
+            head.name = first_line(&head_text);
+            head.duration = head_duration;
+            head.words = Some(head_words);
+            head.fade_out = 0.0;
+            head.rewindow_keys(whole, 0.0, head_duration);
+            timeline.clips.insert(index + 1, Arc::new(tail));
+            Ok(Outcome {
+                created_id: Some(tail_id),
+                applied: true,
             })
         }
 
@@ -867,17 +1437,23 @@ pub(super) fn apply(
                             // spilled into an adjacent range with zero spoken words.
                             continue;
                         }
+                        // A rebuilt piece's text is its surviving words -
+                        // also when none survived. A piece that kept the
+                        // whole old sentence with no words left is exactly
+                        // the stale repetition the rebuild exists to stop,
+                        // and the E2 husk sweep reads the empty text as
+                        // "this piece went with its words".
+                        if surviving_ranges > 1
+                            && piece.kind == ClipKind::Text
+                            && let Some(style) = &mut piece.text
+                        {
+                            style.content = kept
+                                .iter()
+                                .map(|word| word.text.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                        }
                         if !kept.is_empty() {
-                            if surviving_ranges > 1
-                                && piece.kind == ClipKind::Text
-                                && let Some(style) = &mut piece.text
-                            {
-                                style.content = kept
-                                    .iter()
-                                    .map(|word| word.text.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                            }
                             piece.words = Some(kept);
                         } else {
                             piece.words = None;
@@ -1262,6 +1838,8 @@ fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
         id: id.clone(),
         visible: true,
         muted: false,
+        caption_nudge_ms: 0,
+        speaker: None,
         extra: Default::default(),
     });
     id

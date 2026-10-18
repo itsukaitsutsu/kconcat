@@ -12,14 +12,17 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::duck::DuckRegion;
 use crate::model::{
     AppliedFilter, AudioTrack, Clip, ClipKind, ColorRange, ColorSpace, Crop, CustomFont, Cutout,
     CutoutMode, Enhanced, KeyEase, KeyProperty, MediaItem, MediaKind, MediaOrigin, Project,
     ShapeStyle, SpeedPoint, Stroke, TextStyle, Timeline, Track, Transition, VideoSettings,
 };
+use crate::reframe::ReframePoint;
 
 mod audio;
 mod clips;
+mod speakers;
 pub use clips::why_not_merge;
 mod media;
 mod properties;
@@ -215,6 +218,17 @@ pub struct NewMedia {
     /// to SDR.
     #[serde(default)]
     pub color_space: ColorSpace,
+}
+
+/// Which edge of a heard word a drag took (E3). The wire spelling is
+/// the word's own: "start" and "end".
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WordEdge {
+    /// The edge where the word begins.
+    Start,
+    /// The edge where the word ends.
+    End,
 }
 
 /// Every edit, as the window sends it: a tagged `op` plus camelCase
@@ -506,6 +520,157 @@ pub enum Command {
         #[serde(default)]
         ripple: bool,
     },
+    /// Enter splits a caption at the caret (E4): the cut lands on the heard
+    /// start of one of its words - the audio boundary, never a text-length
+    /// estimate. The head keeps the id and the words before the caret; the
+    /// tail is minted fresh at the boundary with the rest. A caption with no
+    /// heard word timings is refused, not guessed. One command, one undo.
+    SplitCaptionAtWord {
+        /// The caption to split.
+        clip_id: String,
+        /// Which of its heard words the tail starts with. `0` leaves no head
+        /// and is refused; [`captionmap::word_at_caret`] maps the caret here.
+        word_index: usize,
+    },
+    /// Deletes one heard word from a caption (E1). With `cut_video`, the
+    /// word's audio span is cut out of the timeline the way the
+    /// remove-selection flow cuts: [`Command::AutotrimClip`] on the clip the
+    /// caption follows, every lane cut at the same moments, the gap closed.
+    /// Without it, only the text goes and every other timing stands - the
+    /// single writer's prune path (T7). The choice follows the owner's
+    /// checkbox "Potong video saat kata dihapus" (A2/A7); the command
+    /// carries it as a plain bool.
+    DeleteCaptionWord {
+        /// The caption to delete from.
+        clip_id: String,
+        /// Which heard word goes.
+        word_index: usize,
+        /// Whether picture and sound are cut with the word (the checkbox).
+        cut_video: bool,
+    },
+    /// One word edge dragged to a new time (E3). The drag never moves the
+    /// caption's window, its text or any other word: the edge stops at its
+    /// neighbours and at the shortest a word may be, so the heard order
+    /// stays the heard order. A timing-only edit - T7's writer is not
+    /// involved because no text changes. A live drag sends one of these
+    /// per mouse move through [`crate::editor::Editor::apply_within`]
+    /// under one gesture name, so the whole drag is one undo; a drag
+    /// that lands where it started applies nothing and records nothing.
+    MoveCaptionWordEdge {
+        /// The caption whose word is being dragged.
+        clip_id: String,
+        /// Which heard word.
+        word_index: usize,
+        /// Which of its two edges.
+        edge: WordEdge,
+        /// Seconds, absolute on the timeline, where the drag wants the
+        /// edge. Clamped, never refused, unless it is not a number.
+        time: f64,
+    },
+    /// One filler pass over a selected caption run (E2). Owner decision A7:
+    /// two opt-in tiers - nothing is removed unless its tier is ticked - and
+    /// the video effect follows the same A2 checkbox as E1: on, the fillers'
+    /// heard spans come out of every lane and the gaps close; off, only the
+    /// text goes and every other timing stands. The lists live in
+    /// [`crate::filler`].
+    RemoveFillerWords {
+        /// The selected captions. Anything in the selection that is not a
+        /// heard caption is skipped, because a selection may hold picture.
+        clip_ids: Vec<String>,
+        /// The strong tier is ticked (eee, anu, ehm).
+        strong: bool,
+        /// The weak tier is ticked (kayak, gitu, terus, apa ya).
+        weak: bool,
+        /// Whether picture and sound are cut with the words (the checkbox).
+        cut_video: bool,
+    },
+    /// P3 speaker labels (owner 16 Oct 2026): adds one speaker to this
+    /// timeline's registry. The count is the user's - detection, when the
+    /// engine is chosen, proposes names through the same command; nothing
+    /// runs on import (the opt-in rule). The name is never blank once
+    /// given; the colour may be empty, which is the renderer's fallback.
+    AddSpeaker {
+        /// What the user calls this voice, e.g. "Host".
+        name: String,
+        /// The speaker's colour, a CSS hex string; empty is the fallback.
+        color: String,
+    },
+    /// The manual route (P3): one caption joins one speaker - it moves to
+    /// that speaker's lane (created on first use, D7) and takes the
+    /// speaker's label, which every word of it inherits. Refused when the
+    /// clip is not a caption or either id is unknown. Word-granular moves
+    /// compose from what exists: split at the word (E4), assign the piece.
+    AssignCaptionToSpeaker {
+        /// The caption to label and move.
+        clip_id: String,
+        /// The speaker it belongs to.
+        speaker_id: String,
+    },
+    /// Speaker tags are editable (owner 16 Oct 2026): the name.
+    RenameSpeaker {
+        /// The speaker.
+        speaker_id: String,
+        /// The new name; never blank.
+        name: String,
+    },
+    /// Speaker tags are editable: the colour every caption of the speaker
+    /// takes through the label (D7).
+    SetSpeakerColor {
+        /// The speaker.
+        speaker_id: String,
+        /// The new colour, a CSS hex string; empty is the fallback.
+        color: String,
+    },
+    /// Takes a speaker out of the registry. Refused while any clip still
+    /// carries the label - the captions move or go first, so a speaker
+    /// never vanishes from under a lane that is showing its colour. The
+    /// speaker's empty lane, if one was made, goes with it.
+    RemoveSpeaker {
+        /// The speaker.
+        speaker_id: String,
+    },
+    /// V1 auto-reframe: the constant fill scale plus one `OffsetX` key per
+    /// smoothed subject position, so a wide clip fills a tall frame with
+    /// the subject in it - the plan's "talking-head 16:9 becomes a framed
+    /// 9:16 without manual keyframing". The points come from the caller:
+    /// per-frame mask centroids, which live beside the decoder and the
+    /// model, not in this crate. One command, one undo.
+    AutoReframe {
+        /// The clip to reframe; its media must carry a picture size.
+        clip_id: String,
+        /// The frame being reframed into, e.g. 1080 x 1920.
+        target_width: u32,
+        /// The frame's height.
+        target_height: u32,
+        /// The subject's positions, in timeline seconds and source-frame
+        /// fractions; the plan smooths and clamps them.
+        points: Vec<ReframePoint>,
+    },
+    /// V3 auto-ducking (owner A6): volume keys on one music clip that
+    /// drop it under speech and bring it back after. Route B names the
+    /// speech clips and their heard words are the speech; Route A passes
+    /// regions analysed from audio - the decode lives where FFmpeg lives,
+    /// so the caller analyses with `duck::regions_from_samples` and this
+    /// command writes. The output is ordinary volume keyframes: editable
+    /// in the curve editor, erasable with `ClearClipKeys`, one undo for
+    /// the whole duck.
+    DuckMusic {
+        /// The music clip that gets the keys.
+        clip_id: String,
+        /// Route B: clips whose heard words are the speech. Skipped when
+        /// `against_regions` is given.
+        #[serde(default)]
+        against_clips: Vec<String>,
+        /// Route A: speech regions in absolute timeline seconds.
+        #[serde(default)]
+        against_regions: Vec<DuckRegion>,
+        /// How deep the duck goes, in dB; the owner default is -12, and
+        /// the writer clamps to -60..=0.
+        amount_db: f64,
+        /// The ramp on both ends of every speech region, in ms; the owner
+        /// default is 500, and the writer caps it at 10 s.
+        fade_ms: u32,
+    },
     /// Cuts each named clip in two at one playhead time. The head keeps the
     /// id and the transition; the tail is minted fresh and stays
     /// source-continuous. A clip the time misses (or grazes within the
@@ -685,6 +850,20 @@ pub enum Command {
         /// The new setting.
         value: bool,
     },
+    /// Shifts every caption on a track, and the track's stored nudge, by a
+    /// sync correction in ±10 ms steps (T6). The stored nudge is what a
+    /// re-transcription lands on: regenerated captions are placed already
+    /// shifted, because the correction belongs to the lane, not to the run
+    /// that made it. An unknown id is an error, like `RemoveTrack`'s.
+    NudgeCaptionTrack {
+        /// The caption track to shift.
+        track_id: String,
+        /// The correction in milliseconds, any sign. Quantised to the
+        /// nearest [`crate::model::ranges::CAPTION_NUDGE_STEP_MS`] step, and
+        /// the track's accumulated total is clamped - one place, here - to
+        /// ±[`crate::model::ranges::MAX_CAPTION_NUDGE_MS`].
+        delta_ms: i32,
+    },
     /// Adds a fresh timeline - four new lanes, "Timeline N" after the
     /// highest in use - and makes it active. Mints a "tl" id.
     AddTimeline,
@@ -807,6 +986,41 @@ pub enum CommandError {
     #[error("{reason}")]
     CannotMerge {
         /// The [`why_not_merge`] sentence, verbatim.
+        reason: String,
+    },
+    /// [`Command::SplitCaptionAtWord`] was refused: no heard word timing to
+    /// cut at, or the caret leaves no head or no tail (E4).
+    #[error("{reason}")]
+    CannotSplitCaption {
+        /// The refusal sentence, shown to the user verbatim.
+        reason: String,
+    },
+    /// A speaker command (P3) was refused: a blank name, an unknown id, a
+    /// clip that is not a caption, or a speaker still in use.
+    #[error("{reason}")]
+    CannotEditSpeakers {
+        /// The refusal sentence, shown to the user verbatim.
+        reason: String,
+    },
+    /// [`Command::AutoReframe`] was refused: no clip, no picture size, no
+    /// points, or a frame the clip already fills (V1).
+    #[error("{reason}")]
+    CannotReframe {
+        /// The refusal sentence, shown to the user verbatim.
+        reason: String,
+    },
+    /// [`Command::DeleteCaptionWord`] was refused: the clip is not a caption
+    /// with heard words, or the index names none of them (E1).
+    #[error("{reason}")]
+    CannotDeleteWord {
+        /// The refusal sentence, shown to the user verbatim.
+        reason: String,
+    },
+    /// [`Command::MoveCaptionWordEdge`] was refused: the clip is not a
+    /// caption with heard words, or the index names none of them (E3).
+    #[error("{reason}")]
+    CannotMoveWordEdge {
+        /// The refusal sentence, shown to the user verbatim.
         reason: String,
     },
     /// [`Command::RemoveTrack`] would have deleted the last track.
@@ -997,6 +1211,28 @@ impl Command {
             Command::MoveClips { moves } => bad(moves.iter().map(|wanted| wanted.start)),
             Command::TrimClip { delta, .. } => bad([*delta]),
             Command::SplitClips { time, .. } => bad([*time]),
+            Command::MoveCaptionWordEdge { time, .. } => bad([*time]),
+            Command::SplitCaptionAtWord { .. } => false,
+            Command::DeleteCaptionWord { .. } => false,
+            Command::RemoveFillerWords { .. } => false,
+            Command::AutoReframe { points, .. } => {
+                points.iter().any(|point| bad([point.t, point.x, point.y]))
+            }
+            Command::AddSpeaker { .. }
+            | Command::AssignCaptionToSpeaker { .. }
+            | Command::RenameSpeaker { .. }
+            | Command::SetSpeakerColor { .. }
+            | Command::RemoveSpeaker { .. } => false,
+            Command::DuckMusic {
+                amount_db,
+                against_regions,
+                ..
+            } => {
+                bad([*amount_db])
+                    || against_regions
+                        .iter()
+                        .any(|region| bad([region.start, region.end]))
+            }
             Command::AutotrimClip { kept, .. } => {
                 bad(kept.iter().flat_map(|(start, end)| [*start, *end]))
             }
@@ -1115,6 +1351,10 @@ pub fn apply(
         | Command::MoveClips { .. }
         | Command::TrimClip { .. }
         | Command::SplitClips { .. }
+        | Command::SplitCaptionAtWord { .. }
+        | Command::DeleteCaptionWord { .. }
+        | Command::MoveCaptionWordEdge { .. }
+        | Command::RemoveFillerWords { .. }
         | Command::FreezeFrame { .. }
         | Command::ReplaceClipMedia { .. }
         | Command::SetClipEnhanced { .. }
@@ -1128,17 +1368,25 @@ pub fn apply(
         | Command::SetClipKey { .. }
         | Command::ClearClipKey { .. }
         | Command::ClearClipKeys { .. }
+        | Command::DuckMusic { .. }
         | Command::SetEffectKey { .. }
         | Command::ClearEffectKey { .. }
         | Command::ClearEffectKeys { .. }
         | Command::SetClipSpeedCurve { .. }
-        | Command::SetClipTransform { .. }) => properties::apply(project, mint, command),
+        | Command::SetClipTransform { .. }
+        | Command::AutoReframe { .. }) => properties::apply(project, mint, command),
         command @ (Command::DetachAudio { .. } | Command::ReattachAudio { .. }) => {
             audio::apply(project, mint, command)
         }
+        command @ (Command::AddSpeaker { .. }
+        | Command::AssignCaptionToSpeaker { .. }
+        | Command::RenameSpeaker { .. }
+        | Command::SetSpeakerColor { .. }
+        | Command::RemoveSpeaker { .. }) => speakers::apply(project, mint, command),
         command @ (Command::AddTrack { .. }
         | Command::RemoveTrack { .. }
-        | Command::SetTrackFlag { .. }) => tracks::apply(project, mint, command),
+        | Command::SetTrackFlag { .. }
+        | Command::NudgeCaptionTrack { .. }) => tracks::apply(project, mint, command),
         command @ (Command::AddTimeline
         | Command::SetTimelineVideo { .. }
         | Command::RemoveTimeline { .. }

@@ -20,6 +20,7 @@
 //! language = "Latin"           # optional: the writing it is for; Latin when absent
 //! order = 10                   # optional: where it sorts; absent sorts last, by name
 //! sample = "Aa"                # optional: what its card draws; see TextPreset::sample
+//! kind = "caption"             # optional: the group it belongs to; "title" when absent
 //!
 //! [style]                      # any of a title's fields; the rest default
 //! fontFamily = "Big Red"
@@ -29,6 +30,7 @@
 //! strokeColor = "#000000"
 //! strokeWidth = 0.01
 //! align = "center"
+//! highlightColor = "#39ff88"   # optional: the karaoke accent; absent is off
 //! ```
 //!
 //! The font is installed when the preset is first used, not when it is
@@ -41,7 +43,7 @@
 use std::path::{Path, PathBuf};
 
 use concat_host::AppDirs;
-use concat_project::model::{TextAlign, TextStyle};
+use concat_project::model::{CaptionMotion, MotionMode, TextAlign, TextStyle, TextTransform};
 use serde::Deserialize;
 
 /// One look a title can be given.
@@ -60,6 +62,11 @@ pub struct TextPreset {
     /// "Latin", "Japanese", "Hebrew". What the library filters and sorts
     /// presets by; a preset file that says nothing is Latin.
     pub language: String,
+    /// The group the look belongs to (roadmap C2): "title" for the Text
+    /// page's shelves, "caption" for the caption looks. A file that says
+    /// nothing is a title, so every preset that shipped before the tag
+    /// stays where it was.
+    pub kind: String,
     /// What its card draws in the look: the file's `sample`, else "Aa" for
     /// Latin and the first two characters of its words for any other
     /// writing, so a Japanese card shows Japanese.
@@ -83,8 +90,49 @@ struct PresetFile {
     /// What the card draws; see [`TextPreset::sample`].
     #[serde(default)]
     sample: Option<String>,
+    /// The group tag; see [`TextPreset::kind`]. Absent is "title".
+    #[serde(default)]
+    kind: Option<String>,
     #[serde(default)]
     style: PresetStyle,
+    /// The way-in block (roadmap C5, schema v1, owner-approved 16 Oct
+    /// 2026): `[motion]` beside `[style]`. Absent - and in every preset
+    /// that shipped before the schema - the style keeps its default,
+    /// mode none. Older builds ignore the block (no
+    /// `deny_unknown_fields`), which the schema checked before approving.
+    #[serde(default)]
+    motion: Option<PresetMotion>,
+}
+
+/// The `[motion]` block's fields, every one optional. The schema writes
+/// `scale_from`; the rest of a preset file is camelCase, so the reader
+/// takes both spellings.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PresetMotion {
+    mode: Option<String>,
+    duration: Option<f64>,
+    #[serde(alias = "scale_from")]
+    scale_from: Option<f64>,
+}
+
+impl PresetMotion {
+    /// The block resolved over the schema's defaults and clamped the way
+    /// `PresetStyle::over` clamps - an unrecognised mode is no motion,
+    /// never a parse failure.
+    fn resolved(self) -> CaptionMotion {
+        let base = CaptionMotion::default();
+        CaptionMotion {
+            mode: match self.mode.as_deref().map(str::trim) {
+                Some("pop") => MotionMode::Pop,
+                Some("word-reveal") => MotionMode::WordReveal,
+                Some("typewriter") => MotionMode::Typewriter,
+                _ => MotionMode::None,
+            },
+            duration: self.duration.unwrap_or(base.duration).clamp(0.02, 2.0),
+            scale_from: self.scale_from.unwrap_or(base.scale_from).clamp(1.0, 3.0),
+        }
+    }
 }
 
 /// A title's fields, every one optional, laid over the default style.
@@ -110,6 +158,14 @@ struct PresetStyle {
     tracking: Option<f64>,
     max_width: Option<f64>,
     max_height: Option<f64>,
+    /// The karaoke accent (roadmap C2/C3, owner A10): a preset that names
+    /// one ships with its highlight on; absent or empty is off.
+    highlight_color: Option<String>,
+    /// The render-time case transform (roadmap C4): "uppercase" draws the
+    /// words in caps; absent or an unrecognised name draws them as stored.
+    /// The preset never rewrites the transcript - the transform lives on
+    /// the style and the painter applies it.
+    transform: Option<String>,
 }
 
 impl PresetStyle {
@@ -153,8 +209,20 @@ impl PresetStyle {
             tracking: self.tracking.unwrap_or(0.0),
             max_width: self.max_width.unwrap_or(0.0).max(0.0),
             max_height: self.max_height.unwrap_or(0.0).max(0.0),
-            // A preset is a look, not a caption: no highlight.
-            highlight_color: String::new(),
+            // The karaoke accent travels with the preset (C2/C3): the
+            // three caption looks that the manual gives one ship with the
+            // highlight on; everything else stays off until the user turns
+            // it on with the existing option (owner A10).
+            highlight_color: self
+                .highlight_color
+                .map(|color| color.trim().to_owned())
+                .unwrap_or_default(),
+            // C4: the transform travels with the preset like every other
+            // field of the look; an unrecognised name draws as stored.
+            transform: match self.transform.as_deref().map(str::trim) {
+                Some("uppercase") => TextTransform::Uppercase,
+                _ => TextTransform::None,
+            },
         }
     }
 }
@@ -232,7 +300,21 @@ fn parse(text: &str, folder: Option<&Path>) -> Option<(i64, TextPreset)> {
         .map(|language| language.trim().to_owned())
         .filter(|language| !language.is_empty())
         .unwrap_or_else(|| "Latin".to_owned());
+    let kind = file
+        .kind
+        .map(|kind| kind.trim().to_owned())
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or_else(|| "title".to_owned());
     let style = file.style.over(&file.name);
+    // C5: a preset's [motion] block rides with the look on apply - the
+    // schema's option 1, the one the owner selected. No block, no motion.
+    let style = match file.motion {
+        Some(motion) => TextStyle {
+            motion: motion.resolved(),
+            ..style
+        },
+        None => style,
+    };
     let sample = file
         .sample
         .map(|sample| sample.trim().to_owned())
@@ -262,6 +344,7 @@ fn parse(text: &str, folder: Option<&Path>) -> Option<(i64, TextPreset)> {
             offset_y: file.offset_y,
             font,
             language,
+            kind,
             sample,
         },
     ))
@@ -367,6 +450,146 @@ mod tests {
             assert!(parse(text, None).is_some(), "does not parse:\n{text}");
         }
         assert_eq!(builtin().len(), embedded::BUILTIN.len());
+    }
+
+    /// C2's prescribed test: a preset with a highlight round-trips through
+    /// preset.toml - the file's `highlightColor` arrives on the style, and
+    /// the group tag with it.
+    #[test]
+    fn a_highlight_in_a_preset_file_survives_the_round_trip() {
+        let (_, preset) = parse(
+            "id = \"t.karaoke\"\nname = \"Karaoke\"\nkind = \"caption\"\n\n[style]\nhighlightColor = \"#39ff88\"\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(preset.kind, "caption");
+        assert_eq!(preset.style.highlight_color, "#39ff88");
+        // A file that says nothing is a title look with no highlight, which
+        // is how every preset that shipped before the tag behaves.
+        let (_, plain) = parse("id = \"t.plain\"\nname = \"Plain\"\n", None).expect("parses");
+        assert_eq!(plain.kind, "title");
+        assert!(plain.style.highlight_color.is_empty());
+    }
+
+    /// The eight caption looks (manual B-caption-styles §4, owner A9) ship
+    /// tagged as a group, and the three the manual gives a highlight to
+    /// carry it - the rest start with it off (owner A10).
+    #[test]
+    fn the_eight_caption_presets_ship_tagged_and_three_carry_a_highlight() {
+        let presets = builtin();
+        let find = |id: &str| {
+            presets
+                .iter()
+                .find(|preset| preset.id == id)
+                .unwrap_or_else(|| panic!("{id} ships"))
+        };
+        for id in [
+            "kconcat.pop-bold",
+            "kconcat.boxed",
+            "kconcat.karaoke",
+            "kconcat.minimal",
+            "kconcat.hard-shadow",
+            "kconcat.upper-tight",
+            "kconcat.low-third-cap",
+            "kconcat.clean-bilingual",
+        ] {
+            assert_eq!(find(id).kind, "caption", "{id} is tagged as a group");
+        }
+        assert_eq!(find("kconcat.pop-bold").style.highlight_color, "#ffd21f");
+        assert_eq!(find("kconcat.karaoke").style.highlight_color, "#39ff88");
+        assert_eq!(find("kconcat.upper-tight").style.highlight_color, "#ffffff");
+        // C4: upper-tight is the caps look the manual names ("CapCut styles
+        // are usually ALL CAPS", §1); it ships the render-time transform,
+        // and the other seven draw as stored.
+        assert_eq!(
+            find("kconcat.upper-tight").style.transform,
+            TextTransform::Uppercase
+        );
+        assert_eq!(find("kconcat.boxed").style.transform, TextTransform::None);
+        for id in [
+            "kconcat.boxed",
+            "kconcat.minimal",
+            "kconcat.hard-shadow",
+            "kconcat.low-third-cap",
+            "kconcat.clean-bilingual",
+        ] {
+            assert!(
+                find(id).style.highlight_color.is_empty(),
+                "{id} starts with the highlight off"
+            );
+        }
+        // A preset from before the tag stays a title look.
+        assert_eq!(find("concat.bold-caption").kind, "title");
+    }
+
+    /// C4's prescribed test at the preset layer: a preset with uppercase
+    /// renders uppercase, and the stored caption text is unchanged - here,
+    /// the file's `transform` arrives on the style and `display_content`
+    /// does the rest, while `content` keeps its casing.
+    #[test]
+    fn a_transform_in_a_preset_file_survives_the_round_trip() {
+        let (_, preset) = parse(
+            "id = \"t.upper\"\nname = \"Upper\"\n\n[style]\ntransform = \"uppercase\"\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(preset.style.transform, TextTransform::Uppercase);
+        let mut styled = preset.style;
+        styled.content = "halo dunia".to_owned();
+        assert_eq!(styled.display_content(), "HALO DUNIA");
+        assert_eq!(
+            styled.content, "halo dunia",
+            "the transcript keeps its casing"
+        );
+
+        let (_, plain) = parse("id = \"t.plain\"\nname = \"Plain\"\n", None).expect("parses");
+        assert_eq!(plain.style.transform, TextTransform::None);
+
+        // An unrecognised name is not a parse failure; it draws as stored.
+        let (_, odd) = parse(
+            "id = \"t.odd\"\nname = \"Odd\"\n\n[style]\ntransform = \"smallcaps\"\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(odd.style.transform, TextTransform::None);
+    }
+
+    /// C5's prescribed test at the preset layer: a preset yields motion
+    /// on apply - the file's `[motion]` block arrives on the style the
+    /// apply hands over.
+    #[test]
+    fn a_motion_block_in_a_preset_file_lands_on_the_style() {
+        let (_, preset) = parse(
+            "id = \"t.pop\"\nname = \"Pop\"\n\n[motion]\nmode = \"pop\"\nduration = 0.25\nscale_from = 1.3\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(preset.style.motion.mode, MotionMode::Pop);
+        assert!((preset.style.motion.duration - 0.25).abs() < 1e-9);
+        assert!((preset.style.motion.scale_from - 1.3).abs() < 1e-9);
+
+        // The camelCase spelling reads too, the rest of a preset file's
+        // habit.
+        let (_, camel) = parse(
+            "id = \"t.rev\"\nname = \"Rev\"\n\n[motion]\nmode = \"word-reveal\"\nscaleFrom = 1.2\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(camel.style.motion.mode, MotionMode::WordReveal);
+        assert!((camel.style.motion.scale_from - 1.2).abs() < 1e-9);
+
+        // No block is no motion, which is every preset that shipped
+        // before the schema.
+        let (_, plain) = parse("id = \"t.plain\"\nname = \"Plain\"\n", None).expect("parses");
+        assert_eq!(plain.style.motion.mode, MotionMode::None);
+
+        // An unrecognised mode is no motion, not a parse failure.
+        let (_, odd) = parse(
+            "id = \"t.odd\"\nname = \"Odd\"\n\n[motion]\nmode = \"fireworks\"\n",
+            None,
+        )
+        .expect("parses");
+        assert_eq!(odd.style.motion.mode, MotionMode::None);
     }
 
     #[test]

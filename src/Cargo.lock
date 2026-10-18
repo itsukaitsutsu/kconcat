@@ -1264,6 +1264,7 @@ name = "concat-media"
 version = "0.2.7"
 dependencies = [
  "concat-core",
+ "concat-timing",
  "ffmpeg-the-third",
  "libc",
  "log",
@@ -1316,6 +1317,8 @@ dependencies = [
  "bzip2 0.6.1",
  "concat-host",
  "concat-media",
+ "concat-project",
+ "concat-timing",
  "log",
  "ort",
  "serde",
@@ -1339,6 +1342,14 @@ dependencies = [
  "unicode-bidi",
  "unicode-linebreak",
  "unicode-script",
+]
+
+[[package]]
+name = "concat-timing"
+version = "0.2.7"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

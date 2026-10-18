@@ -77,6 +77,8 @@ pub(super) fn apply(
                                 id: id.clone(),
                                 visible: true,
                                 muted: false,
+                                caption_nudge_ms: 0,
+                                speaker: None,
                                 extra: Default::default(),
                             });
                             id

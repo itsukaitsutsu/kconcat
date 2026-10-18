@@ -1,0 +1,14 @@
+# Quiet and clean: no stroke, no plate. Readable on calm footage only.
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.minimal"
+name = "Minimal"
+language = "Latin"
+order = 104
+kind = "caption"
+offsetY = 0.45
+
+[style]
+content = "Minimal"
+fontWeight = 600
+fontSize = 0.055
+shadow = false

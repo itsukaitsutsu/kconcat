@@ -56,6 +56,45 @@ pub enum Align {
     Right,
 }
 
+/// How a title comes in - the painter's mirror of the document's caption
+/// motion (roadmap C5, schema v1). This crate does not depend on the
+/// document; the host copies the fields across like the rest of
+/// [`TitleStyle`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MotionMode {
+    /// On screen from the start; only the highlight moves.
+    #[default]
+    None,
+    /// Each word scales in at its spoken time.
+    Pop,
+    /// Each word appears at its spoken time and stays.
+    WordReveal,
+    /// Each word's letters appear one by one across its spoken time.
+    Typewriter,
+}
+
+/// The way-in's dials, in the painter's terms; the defaults are the
+/// schema's (owner-approved 16 Oct 2026).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Motion {
+    /// Which way in.
+    pub mode: MotionMode,
+    /// Seconds per word for pop and word-reveal.
+    pub duration: f64,
+    /// Pop only: the starting scale of each word.
+    pub scale_from: f64,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Motion {
+            mode: MotionMode::None,
+            duration: 0.18,
+            scale_from: 1.15,
+        }
+    }
+}
+
 /// Everything about a title's look. Mirrors the document's text style field
 /// for field so the host can copy it across; this crate does not depend on
 /// the document.
@@ -104,6 +143,9 @@ pub struct TitleStyle {
     /// own. With a height the block is a box that tall, at least, and the
     /// words sit centred in it.
     pub max_height: f64,
+    /// How the title comes in (roadmap C5); the mirror of the document's
+    /// motion, defaulting to no motion at all.
+    pub motion: Motion,
 }
 
 /// One word's box in canvas pixels, top-left origin, in reading order
@@ -1917,6 +1959,27 @@ fn paint_shape(style: &ShapeStyle, width: u32, height: u32) -> Result<(Pixmap, B
 
 #[cfg(test)]
 mod tests {
+    /// C5's mirror: the painter's style carries the way-in the host
+    /// copied across, and says no motion until it does.
+    #[test]
+    fn the_motion_mirror_carries_the_way_in() {
+        use super::{Motion, MotionMode};
+        let plain = style("words");
+        assert_eq!(plain.motion.mode, MotionMode::None);
+        assert!((plain.motion.duration - 0.18).abs() < 1e-9);
+        assert!((plain.motion.scale_from - 1.15).abs() < 1e-9);
+        let popped = TitleStyle {
+            motion: Motion {
+                mode: MotionMode::Pop,
+                duration: 0.25,
+                scale_from: 1.3,
+            },
+            ..style("words")
+        };
+        assert_eq!(popped.motion.mode, MotionMode::Pop);
+        assert!((popped.motion.duration - 0.25).abs() < 1e-9);
+    }
+
     use super::*;
 
     #[test]
@@ -1954,6 +2017,7 @@ mod tests {
     fn style(content: &str) -> TitleStyle {
         TitleStyle {
             content: content.to_owned(),
+            motion: Motion::default(),
             font_family: "\"No Such Family\"".to_owned(),
             font_size: 0.09,
             font_weight: 700.0,

@@ -8,6 +8,46 @@
 
 use super::*;
 
+/// T7: keep `clip.words` consistent with the clip's text after a text patch.
+///
+/// The roadmap's three cases: the same token count re-texts the words in
+/// position and keeps every timing (fixing a typo must not lose the
+/// karaoke); a different count prunes to the old words that still appear,
+/// in their old order, counted as a multiset so a repeated word survives
+/// exactly as often as it still occurs; and nothing ever invents a word.
+/// Tokens are `captionmap::word_units`, so the split stays the one rule
+/// (T4). A clip whose style was cleared has no content to highlight, so
+/// its words go with it - absent by design, never stale. The stored caption
+/// flag is not touched: identity survives every text edit (T5). Titles
+/// carry no words and fall straight through.
+pub(super) fn reconcile_caption_words(clip: &mut Clip) {
+    let Some(style) = clip.text.as_ref() else {
+        clip.words = None;
+        return;
+    };
+    let Some(words) = clip.words.as_mut() else {
+        return;
+    };
+    let units = crate::captionmap::word_units(&style.content);
+    if units.len() == words.len() {
+        for (word, unit) in words.iter_mut().zip(units) {
+            word.text = unit;
+        }
+        return;
+    }
+    let mut remaining: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for unit in &units {
+        *remaining.entry(unit.as_str()).or_insert(0) += 1;
+    }
+    words.retain(|word| match remaining.get_mut(word.text.trim()) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            true
+        }
+        _ => false,
+    });
+}
+
 /// Applies one of this module's commands. Any other is a routing error.
 pub(super) fn apply(
     project: &mut Project,
@@ -77,6 +117,10 @@ pub(super) fn apply(
                     applied |= assign(&mut clip.name, first_line(&style.content));
                 }
                 applied |= assign(&mut clip.text, text);
+                // T7: this arm is the single writer of a text patch, so it
+                // writes the words with the text. Content and word timings
+                // can never drift apart through an edit that passes here.
+                reconcile_caption_words(clip);
             }
             if let Some(stream) = patch.audio_stream {
                 applied |= assign(&mut clip.audio_stream, stream);
@@ -214,6 +258,106 @@ pub(super) fn apply(
             Ok(Outcome {
                 created_id: None,
                 applied,
+            })
+        }
+
+        Command::AutoReframe {
+            clip_id,
+            target_width,
+            target_height,
+            points,
+        } => {
+            let refuse = |reason: &str| -> Result<Outcome, CommandError> {
+                Err(CommandError::CannotReframe {
+                    reason: reason.to_owned(),
+                })
+            };
+            if points.is_empty() {
+                return refuse("No subject positions were given, so there is nothing to follow.");
+            }
+            let plan = {
+                let timeline = project.active();
+                let Some(clip) = timeline.clip(&clip_id) else {
+                    return refuse("That clip no longer exists.");
+                };
+                let Some(media) = project.media_by_id(&clip.media_id) else {
+                    return refuse("That clip has no media picture to reframe.");
+                };
+                let (Some(width), Some(height)) = (media.width, media.height) else {
+                    return refuse(
+                        "That clip's media has no picture size, so there is nothing to reframe.",
+                    );
+                };
+                let Some(plan) = crate::reframe::reframe_plan(
+                    clip,
+                    (width, height),
+                    (target_width, target_height),
+                    &points,
+                ) else {
+                    return refuse(
+                        "That clip already fills this frame; there is nothing to reframe.",
+                    );
+                };
+                plan
+            };
+            let timeline = project.active_mut();
+            let clip = timeline
+                .clip_mut(&clip_id)
+                .expect("found above, and nothing between removed it");
+            clip.scale = plan.scale;
+            for key in plan.keys {
+                clip.set_key(key.property, key.at, key.value, key.ease);
+            }
+            Ok(Outcome {
+                created_id: None,
+                applied: true,
+            })
+        }
+
+        Command::DuckMusic {
+            clip_id,
+            against_clips,
+            against_regions,
+            amount_db,
+            fade_ms,
+        } => {
+            let timeline = project.active_mut();
+            let fade_s = f64::from(fade_ms.min(crate::duck::MAX_FADE_MS)) / 1000.0;
+            // Route A first: regions the caller analysed from audio win
+            // over the transcript route, because the caller only passes
+            // them when the analysis is the point (owner A6: the route is
+            // chosen per clip).
+            let regions: Vec<(f64, f64)> = if !against_regions.is_empty() {
+                let spans: Vec<(f64, f64)> = against_regions
+                    .iter()
+                    .map(|region| (region.start, region.end))
+                    .collect();
+                crate::duck::merge_regions(&spans, fade_s)
+            } else {
+                // Route B: the heard words of the named clips are the
+                // speech. A clip with no words contributes nothing.
+                let mut words = Vec::new();
+                for id in &against_clips {
+                    if let Some(heard) = timeline.clip(id).and_then(|clip| clip.words.as_ref()) {
+                        words.extend(heard.iter().cloned());
+                    }
+                }
+                crate::duck::regions_from_words(&words, fade_s)
+            };
+            let Some(clip) = timeline.clip_mut(&clip_id) else {
+                return Ok(Outcome::default());
+            };
+            let keys = crate::duck::duck_keys(clip, &regions, amount_db, fade_s);
+            if keys.is_empty() {
+                return Ok(Outcome::default());
+            }
+            let before = clip.keys.clone();
+            for key in keys {
+                clip.set_key(key.property, key.at, key.value, key.ease);
+            }
+            Ok(Outcome {
+                created_id: None,
+                applied: clip.keys != before,
             })
         }
 

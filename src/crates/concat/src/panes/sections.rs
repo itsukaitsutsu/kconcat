@@ -52,6 +52,8 @@ pub enum SectionsMsg {
     RowSeek(i32),
     /// Edit a caption row's text inline.
     RowTextEdited(i32, String),
+    /// Enter in a caption row: the text as typed and the caret's byte offset.
+    RowTextAccepted(i32, String, i32),
     /// User scrolled the Sections rows table directly (passes top/focus visible row index).
     ListScrolled(i32),
     /// User clicked a section bar in the Timeline Ruler section strip.
@@ -333,6 +335,11 @@ impl SectionsPane {
                         );
                     }
                     self.edit_row_text(idx, text, studio);
+                }
+            }
+            SectionsMsg::RowTextAccepted(index, text, caret) => {
+                if let Ok(idx) = usize::try_from(index) {
+                    self.accept_row_text(idx, text, caret, studio);
                 }
             }
             SectionsMsg::ListScrolled(visible_index) => {
@@ -740,6 +747,43 @@ impl SectionsPane {
                 });
             }
         }
+    }
+
+    /// Enter in a caption row (E4). The text commits first through the
+    /// single writer (T7), so the split reads the words the committed text
+    /// carries; then the caption splits at the heard start of the word the
+    /// caret falls in. `Studio::apply` toasts a refusal itself - no audio
+    /// timing means a message, never a guess. A caret with no heard word
+    /// (before the first word, after the last) is refused here.
+    fn accept_row_text(&mut self, index: usize, text: String, caret: i32, studio: &mut Studio) {
+        self.edit_row_text(index, text, studio);
+        let Some(row) = self.rows.get(index) else {
+            return;
+        };
+        if row.section.kind != Kind::Caption {
+            return;
+        }
+        let Some(caption_id) = row.caption_id.clone() else {
+            studio.notify("This row has no timeline caption to split.", true);
+            return;
+        };
+        let Some(word_index) = studio.timeline().clip(&caption_id).and_then(|clip| {
+            concat_project::captionmap::word_at_caret(
+                &clip.text.as_ref()?.content,
+                clip.words.as_ref()?,
+                usize::try_from(caret).ok()?,
+            )
+        }) else {
+            studio.notify("There is no heard word at the caret to split at.", true);
+            return;
+        };
+        studio.apply(Command::SplitCaptionAtWord {
+            clip_id: caption_id,
+            word_index,
+        });
+        // The rows described the caption before the split; one row became
+        // two, so they are read back from the timeline.
+        self.refresh_from_timeline(studio);
     }
 
     fn toggle_kind(&mut self, kind: i32) {
@@ -1441,12 +1485,13 @@ fn carve_silences_around_cues(silences: &[(f64, f64)], cues: &mut [(f64, f64)]) 
 
 /// A section kind as the row's first word.
 /// Whether a text clip is a timeline caption rather than a hand-made title.
-/// Imported captions carry word timing; transcribed captions additionally have
-/// `caption_of`. Old untagged title clips are deliberately not inferred from
-/// timing alone, because deleting a title to remove a subtitle is destructive.
+/// The rule itself lives in `Clip::is_caption` (AGENTS.md invariant 2: one
+/// definition, stored at creation since T5). Old untagged title clips are
+/// still not inferred from timing alone - a document without the stored flag
+/// derives identity exactly the way it always did - because deleting a title
+/// to remove a subtitle is destructive.
 fn is_caption_clip(clip: &concat_project::model::Clip) -> bool {
-    clip.kind == concat_project::model::ClipKind::Text
-        && (clip.caption_of.is_some() || clip.words.is_some())
+    clip.is_caption()
 }
 
 fn kind_label(kind: Kind) -> String {

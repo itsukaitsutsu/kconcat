@@ -29,6 +29,8 @@ pub(super) fn apply(
                     id: mint.next("t"),
                     visible: true,
                     muted: false,
+                    caption_nudge_ms: 0,
+                    speaker: None,
                     extra: Default::default(),
                 })
                 .collect();
@@ -41,6 +43,7 @@ pub(super) fn apply(
                 name,
                 video,
                 tracks,
+                speakers: Vec::new(),
                 clips: Vec::new(),
                 extra: Default::default(),
             }));

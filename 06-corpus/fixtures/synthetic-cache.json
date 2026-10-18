@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "audio": {
+    "file": "06-corpus/fixtures/synthetic-30s.f32",
+    "sample_rate": 16000,
+    "channels": 1,
+    "duration_s": 30.0
+  },
+  "segments": [
+    {
+      "start": 0.515,
+      "end": 3.4,
+      "text": "jadi kalau kita potong di kata",
+      "words": [
+        {
+          "text": "jadi",
+          "start": 0.515,
+          "end": 0.9
+        },
+        {
+          "text": "kalau",
+          "start": 1.015,
+          "end": 1.4
+        },
+        {
+          "text": "kita",
+          "start": 1.515,
+          "end": 1.9
+        },
+        {
+          "text": "potong",
+          "start": 2.015,
+          "end": 2.4
+        },
+        {
+          "text": "di",
+          "start": 2.515,
+          "end": 2.7
+        },
+        {
+          "text": "kata",
+          "start": 3.015,
+          "end": 3.4
+        }
+      ]
+    },
+    {
+      "start": 5.015,
+      "end": 12.2,
+      "text": "ini sinkronnya tetap jaga hantu",
+      "words": [
+        {
+          "text": "ini",
+          "start": 5.015,
+          "end": 5.3
+        },
+        {
+          "text": "sinkronnya",
+          "start": 4.9,
+          "end": 5.6
+        },
+        {
+          "text": "tetap",
+          "start": 6.015,
+          "end": 8.5
+        },
+        {
+          "text": "jaga",
+          "start": 6.515,
+          "end": 6.9
+        },
+        {
+          "text": "hantu",
+          "start": 12.0,
+          "end": 12.2
+        }
+      ]
+    }
+  ]
+}

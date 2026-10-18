@@ -3529,7 +3529,7 @@ impl Studio {
         if primary.kind != model::ClipKind::Text {
             return vec![clip_id.to_owned()];
         }
-        let is_caption = primary.caption_of.is_some() || primary.words.is_some();
+        let is_caption = primary.is_caption();
         if !is_caption {
             return vec![clip_id.to_owned()];
         }
@@ -7892,10 +7892,7 @@ impl Studio {
         // which a clip drag or a trim does not publish, so the strip stayed
         // where the caption was before the gesture until something else
         // published the whole window.
-        sync(
-            &models.timeline_sections,
-            self.sections.timeline_sections(),
-        );
+        sync(&models.timeline_sections, self.sections.timeline_sections());
         editor.set_section_filter_caption(self.sections.show_caption);
         editor.set_section_filter_silence(self.sections.show_silence);
         editor.set_section_filter_other(self.sections.show_other);
@@ -9558,6 +9555,10 @@ impl Studio {
         let cards: Vec<TextPresetData> = self
             .text_presets
             .iter()
+            // The group tag (C2): caption looks are not title looks and do
+            // not mix into the Text page's shelves. The captions dialog is
+            // where its group is offered.
+            .filter(|preset| preset.kind != "caption")
             .map(|preset| {
                 let plate = colour_of(&preset.style.background);
                 TextPresetData {

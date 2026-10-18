@@ -11,6 +11,14 @@
 //! window reads while a take runs is the level for its meter; what it gets
 //! at the end is the file, its length, and when its first sample was heard,
 //! which is what lines the take up with the picture it was spoken over.
+//!
+//! Roadmap P4 (owner, 16 Oct 2026: audio only, one track per microphone):
+//! a [`Session`] opens several named microphones at once, each with its
+//! own [`Recorder`] and its own file, and anchors them to one shared
+//! "picture started rolling" moment. The single-mic voiceover is
+//! [`Recorder::start`] and is unchanged - a session of one is what it
+//! already was. Placing the finished takes, one track each, is
+//! `concat_project::takes::place_session`.
 
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
@@ -44,6 +52,15 @@ impl Recorder {
     /// once the device is open and running, or with why it would not open:
     /// no microphone, or one the system will not hand over.
     pub fn start(path: PathBuf) -> Result<Recorder, String> {
+        Recorder::start_from(None, path)
+    }
+
+    /// [`Recorder::start`] from a named microphone (roadmap P4): `None`
+    /// is the system default - the single-mic voiceover, unchanged - and
+    /// `Some(name)` opens the input device whose name, exactly, is
+    /// `name` as [`input_devices`] lists it, or refuses with why it is
+    /// not there.
+    pub fn start_from(device: Option<String>, path: PathBuf) -> Result<Recorder, String> {
         if let Some(folder) = path.parent() {
             std::fs::create_dir_all(folder)
                 .map_err(|error| format!("could not make {}: {error}", folder.display()))?;
@@ -56,7 +73,7 @@ impl Recorder {
             let level = Arc::clone(&level);
             std::thread::Builder::new()
                 .name("audio-input".into())
-                .spawn(move || record(&path, &stop, &level, &ready_tx))
+                .spawn(move || record(device.as_deref(), &path, &stop, &level, &ready_tx))
                 .map_err(|error| format!("could not spawn the recording thread: {error}"))?
         };
         match ready_rx.recv() {
@@ -106,9 +123,97 @@ impl Drop for Recorder {
     }
 }
 
+/// The system's input device names, in the order the system lists them:
+/// the session UI's microphone picker. A device that will not say its
+/// name is skipped; an empty list is "no microphone at all".
+pub fn input_devices() -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    match cpal::default_host().input_devices() {
+        Ok(devices) => devices.filter_map(|device| device.name().ok()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Several microphones recording one take together (roadmap P4): one
+/// [`Recorder`] per mic, one file per mic, and ONE shared `rolled`
+/// moment - the instant the last of them reported open - so every take's
+/// [`Take::first`] is measured against the same anchor and the tracks
+/// stay in sync by construction. What each mic heard is the device's own
+/// business; how the takes line up afterwards is `landing` +
+/// `concat_project::takes::place_session`, one track per mic.
+pub struct Session {
+    rolled: Instant,
+    mics: Vec<(String, Recorder)>,
+}
+
+impl Session {
+    /// Opens every listed microphone - `(device name, file path)` pairs,
+    /// one per person - and starts writing. All or nothing: a mic that
+    /// will not open stops the ones already open, removes their partial
+    /// files and reports its sentence, because a take silently missing
+    /// one person's voice is a take nobody wants.
+    pub fn start(takes: Vec<(String, PathBuf)>) -> Result<Session, String> {
+        let mut mics: Vec<(String, Recorder)> = Vec::with_capacity(takes.len());
+        let mut opened_paths: Vec<PathBuf> = Vec::with_capacity(takes.len());
+        for (device, path) in takes {
+            match Recorder::start_from(Some(device.clone()), path.clone()) {
+                Ok(recorder) => {
+                    mics.push((device, recorder));
+                    opened_paths.push(path);
+                }
+                Err(error) => {
+                    // Dropping a Recorder stops it and finishes its file;
+                    // the partial takes of a session that never was are
+                    // then removed, the failed mic's own path included
+                    // (harmless when it never got as far as a file).
+                    drop(mics);
+                    for partial in opened_paths.iter().chain(std::iter::once(&path)) {
+                        let _ = std::fs::remove_file(partial);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        // The anchor: every mic is open and running as of this instant.
+        // Each device still reports its own first sample, and the
+        // distance between those reports IS the sync - the anchor is
+        // what both distances are measured from.
+        Ok(Session {
+            rolled: Instant::now(),
+            mics,
+        })
+    }
+
+    /// When the last microphone reported open: the shared anchor each
+    /// take's [`Take::first`] is handed to [`landing`] with.
+    pub fn rolled(&self) -> Instant {
+        self.rolled
+    }
+
+    /// Each microphone's meter feed, `0..=1`, in session order: the
+    /// multi-mic UI shows one meter per person.
+    pub fn levels(&self) -> Vec<(String, f32)> {
+        self.mics
+            .iter()
+            .map(|(device, recorder)| (device.clone(), recorder.level()))
+            .collect()
+    }
+
+    /// Stops every microphone and finishes every file. One mic's failure
+    /// does not eat the others' takes: each entry reports its own
+    /// outcome, in session order, and the caller keeps what succeeded.
+    pub fn stop(self) -> Vec<(String, Result<Take, String>)> {
+        self.mics
+            .into_iter()
+            .map(|(device, recorder)| (device, recorder.stop()))
+            .collect()
+    }
+}
+
 /// The recording thread: opens the device, says so, writes until told to
 /// stop, then closes the stream and the file.
 fn record(
+    device: Option<&str>,
     path: &Path,
     stop: &AtomicBool,
     level: &Arc<AtomicU32>,
@@ -117,9 +222,17 @@ fn record(
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let opened = (|| -> Result<_, String> {
-        let device = cpal::default_host()
-            .default_input_device()
-            .ok_or_else(|| "no microphone was found".to_owned())?;
+        let host = cpal::default_host();
+        let device = match device {
+            Some(name) => host
+                .input_devices()
+                .map_err(|error| format!("the system would not list its microphones: {error}"))?
+                .find(|candidate| candidate.name().as_deref() == Ok(name))
+                .ok_or_else(|| format!("no microphone named {name} was found"))?,
+            None => host
+                .default_input_device()
+                .ok_or_else(|| "no microphone was found".to_owned())?,
+        };
         let supported = device
             .default_input_config()
             .map_err(|error| format!("the microphone would not say how it records: {error}"))?;

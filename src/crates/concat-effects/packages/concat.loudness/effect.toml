@@ -12,9 +12,9 @@ key = "target"
 label = "Target"
 min = -30
 max = -12
-default = -23
+default = -14
 step = 1
 unit = "dB"
 
 [ffmpeg]
-chain = "loudnorm=I={fixed(target, 1)}:TP=-1.5:LRA=11"
+chain = "loudnorm=I={fixed(target, 1)}:TP=-1.0:LRA=11"

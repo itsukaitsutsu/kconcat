@@ -1,0 +1,295 @@
+//! A caption that survives a trim with none of its words left stops being a caption.
+//!
+//! Reproduced 2026-10-16 against `1aece2d`.
+//!
+//! `Clip::is_caption()` (concat-project/src/model.rs:1509) is
+//! `kind == Text && (caption_of.is_some() || words.is_some())`. For an imported
+//! caption there is no `caption_of` - the identity rests on `words` alone - and
+//! `AutotrimClip` clears `words` to `None` when a surviving piece keeps none of
+//! them (commands/clips.rs:883). The clip survives; the caption does not.
+//!
+//! Damage: the clip keeps its whole cue text while no longer counting as a
+//! caption, so it is excluded from the caption-caption overlap rule in
+//! `placement.rs` and blocks caption placement in `first_caption_track_above`.
+
+use concat_project::captionmap::Word;
+use concat_project::commands::{Command, NewMedia};
+use concat_project::editor::Editor;
+use concat_project::model::{MediaKind, TextStyle};
+
+fn media(path: &str, duration: f64) -> Command {
+    Command::AddMedia {
+        item: NewMedia {
+            path: path.to_owned(),
+            name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+            duration: Some(duration),
+            kind: MediaKind::Video,
+            width: Some(1920),
+            height: Some(1080),
+            frame_rate: Some(30.0),
+            frame_rate_fraction: Some("30/1".to_owned()),
+            video_codec: Some("h264".to_owned()),
+            audio_codec: Some("aac".to_owned()),
+            has_audio: true,
+            audio_tracks: Vec::new(),
+            origin: None,
+            color_space: Default::default(),
+        },
+    }
+}
+
+fn setup() -> (Editor, String) {
+    let mut editor = Editor::new();
+    let media_id = editor
+        .apply(media("/a.mp4", 10.0))
+        .expect("adds media")
+        .created_id
+        .expect("media id");
+    let track_id = editor.project().active().tracks[0].id.clone();
+    let clip_id = editor
+        .apply(Command::AddClip {
+            media_id,
+            track_id,
+            start: 0.0,
+            ripple: false,
+        })
+        .expect("adds clip")
+        .created_id
+        .expect("clip id");
+    (editor, clip_id)
+}
+
+fn word(text: &str, start: f64, end: f64) -> Word {
+    Word {
+        text: text.to_owned(),
+        start,
+        end,
+    }
+}
+
+#[test]
+fn a_caption_that_keeps_no_words_is_still_a_caption() {
+    let (mut editor, clip_id) = setup();
+
+    // An imported .srt cue: no `caption_of`, identity carried by word timings.
+    // Its words sit in the second half of the cue, as real cues often do.
+    let caption_id = editor
+        .apply(Command::AddTextClip {
+            above: true,
+            track_id: None,
+            start: 2.0,
+            style: Some(TextStyle {
+                content: "halo dunia".to_owned(),
+                ..TextStyle::default()
+            }),
+            duration: Some(2.0),
+            offset_y: Some(0.38),
+            caption_of: None,
+            words: Some(vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)]),
+        })
+        .expect("adds the caption")
+        .created_id
+        .expect("caption id");
+
+    assert!(
+        editor
+            .project()
+            .active()
+            .clip(&caption_id)
+            .expect("caption")
+            .is_caption(),
+        "an imported cue starts out as a caption"
+    );
+
+    // Keep [0, 3): the cue survives (2.0-3.0 is kept) but every word is gone.
+    editor
+        .apply(Command::AutotrimClip {
+            clip_id,
+            kept: vec![(0.0, 3.0)],
+        })
+        .expect("autotrims");
+
+    let clip = editor
+        .project()
+        .active()
+        .clip(&caption_id)
+        .expect("the caption piece survives the trim");
+
+    assert!(
+        clip.is_caption(),
+        "the surviving piece stopped being a caption: caption_of={:?}, words={:?}, text={:?}",
+        clip.caption_of,
+        clip.words.as_ref().map(Vec::len),
+        clip.text.as_ref().map(|t| t.content.clone()),
+    );
+}
+
+/// Does the ghost drift out of sync on the NEXT trim?
+///
+/// A caption piece that lost its identity: does the autotrim still know to
+/// move it when the video under it is cut a second time?
+#[test]
+fn a_ghost_caption_still_follows_the_next_trim() {
+    let (mut editor, clip_id) = setup();
+
+    // An imported cue at 2.0-4.0 whose words sit at the very end.
+    let caption_id = editor
+        .apply(Command::AddTextClip {
+            above: true,
+            track_id: None,
+            start: 2.0,
+            style: Some(TextStyle {
+                content: "halo dunia".to_owned(),
+                ..TextStyle::default()
+            }),
+            duration: Some(2.0),
+            offset_y: Some(0.38),
+            caption_of: None,
+            words: Some(vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)]),
+        })
+        .expect("adds")
+        .created_id
+        .expect("id");
+
+    // TRIM 1: keep [0, 3). The cue survives 2.0-3.0, but all its words are in
+    // the removed part -> it becomes a ghost.
+    editor
+        .apply(Command::AutotrimClip {
+            clip_id: clip_id.clone(),
+            kept: vec![(0.0, 3.0)],
+        })
+        .expect("first trim");
+
+    let after_first = editor
+        .project()
+        .active()
+        .clip(&caption_id)
+        .expect("cue")
+        .clone();
+    println!(
+        "after TRIM 1: start={:.2} dur={:.2} is_caption()={}",
+        after_first.start,
+        after_first.duration,
+        after_first.is_caption()
+    );
+
+    // TRIM 2: on the now-3s clip, drop [1.0, 2.0).
+    // The caption piece at 2.0-3.0 is fully kept, so it must land at 1.0-2.0.
+    editor
+        .apply(Command::AutotrimClip {
+            clip_id,
+            kept: vec![(0.0, 1.0), (2.0, 3.0)],
+        })
+        .expect("second trim");
+
+    let after_second = editor
+        .project()
+        .active()
+        .clip(&caption_id)
+        .expect("cue")
+        .clone();
+    println!(
+        "after TRIM 2: start={:.2} dur={:.2} is_caption()={}",
+        after_second.start,
+        after_second.duration,
+        after_second.is_caption()
+    );
+    println!("expected:    start=1.00 dur=1.00");
+
+    assert_eq!(
+        (after_second.start, after_second.duration),
+        (1.0, 1.0),
+        "the ghost did not follow the second trim: it is now out of sync with the video"
+    );
+}
+
+/// Is the ghost still visible to the Sections panel as a caption?
+///
+/// `clip_sections_with_cues` decides which timeline clips are caption cues
+/// with the same rule the identity bug breaks (sectionlist.rs:189). If the
+/// ghost drops out of that list, the panel no longer knows a caption sits
+/// there when it plans a trim.
+#[test]
+fn a_ghost_caption_is_still_listed_as_a_caption_section() {
+    use concat_project::sectionlist::clip_sections_with_cues;
+    use concat_project::sections::Kind;
+
+    let (mut editor, clip_id) = setup();
+
+    let caption_id = editor
+        .apply(Command::AddTextClip {
+            above: true,
+            track_id: None,
+            start: 2.0,
+            style: Some(TextStyle {
+                content: "halo dunia".to_owned(),
+                ..TextStyle::default()
+            }),
+            duration: Some(2.0),
+            offset_y: Some(0.38),
+            caption_of: None,
+            words: Some(vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)]),
+        })
+        .expect("adds")
+        .created_id
+        .expect("id");
+
+    // While it is still a real caption, the panel sees a Caption section.
+    let before = clip_sections_with_cues(
+        editor.project().active(),
+        &clip_id,
+        &[(0.0, 1.0)],
+        0.0,
+        true,
+        200,
+        None,
+    )
+    .expect("sections");
+    let captions_before = before
+        .rows
+        .iter()
+        .filter(|row| matches!(row.section.kind, Kind::Caption))
+        .count();
+    println!("caption sections before the trim: {captions_before}");
+    assert!(captions_before > 0, "the panel should see the caption");
+
+    // Turn it into a ghost.
+    editor
+        .apply(Command::AutotrimClip {
+            clip_id: clip_id.clone(),
+            kept: vec![(0.0, 3.0)],
+        })
+        .expect("trim");
+    println!(
+        "ghost? {}",
+        !editor
+            .project()
+            .active()
+            .clip(&caption_id)
+            .expect("cue")
+            .is_caption()
+    );
+
+    let after = clip_sections_with_cues(
+        editor.project().active(),
+        &clip_id,
+        &[],
+        0.0,
+        true,
+        200,
+        None,
+    )
+    .expect("sections");
+    let captions_after = after
+        .rows
+        .iter()
+        .filter(|row| matches!(row.section.kind, Kind::Caption))
+        .count();
+    println!("caption sections after the trim: {captions_after}");
+
+    assert!(
+        captions_after > 0,
+        "the panel can no longer see the surviving caption: it vanished from the \
+         section list, so a later silence removal will not know it is there"
+    );
+}

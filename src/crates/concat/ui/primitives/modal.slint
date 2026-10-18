@@ -562,6 +562,9 @@ export component Field inherits Rectangle {
     in property <length> radius-right: Theme.r;
 
     callback edited(text: string);
+    /// Enter was pressed (E4): the text as it stands, and the caret's byte
+    /// offset into it. Fields that split nothing simply leave it unbound.
+    callback accepted(text: string, caret: int);
 
     // A layout owns its children's size on both axes: it reads min, preferred
     // and max, and a bare `height` is none of those. Without a max the row
@@ -632,6 +635,7 @@ export component Field inherits Rectangle {
         selection-foreground-color: Theme.on-accent;
 
         edited => { root.edited(self.text); }
+        accepted => { root.accepted(self.text, self.cursor-position-byte-offset); }
     }
 
     if root.draft == "" && !input.has-focus: Text {

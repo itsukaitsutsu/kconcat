@@ -7,6 +7,9 @@ license.workspace = true
 description = "Getting pixels and samples in and out of media files. The only crate that knows FFmpeg exists."
 
 [dependencies]
+# The energy helpers (rms, linear_from_db) moved here per D4-B: one copy,
+# in the crate whose tests run with nothing installed.
+concat-timing.workspace = true
 concat-core.workspace = true
 # Linked FFmpeg: the safe wrapper over libavformat, libavcodec, libavfilter,
 # libswscale and libswresample. Built against the FFmpeg development

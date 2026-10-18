@@ -123,6 +123,7 @@ export global SectionsView {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback row-text-accepted(index: int, text: string, caret: int);
     callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
@@ -157,6 +158,7 @@ component SectionsBody inherits VerticalLayout {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback row-text-accepted(index: int, text: string, caret: int);
     callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
@@ -801,6 +803,7 @@ component SectionsBody inherits VerticalLayout {
                                     Field {
                                         value: row.label;
                                         edited(text) => { root.row-text-edited(row.source-index, text); }
+                                        accepted(text, caret) => { root.row-text-accepted(row.source-index, text, caret); }
                                     }
                                 }
 
@@ -880,6 +883,7 @@ export component SectionsDialog inherits Modal {
     callback row-drag-over(visible-index: int);
     callback row-seek(index: int);
     callback row-text-edited(index: int, text: string);
+    callback row-text-accepted(index: int, text: string, caret: int);
     callback list-scrolled(visible-index: int);
     callback detect();
     callback detect-silence-changed(on: bool);
@@ -916,6 +920,7 @@ export component SectionsDialog inherits Modal {
         row-drag-over(visible-index) => { root.row-drag-over(visible-index); }
         row-seek(index) => { root.row-seek(index); }
         row-text-edited(index, text) => { root.row-text-edited(index, text); }
+        row-text-accepted(index, text, caret) => { root.row-text-accepted(index, text, caret); }
         list-scrolled(visible-index) => { root.list-scrolled(visible-index); }
         detect => { root.detect(); }
         detect-silence-changed(on) => { root.detect-silence-changed(on); }
@@ -981,6 +986,7 @@ export component SectionsWorkspacePane inherits Pane {
             row-drag-over(visible-index) => { SectionsView.row-drag-over(visible-index); }
             row-seek(index) => { SectionsView.row-seek(index); }
             row-text-edited(index, text) => { SectionsView.row-text-edited(index, text); }
+            row-text-accepted(index, text, caret) => { SectionsView.row-text-accepted(index, text, caret); }
             list-scrolled(visible-index) => { SectionsView.list-scrolled(visible-index); }
             detect => { SectionsView.detect(); }
             detect-silence-changed(on) => { SectionsView.detect-silence-changed(on); }

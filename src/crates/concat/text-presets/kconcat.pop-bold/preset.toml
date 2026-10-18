@@ -1,0 +1,17 @@
+# The CapCut-shaped pop look: heavy, big, low, outlined, one bright karaoke accent.
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.pop-bold"
+name = "Pop bold"
+language = "Latin"
+order = 101
+kind = "caption"
+offsetY = 0.42
+
+[style]
+content = "Pop bold"
+fontWeight = 900
+fontSize = 0.075
+strokeWidth = 0.014
+strokeColor = "#000000"
+shadow = false
+highlightColor = "#ffd21f"

@@ -22,6 +22,8 @@ pub(super) fn apply(
                 id: id.clone(),
                 visible: true,
                 muted: false,
+                caption_nudge_ms: 0,
+                speaker: None,
                 extra: Default::default(),
             };
             // The stack is stored bottom first: the last track is the lane
@@ -71,6 +73,56 @@ pub(super) fn apply(
             Ok(Outcome {
                 created_id: None,
                 applied,
+            })
+        }
+
+        Command::NudgeCaptionTrack { track_id, delta_ms } => {
+            use crate::model::ranges::{CAPTION_NUDGE_STEP_MS, MAX_CAPTION_NUDGE_MS};
+            let timeline = project.active_mut();
+            let Some(track) = timeline
+                .tracks
+                .iter_mut()
+                .find(|track| track.id == track_id)
+            else {
+                return Err(CommandError::TrackGone);
+            };
+            // Quantise to the step; f64::round sends a tie away from zero, so
+            // +15 ms is two steps and -15 ms is two steps back.
+            let steps = (f64::from(delta_ms) / f64::from(CAPTION_NUDGE_STEP_MS)).round() as i32;
+            let wanted = track
+                .caption_nudge_ms
+                .saturating_add(steps.saturating_mul(CAPTION_NUDGE_STEP_MS));
+            // The one clamp site for this number (AGENTS.md): the lane's
+            // accumulated correction never passes a second either way.
+            let capped = wanted.clamp(-MAX_CAPTION_NUDGE_MS, MAX_CAPTION_NUDGE_MS);
+            let applied_ms = capped - track.caption_nudge_ms;
+            track.caption_nudge_ms = capped;
+            if applied_ms == 0 {
+                return Ok(Outcome {
+                    created_id: None,
+                    applied: false,
+                });
+            }
+            // Every caption on the lane moves with its word timings, so the
+            // karaoke highlight stays on the cue. What counts as a caption is
+            // the stored identity (T5), not the presence of words.
+            let shift = f64::from(applied_ms) / 1000.0;
+            for slot in timeline.clips.iter_mut() {
+                if slot.track_id == track_id && slot.is_caption() {
+                    let mut clip = (**slot).clone();
+                    clip.start = (clip.start + shift).max(0.0);
+                    if let Some(words) = clip.words.as_mut() {
+                        for word in words {
+                            word.start = (word.start + shift).max(0.0);
+                            word.end = (word.end + shift).max(word.start);
+                        }
+                    }
+                    *slot = std::sync::Arc::new(clip);
+                }
+            }
+            Ok(Outcome {
+                created_id: None,
+                applied: true,
             })
         }
 

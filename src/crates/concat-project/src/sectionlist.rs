@@ -180,13 +180,13 @@ pub fn clip_sections_with_cues(
             .clips
             .iter()
             .filter(|c| {
-                c.kind == crate::model::ClipKind::Text
-                    // A caption tied to this source is unambiguous. An
-                    // imported/project-wide caption has no source link but
-                    // does carry word timing. A hand-typed title has neither
-                    // and must not turn into a removable "caption" section.
-                    && (linked_ids.contains(&c.id)
-                        || (c.caption_of.is_none() && c.words.is_some()))
+                // A caption tied to this source is unambiguous. An
+                // imported/project-wide caption has no source link; the
+                // predicate knows it (stored identity, T5 - word timings
+                // alone could be trimmed away and the cue would vanish from
+                // this panel). A hand-typed title is not a caption and must
+                // not turn into a removable "caption" section.
+                c.is_caption() && (linked_ids.contains(&c.id) || c.caption_of.is_none())
             })
             .map(|caption| Cue {
                 // Timeline -> the clip's source window: how far into the

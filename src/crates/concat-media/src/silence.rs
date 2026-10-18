@@ -64,26 +64,11 @@ pub const DEFAULT_NOISE_DB: f64 = -45.0;
 /// inside it, which are where the meaning is.
 pub const DEFAULT_MIN_DURATION: f64 = 0.5;
 
-/// A decibel level below full scale, as a linear amplitude in 0..=1.
-///
-/// -6 dB is about 0.5, -45 dB about 0.0056. The inverse of what a meter
-/// reads, and the comparison [`spans_from_windows`] actually wants.
-pub fn linear_from_db(db: f64) -> f64 {
-    10.0f64.powf(db / 20.0)
-}
-
-/// The root-mean-square level of one window of samples, in 0..=1.
-///
-/// RMS rather than peak, because a single stray sample - a click, a popped
-/// plosive - should not make a whole window read as sound. This is also the
-/// measure FFmpeg's filter uses.
-pub fn rms(samples: &[f32]) -> f64 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    let sum: f32 = samples.iter().map(|sample| sample * sample).sum();
-    f64::from((sum / samples.len() as f32).sqrt())
-}
+// The two measures moved to `concat-timing` (D4-B) so the snapper and the
+// silence detector share one copy of each. They are re-imported here, not
+// re-defined: the tests below still test them, and they still run in
+// `concat-media`, on a machine with FFmpeg, because that is where they were.
+use concat_timing::energy::{linear_from_db, rms};
 
 /// The spans of silence in a run of per-window levels.
 ///

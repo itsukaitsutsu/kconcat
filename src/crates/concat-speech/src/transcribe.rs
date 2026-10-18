@@ -526,6 +526,7 @@ impl Transcriber {
             if request.vad_filter {
                 refine_segments_with_vad(&samples, &mut segs);
             }
+            snap_word_starts(&samples, &mut segs);
             return Ok(segs);
         }
 
@@ -544,6 +545,7 @@ impl Transcriber {
             if request.vad_filter {
                 refine_segments_with_vad(&samples, &mut segs);
             }
+            snap_word_starts(&samples, &mut segs);
             return Ok(segs);
         }
 
@@ -691,6 +693,7 @@ impl Transcriber {
         if request.vad_filter {
             refine_segments_with_vad(&samples, &mut segs);
         }
+        snap_word_starts(&samples, &mut segs);
         Ok(segs)
     }
 
@@ -732,10 +735,17 @@ fn keep_segment(start: f64, end: f64, text: String, words: Vec<HeardWord>) -> Op
 /// Bytes, not strings: some characters arrive split across tokens, and a
 /// word is only decoded once its bytes are whole.
 ///
-/// Languages written without spaces (Japanese, Chinese, Thai) get few or
-/// no word breaks from this, so a run of them may come back as one long
-/// word. That is honest - whisper did not say where the words break - and a
-/// caption still highlights as one piece.
+/// Languages written without spaces (Japanese, Chinese, Thai, Lao, Khmer)
+/// get no breaks from whisper's spacing, so each decoded group is then split
+/// by `captionmap::word_units` - the one copy of the caption word-split
+/// (T4): per-character units with trailing punctuation attached, the group's
+/// span spread over them in proportion to their length by
+/// `captionmap::expand_units`. Whisper still did not say where the words
+/// break, and this does not pretend otherwise: a true Thai or Japanese word
+/// segmenter this is **not** - the units are characters, and the timings
+/// inside a group are estimated, not heard. The snap that follows
+/// (`snap_word_starts`) can pull unit starts onto real onsets, and its
+/// segment clip is what keeps an expansion inside its cue.
 fn words_from_tokens<'a>(tokens: impl IntoIterator<Item = (&'a [u8], f64, f64)>) -> Vec<HeardWord> {
     let mut words: Vec<(Vec<u8>, f64, f64)> = Vec::new();
     for (bytes, start, end) in tokens {
@@ -752,6 +762,30 @@ fn words_from_tokens<'a>(tokens: impl IntoIterator<Item = (&'a [u8], f64, f64)>)
         .filter_map(|(bytes, start, end)| {
             let text = String::from_utf8_lossy(&bytes).trim().to_owned();
             (!text.is_empty()).then_some(HeardWord { text, start, end })
+        })
+        .flat_map(expand_heard)
+        .collect()
+}
+
+/// One decoded whisper word group, split the way captions split (T4):
+/// `captionmap::word_units` decides the units - Unicode alphanumeric
+/// boundaries, never ASCII whitespace alone - and `captionmap::expand_units`
+/// spreads the group's span over them. A Latin word is one unit and comes
+/// back untouched, timings included; only space-less scripts (and any group
+/// whisper glued across a space) change shape. The rule lives in captionmap
+/// and this is the mapping, per D4-B's shape for shared logic.
+fn expand_heard(word: HeardWord) -> Vec<HeardWord> {
+    let mapped = concat_project::captionmap::Word {
+        text: word.text,
+        start: word.start,
+        end: word.end,
+    };
+    concat_project::captionmap::expand_units(&mapped)
+        .into_iter()
+        .map(|unit| HeardWord {
+            text: unit.text,
+            start: unit.start,
+            end: unit.end,
         })
         .collect()
 }
@@ -1111,6 +1145,45 @@ fn refine_segments_with_vad(samples: &[f32], segments: &mut Vec<Segment>) {
         }
         true
     });
+}
+
+/// Level 1 word-onset snapping (roadmap T2, `A-word-timing-level1.md` §2).
+///
+/// Runs after the VAD pass, on the same continuous window buffer, on the
+/// window's own clock - before the caller maps onto the timeline and divides
+/// by the clip speed, and never on a compacted buffer (both rules are tests
+/// in `concat-timing`, not comments). The snapper itself is pure and lives in
+/// `concat-timing`; this function is only the `HeardWord` mapping D4-B asks
+/// for. A word with no rise in its search window keeps Whisper's value, and
+/// a snap that would reorder words is reverted, per the roadmap's collision
+/// rule - so this can only ever pull starts onto energy, never invent them.
+fn snap_word_starts(samples: &[f32], segments: &mut [Segment]) {
+    if samples.is_empty() || segments.is_empty() {
+        return;
+    }
+    let signals = concat_timing::Signals::from_samples(samples);
+    let params = concat_timing::snap::Params::default();
+    for segment in segments.iter_mut() {
+        if segment.words.is_empty() {
+            continue;
+        }
+        let words: Vec<concat_timing::Word> = segment
+            .words
+            .iter()
+            .map(|w| concat_timing::Word::whisper(&w.text, w.start, w.end))
+            .collect();
+        let report = concat_timing::snap::snap_words(
+            &words,
+            &signals,
+            (segment.start, segment.end),
+            &params,
+        );
+        // Same length, same order - the snapper never adds or drops a word.
+        for (heard, snapped) in segment.words.iter_mut().zip(report.words) {
+            heard.start = snapped.start;
+            heard.end = snapped.end;
+        }
+    }
 }
 
 fn transcribe_via_whisper_cli(
@@ -1543,15 +1616,48 @@ mod tests {
         assert!(words_from_tokens([(b"  ".as_slice(), 0.0, 0.1)]).is_empty());
     }
 
-    /// Without spaces, the words are not separable, and the honest answer is
-    /// one word, not a guess at breaks.
+    /// T4, prescribed: a Japanese cue yields more than one word unit. The
+    /// tokens decode to "こん" - before T4 this came back as one word (that
+    /// was the honest answer then); now captionmap's split makes it two
+    /// character units tiling the group's span. Still not a guess at real
+    /// word breaks - a true segmenter is nobody's task yet.
     #[test]
-    fn unspaced_text_is_one_word_not_a_guess() {
+    fn unspaced_text_splits_into_captionmap_units() {
         let tokens: [(&[u8], f64, f64); 2] =
             [(b"\xE3\x81\x93", 0.0, 0.4), (b"\xE3\x82\x93", 0.4, 0.8)];
         let words = words_from_tokens(tokens);
-        assert_eq!(words.len(), 1);
-        assert_eq!((words[0].start, words[0].end), (0.0, 0.8));
+        assert_eq!(words.len(), 2, "{words:?}");
+        assert_eq!(words[0].text, "こ");
+        assert_eq!(words[1].text, "ん");
+        assert_eq!((words[0].start, words[0].end), (0.0, 0.4));
+        assert_eq!((words[1].start, words[1].end), (0.4, 0.8));
+    }
+
+    /// A longer Japanese run: every character its own unit, the span tiled
+    /// in order, nothing lost when the units are joined back.
+    #[test]
+    fn a_japanese_run_yields_one_unit_per_character() {
+        let text = "こんにちは世界";
+        let tokens: Vec<(&[u8], f64, f64)> = text
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                // One token per character, no leading spaces - whisper's
+                // space-less shape. `leak` gives the bytes the 'static life
+                // the token triple wants; a test-local string is fine to leak.
+                (
+                    c.to_string().leak().as_bytes(),
+                    i as f64 * 0.2,
+                    (i + 1) as f64 * 0.2,
+                )
+            })
+            .collect();
+        let words = words_from_tokens(tokens);
+        assert_eq!(words.len(), 7, "{words:?}");
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(""), text);
+        assert!(words.windows(2).all(|pair| pair[1].start >= pair[0].end - 1e-9));
+        assert!((words[0].start - 0.0).abs() < 1e-9);
+        assert!((words[6].end - 1.4).abs() < 1e-9);
     }
 
     #[test]

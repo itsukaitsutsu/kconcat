@@ -507,7 +507,12 @@ impl ExportPane {
             media_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
             let mut segments: Vec<(std::path::PathBuf, f64, f64)> = Vec::new();
             for clip in &media_clips {
-                if let Some(media) = studio.project().media.iter().find(|m| m.id == clip.media_id) {
+                if let Some(media) = studio
+                    .project()
+                    .media
+                    .iter()
+                    .find(|m| m.id == clip.media_id)
+                {
                     let raw = std::path::PathBuf::from(&media.path);
                     let resolved = if raw.is_absolute() {
                         raw
@@ -777,7 +782,12 @@ impl ExportPane {
             rate_mode: self.rate_mode as i32,
             bitrate: self.bitrate as i32,
             encoding: if self.is_stream_copy() {
-                format!("{} · {}", t("export.sameAsCopy"), t("export.streamCopyDetail")).into()
+                format!(
+                    "{} · {}",
+                    t("export.sameAsCopy"),
+                    t("export.streamCopyDetail")
+                )
+                .into()
             } else {
                 // "HEVC 10-bit · hardware": the standard, the depth when it
                 // is the deeper one, and whether the platform's own encoder
@@ -828,11 +838,12 @@ impl ExportPane {
 }
 
 /// A timeline text clip that represents subtitle/caption content rather
-/// than a hand-made title. Imported captions carry word timings; generated
-/// captions additionally link to their spoken source clip.
+/// than a hand-made title. The rule itself lives in `Clip::is_caption`
+/// (AGENTS.md invariant 2: one definition, stored at creation since T5, so a
+/// trim that takes a cue's words cannot un-make the caption and burn it with
+/// "Burn captions" off).
 fn is_caption_clip(clip: &concat_project::model::Clip) -> bool {
-    clip.kind == concat_project::model::ClipKind::Text
-        && (clip.caption_of.is_some() || clip.words.is_some())
+    clip.is_caption()
 }
 
 /// The typed name as the file's, or `None` for one that cannot be: empty
@@ -859,7 +870,10 @@ mod tests {
         let export = ExportPane::default();
         assert!(export.burn_captions);
         assert!(!export.is_stream_copy());
-        let copy = ExportPane { codec: 3, ..ExportPane::default() };
+        let copy = ExportPane {
+            codec: 3,
+            ..ExportPane::default()
+        };
         assert!(copy.is_stream_copy());
     }
 

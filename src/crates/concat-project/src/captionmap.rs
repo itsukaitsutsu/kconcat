@@ -231,6 +231,33 @@ pub fn caption_words(
     }
 }
 
+/// Which word an Enter caret falls in, for splitting a caption there (E4).
+///
+/// The caret is a byte offset into `content`. A caret inside a word maps to
+/// that word; a caret in the gap between two words maps to the *next* one,
+/// so Enter after a space starts the tail at the following word. `None`
+/// where the split would leave nothing on one side - before the first word
+/// or after the last - or where the word the caret lands in cannot be
+/// located in the content (which T7 keeps from happening).
+pub fn word_at_caret(content: &str, words: &[Word], caret: usize) -> Option<usize> {
+    for (i, located) in locate_words(content, words).into_iter().enumerate() {
+        let Some(range) = located else {
+            continue;
+        };
+        if caret < range.end {
+            if caret <= range.start {
+                // In the gap before this word (or at its first byte): the
+                // tail starts here - but only when a head is left to keep.
+                return (i > 0).then_some(i);
+            }
+            // Strictly inside the word.
+            return Some(i);
+        }
+    }
+    // Past the last word's end: no tail to make.
+    None
+}
+
 /// Where each caption word is written in its caption's text, as a byte range.
 ///
 /// The words are found in order, each one after the last one found, because
@@ -720,6 +747,32 @@ fn expand_word_units(word: &Word) -> Vec<Word> {
         .collect()
 }
 
+/// The caption word-split, as the one public door to it (T4).
+///
+/// Whitespace-separated words for scripts that use spaces; per-character
+/// units, with trailing punctuation attached, for scripts written without
+/// them (Japanese, Chinese, Thai, Lao, Khmer). The split asks
+/// `char::is_alphanumeric`, never `is_ascii_alphanumeric` - this is the rule
+/// `AGENTS.md` means by "no whitespace-only splits", and everything that
+/// splits caption text comes through here rather than keeping a second copy:
+/// [`crate::captionmap`]'s own layout, and the transcription words
+/// `concat-speech` returns (roadmap T4).
+///
+/// This is **not** a true Thai or Japanese word segmenter: for space-less
+/// scripts the units are characters, not dictionary words. Segmentation is
+/// nobody's task until a measurement says characters are not enough.
+pub fn word_units(text: &str) -> Vec<String> {
+    text_tokens(text)
+}
+
+/// A single heard word, split into [`word_units`] with its span spread over
+/// them in proportion to their length - the same estimate model
+/// [`estimate_words`] uses, and the same expansion the layout resplit gives
+/// a space-less cue. One unit in, one unit out; the span is never empty.
+pub fn expand_units(word: &Word) -> Vec<Word> {
+    expand_word_units(word)
+}
+
 fn words_for_resplit(cue: &Cue) -> (Vec<Word>, WordSource) {
     let cleaned = clean_words(&cue.words, Some(cue.start), Some(cue.end)).0;
     if !cleaned.is_empty() {
@@ -962,6 +1015,55 @@ pub fn resplit_cues(cues: &[Cue], preset: CaptionLayoutPreset) -> Vec<Cue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // T4, prescribed: a Japanese cue yields more than one word unit.
+    #[test]
+    fn a_japanese_cue_yields_more_than_one_word_unit() {
+        let units = word_units("こんにちは世界");
+        assert!(
+            units.len() > 1,
+            "a space-less script must not collapse to one unit: {units:?}"
+        );
+        assert_eq!(units.join(""), "こんにちは世界", "nothing is lost");
+
+        // Punctuation rides on the unit before it, as in the layout split.
+        assert_eq!(word_units("你好、世界。"), ["你", "好、", "世", "界。"]);
+
+        // Latin text is untouched: a whitespace word is one unit.
+        assert_eq!(word_units("fox."), ["fox."]);
+        assert_eq!(word_units("The quick fox."), ["The", "quick", "fox."]);
+
+        // Thai: the same character-level treatment - and the honest limit,
+        // recorded where the rule lives: these are characters, not the
+        // dictionary words a true segmenter would find.
+        let thai = word_units("สวัสดีชาวโลก");
+        assert!(thai.len() > 1, "{thai:?}");
+    }
+
+    #[test]
+    fn an_expanded_japanese_word_covers_its_span_in_order() {
+        let w = word("こんにちは世界", 0.0, 1.4);
+        let expanded = expand_units(&w);
+        assert_eq!(expanded.len(), 7);
+        assert!(
+            expanded
+                .windows(2)
+                .all(|pair| pair[1].start >= pair[0].end - 1e-9),
+            "units tile the span in order: {expanded:?}"
+        );
+        assert!((expanded[0].start - 0.0).abs() < 1e-9);
+        assert!((expanded[6].end - 1.4).abs() < 1e-9);
+        assert!(expanded.iter().all(|u| u.end - u.start >= MIN_WORD - 1e-9));
+    }
+
+    #[test]
+    fn a_latin_word_expands_to_itself() {
+        let w = word("understanding", 1.0, 1.9);
+        let expanded = expand_units(&w);
+        assert_eq!(expanded.len(), 1);
+        assert_eq!(expanded[0].text, "understanding");
+        assert_eq!((expanded[0].start, expanded[0].end), (1.0, 1.9));
+    }
 
     fn word(text: &str, start: f64, end: f64) -> Word {
         Word {
@@ -1740,6 +1842,31 @@ mod tests {
             vec![Some(0..1), Some(1..2), None]
         );
         assert_eq!(layout_words_of(&[Some(20..22)], &layout), vec![None]);
+    }
+
+    #[test]
+    fn a_caret_inside_a_word_maps_to_that_word() {
+        let words = vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)];
+        // "halo dunia": halo 0..4, dunia 5..10.
+        assert_eq!(word_at_caret("halo dunia", &words, 2), Some(0));
+        assert_eq!(word_at_caret("halo dunia", &words, 7), Some(1));
+    }
+
+    #[test]
+    fn a_caret_in_a_gap_maps_to_the_next_word() {
+        let words = vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)];
+        // Enter right after "halo" (its end, or the space) starts the tail
+        // at "dunia" - a head of one word, not of none.
+        assert_eq!(word_at_caret("halo dunia", &words, 4), Some(1));
+        assert_eq!(word_at_caret("halo dunia", &words, 5), Some(1));
+    }
+
+    #[test]
+    fn a_caret_with_nothing_on_one_side_maps_to_nothing() {
+        let words = vec![word("halo", 3.5, 3.7), word("dunia", 3.7, 3.9)];
+        assert_eq!(word_at_caret("halo dunia", &words, 0), None);
+        assert_eq!(word_at_caret("halo dunia", &words, 10), None);
+        assert_eq!(word_at_caret("halo dunia", &words, 12), None);
     }
 
     #[test]

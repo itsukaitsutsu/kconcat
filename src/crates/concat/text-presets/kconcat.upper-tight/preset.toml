@@ -1,0 +1,19 @@
+# Sits higher and tighter. The manual's inverse white highlight: the colour ships; inverse drawing is the renderer's business.
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.upper-tight"
+name = "Upper tight"
+language = "Latin"
+order = 106
+kind = "caption"
+offsetY = 0.4
+
+[style]
+content = "Upper tight"
+fontWeight = 800
+fontSize = 0.062
+strokeWidth = 0.008
+strokeColor = "#000000"
+shadow = false
+highlightColor = "#ffffff"
+# C4: the caps look - the transform renders, the stored words never change.
+transform = "uppercase"

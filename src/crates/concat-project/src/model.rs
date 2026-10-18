@@ -204,6 +204,10 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
+fn is_zero_ms(value: &i32) -> bool {
+    *value == 0
+}
+
 /// A lane. Deliberately untyped: any media goes on any track.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -215,6 +219,23 @@ pub struct Track {
     pub visible: bool,
     /// Audio on this track is silent when true.
     pub muted: bool,
+    /// The caption track's sync nudge, in milliseconds (T6): a signed
+    /// correction in ±10 ms steps ([`ranges::CAPTION_NUDGE_STEP_MS`]) that
+    /// `Command::NudgeCaptionTrack` accumulates here, capped at
+    /// ±[`ranges::MAX_CAPTION_NUDGE_MS`]. Stored on the *track*, not the
+    /// clips, so it survives re-transcription: when a caption run is
+    /// regenerated the old clips go and new ones arrive, and the lane they
+    /// land on still knows how far the picture and the voice disagree.
+    /// Absent from documents saved before it existed - serde's default is
+    /// zero, which is "never nudged" - so `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "is_zero_ms")]
+    pub caption_nudge_ms: i32,
+    /// The speaker whose caption lane this is (roadmap P3/D7): one lane
+    /// per speaker, every caption on it carrying the same label. `None` -
+    /// the default, and absent from every older document - is an ordinary
+    /// lane, so `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
     /// Fields this build does not know, kept so they round-trip.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: Map<String, Value>,
@@ -226,6 +247,8 @@ impl Default for Track {
             id: String::new(),
             visible: true,
             muted: false,
+            caption_nudge_ms: 0,
+            speaker: None,
             extra: Map::new(),
         }
     }
@@ -853,6 +876,89 @@ pub enum TextAlign {
     Right,
 }
 
+/// How the painter transforms the stored words before drawing them (roadmap
+/// C4). The names are written into project files, so they are stable for
+/// ever. The transform is a render-time act: it never rewrites `content`,
+/// so the transcript keeps its casing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextTransform {
+    /// The words draw as stored - the default, and what the reader falls
+    /// back to for an unrecognised name.
+    #[default]
+    None,
+    /// Every stored word draws in uppercase.
+    Uppercase,
+}
+
+impl TextTransform {
+    /// Whether this is the transform that does nothing, for the wire's
+    /// skip: a style with no transform serialises without the key, so
+    /// documents stay what older builds wrote.
+    fn is_none(&self) -> bool {
+        matches!(self, TextTransform::None)
+    }
+}
+
+/// How a caption comes in (roadmap C5, schema v1 APPROVED by owner
+/// 16 Oct 2026). The names are written into project files and preset
+/// files, so they are stable for ever: `none`, `pop`, `word-reveal`,
+/// `typewriter`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MotionMode {
+    /// The whole cue is on screen from its start; only the highlight
+    /// moves. The default, and what an unrecognised name reads as.
+    #[default]
+    None,
+    /// Each word appears at its spoken time with a scale-in from
+    /// `scale_from` to 1 over `duration`.
+    Pop,
+    /// The cue starts empty; each word appears at its spoken time and
+    /// stays.
+    WordReveal,
+    /// The letters of each word appear one by one across the word's
+    /// spoken time; `duration` is not used.
+    Typewriter,
+}
+
+/// The schema-v1 motion block, stored on the clip so the choice survives
+/// a project reload, and copied here from a preset's `[motion]` on
+/// apply. Older documents have no motion and read as `mode = "none"`,
+/// so `DOCUMENT_VERSION` does not move. The two dials clamp in
+/// [`TextStyle::tidy`] and nowhere else (the schema's own rule).
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CaptionMotion {
+    /// Which way in.
+    pub mode: MotionMode,
+    /// Seconds per word for pop and word-reveal; typewriter times itself
+    /// off the spoken word. The owner accepted 0.18 as the default, to
+    /// tune after T2 is accepted.
+    pub duration: f64,
+    /// Pop only: the starting scale of each word, landing on 1.
+    pub scale_from: f64,
+}
+
+impl CaptionMotion {
+    /// Whether this says nothing - the wire's skip, so a document stays
+    /// what older builds wrote while no motion is chosen.
+    fn is_default(&self) -> bool {
+        *self == CaptionMotion::default()
+    }
+}
+
+impl Default for CaptionMotion {
+    fn default() -> Self {
+        CaptionMotion {
+            mode: MotionMode::None,
+            // The schema's approved defaults.
+            duration: 0.18,
+            scale_from: 1.15,
+        }
+    }
+}
+
 /// Which figure a shape clip draws. The names are written into project
 /// files, so they are stable for ever.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -1049,9 +1155,39 @@ pub struct TextStyle {
     /// the words are matched to the title's words.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub highlight_color: String,
+    /// The render-time case transform (roadmap C4): the painter draws the
+    /// transformed words while `content` - the transcript - keeps its
+    /// casing. Absent in every older document, and what an unrecognised
+    /// name reads as.
+    #[serde(
+        default,
+        deserialize_with = "wire::text_transform",
+        skip_serializing_if = "TextTransform::is_none"
+    )]
+    pub transform: TextTransform,
+    /// The caption's way in (roadmap C5, schema v1, owner-approved
+    /// 16 Oct 2026): the mode, and the two dials pop and word-reveal
+    /// time themselves by. Absent in every older document, which reads
+    /// as `mode = "none"`.
+    #[serde(
+        default,
+        deserialize_with = "wire::caption_motion",
+        skip_serializing_if = "CaptionMotion::is_default"
+    )]
+    pub motion: CaptionMotion,
 }
 
 impl TextStyle {
+    /// What the painter draws: `content` with the render-time transform
+    /// applied. The stored text is never rewritten - a caption keeps the
+    /// transcript's casing (roadmap C4).
+    pub fn display_content(&self) -> std::borrow::Cow<'_, str> {
+        match self.transform {
+            TextTransform::None => std::borrow::Cow::Borrowed(&self.content),
+            TextTransform::Uppercase => std::borrow::Cow::Owned(self.content.to_uppercase()),
+        }
+    }
+
     /// Every number pulled into the range a title can be drawn at: a
     /// hand-edited zero size would render an invisible title, and lines
     /// cannot collapse onto each other.
@@ -1073,6 +1209,15 @@ impl TextStyle {
             finite(self.background_padding_x, base.background_padding_x).max(0.0);
         self.background_padding_y =
             finite(self.background_padding_y, base.background_padding_y).max(0.0);
+        // C5's two dials clamp here and only here, the schema's own rule:
+        // duration stays a per-word number a painter can draw (20 ms to
+        // 2 s), scale_from stays a pop from bigger to life-size (1 to 3;
+        // below 1 a word would grow into its pop, which is another
+        // effect nobody approved). The mode is not a number and does not
+        // clamp.
+        self.motion.duration = finite(self.motion.duration, base.motion.duration).clamp(0.02, 2.0);
+        self.motion.scale_from =
+            finite(self.motion.scale_from, base.motion.scale_from).clamp(1.0, 3.0);
         self
     }
 }
@@ -1100,6 +1245,8 @@ impl Default for TextStyle {
             max_width: 0.0,
             max_height: 0.0,
             highlight_color: String::new(),
+            transform: TextTransform::None,
+            motion: CaptionMotion::default(),
         }
     }
 }
@@ -1117,7 +1264,10 @@ pub(crate) mod wire {
     use serde::{Deserialize, Deserializer};
     use serde_json::Value;
 
-    use super::{ClipKind, ColorSpace, MediaKind, ParamKey, ShapeKind, TextAlign};
+    use super::{
+        CaptionMotion, ClipKind, ColorSpace, MediaKind, ParamKey, ShapeKind, TextAlign,
+        TextTransform,
+    };
 
     /// The entries of a list that parse, in order; not a list at all is
     /// an empty one.
@@ -1205,6 +1355,24 @@ pub(crate) mod wire {
         Ok(serde_json::from_value(value).unwrap_or(TextAlign::Center))
     }
 
+    /// A text transform by name, none for a name this build does not know.
+    pub fn text_transform<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<TextTransform, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        Ok(serde_json::from_value(value).unwrap_or_default())
+    }
+
+    /// A caption's motion, the default (mode none) for any shape this
+    /// build cannot read: a hand-edited way-in must not fail the whole
+    /// document.
+    pub fn caption_motion<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<CaptionMotion, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        Ok(serde_json::from_value(value).unwrap_or_default())
+    }
+
     /// A shape by name, a square for one this build does not know.
     pub fn shape_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ShapeKind, D::Error> {
         let value = Value::deserialize(deserializer)?;
@@ -1241,6 +1409,14 @@ pub mod ranges {
     pub const MAX_OFFSET: f64 = 3.0;
     /// A transition can be no shorter than this, in seconds.
     pub const MIN_TRANSITION: f64 = 0.1;
+    /// One press of the caption nudge (T6): 10 ms, about a third of a frame
+    /// at 30 fps - fine enough to walk a subtitle onto its syllable, coarse
+    /// enough that a lane's accumulated correction stays a round number.
+    pub const CAPTION_NUDGE_STEP_MS: i32 = 10;
+    /// How far a caption track may be nudged in total, either direction.
+    /// Past a second, the fix is not a nudge but a re-transcription or a
+    /// ripple, and the cap keeps a held button from walking a lane away.
+    pub const MAX_CAPTION_NUDGE_MS: i32 = 1000;
 
     /// A rotation kept in (-180, 180] so a full drag never accumulates
     /// turns.
@@ -1381,6 +1557,28 @@ pub struct Clip {
     /// `caption_of`, so `DOCUMENT_VERSION` does not move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words: Option<Vec<crate::captionmap::Word>>,
+    /// The speaker this clip's voice belongs to (roadmap P3): set on an
+    /// audio clip by detection or by hand, and on a caption when it joins
+    /// a speaker's lane - every word of the caption inherits the label,
+    /// which is what "the label lives on each transcript word" means at
+    /// caption granularity: a caption is one speaker's utterance (overlap
+    /// is manual-only in the plan, and one speaker per caption is the
+    /// lossless case). Absent from older documents; `DOCUMENT_VERSION`
+    /// does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// Whether this clip was **created** as a caption: stored at creation,
+    /// never re-derived from fields a trim can take away (T5). The bug this
+    /// fixes: an imported cue's identity rested on `words` alone, autotrim
+    /// clears `words` when a surviving piece keeps none of them, and the
+    /// piece stopped being a caption while still showing the whole cue text -
+    /// burned with "Burn captions" off, blocking caption lanes, invisible to
+    /// the Sections panel. `None` means the document predates the field, and
+    /// [`Clip::is_caption`] then derives identity the old way, so every
+    /// project saved before it keeps loading and behaving exactly as before
+    /// until an edit stores a flag. `DOCUMENT_VERSION` does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption_flag: Option<bool>,
     /// The transition on the cut into this clip, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
@@ -1494,6 +1692,8 @@ impl Clip {
             detached_from: None,
             caption_of: None,
             words: None,
+            speaker: None,
+            caption_flag: None,
             transition_in: None,
             enhanced: None,
             text: None,
@@ -1506,7 +1706,14 @@ impl Clip {
     /// than a hand-made title or lower third. Captions may share a track
     /// and overlap in time; ordinary clips keep the normal no-overlap rule.
     pub fn is_caption(&self) -> bool {
-        self.kind == ClipKind::Text && (self.caption_of.is_some() || self.words.is_some())
+        // The one definition of caption-ness in the tree (AGENTS.md
+        // invariant 2): the stored flag when the document has one, and the
+        // historical derivation - a caption run's link or word timings -
+        // only for documents saved before the flag existed.
+        self.kind == ClipKind::Text
+            && self
+                .caption_flag
+                .unwrap_or(self.caption_of.is_some() || self.words.is_some())
     }
 
     /// Pulls every number back into the range a command would have held
@@ -1829,6 +2036,28 @@ impl Clip {
     }
 }
 
+/// One speaker of a long-form recording (roadmap P3, owner 16 Oct 2026:
+/// a speaker is a label, not a lane - but D7 gives each speaker's captions
+/// a lane of their own, linked by [`Track::speaker`]). The name is what
+/// the user typed (SPEAKER_00 becomes "Host" once, and stays editable);
+/// the colour belongs to the speaker, not to single words, and every
+/// caption of the speaker takes it through the label. Absent from
+/// documents saved before speakers existed - serde's default is no
+/// speakers at all - so `DOCUMENT_VERSION` does not move, and with the
+/// registry empty nothing in the editing flow changes (the owner's opt-in
+/// rule: no speaker processing runs unless the user asks).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Speaker {
+    /// Minted per timeline ("sp1", ...); never reused within one.
+    pub id: String,
+    /// What the user calls this voice. Never blank once named.
+    pub name: String,
+    /// The speaker's colour, a CSS hex string like every colour here;
+    /// empty is "the renderer's fallback".
+    pub color: String,
+}
+
 /// One timeline: a name and its lanes and clips. Every operation takes the
 /// project and works on whichever timeline is active.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -1848,6 +2077,11 @@ pub struct Timeline {
     /// of one.
     #[serde(deserialize_with = "wire::list")]
     pub tracks: Vec<Track>,
+    /// The speakers of this timeline (roadmap P3). Empty - the default,
+    /// and absent from every older document - is a recording with no
+    /// speaker labels at all, which is every single-speaker project.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speakers: Vec<Speaker>,
     /// Every clip on this timeline, in insertion order, not time order -
     /// readers must sort by `start` where order matters.
     ///
@@ -1869,6 +2103,7 @@ impl Default for Timeline {
             name: "Timeline".to_owned(),
             video: VideoSettings::default(),
             tracks: Vec::new(),
+            speakers: Vec::new(),
             clips: Vec::new(),
             extra: Map::new(),
         }
@@ -2085,6 +2320,7 @@ impl Project {
                         ..Track::default()
                     })
                     .collect(),
+                speakers: Vec::new(),
                 clips: Vec::new(),
                 extra: Map::new(),
             })],

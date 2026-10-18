@@ -1,0 +1,15 @@
+# A caption in the lower third's place, on a soft plate.
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.low-third-cap"
+name = "Low third cap"
+language = "Latin"
+order = 107
+kind = "caption"
+offsetY = 0.62
+
+[style]
+content = "Low third cap"
+fontWeight = 700
+fontSize = 0.05
+shadow = false
+background = "#00000099"

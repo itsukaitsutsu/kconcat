@@ -1,0 +1,17 @@
+# The karaoke look: the highlight ships on, one lit word at a time (C3/A10).
+# One of the eight caption looks (roadmap C2, manual B-caption-styles §4, owner A9: no Indonesian variant).
+id = "kconcat.karaoke"
+name = "Karaoke"
+language = "Latin"
+order = 103
+kind = "caption"
+offsetY = 0.42
+
+[style]
+content = "Karaoke"
+fontWeight = 900
+fontSize = 0.078
+strokeWidth = 0.012
+strokeColor = "#000000"
+shadow = false
+highlightColor = "#39ff88"

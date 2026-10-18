@@ -803,7 +803,29 @@ fn reveal_of(words: &[WordRect], width: u32, height: u32) -> Arc<RevealMap> {
 /// The document's style, field for field, in the painter's terms.
 fn title_style(style: &TextStyle) -> TitleStyle {
     TitleStyle {
-        content: style.content.clone(),
+        // The painter draws the render-time transform (roadmap C4); the
+        // document's `content` - the transcript - keeps its casing, and the
+        // word-matching above runs on the stored text, so the highlight
+        // lands on the words the transcript says.
+        content: style.display_content().into_owned(),
+        // The caption's way in (roadmap C5): the document's motion copied
+        // into the painter's mirror, field for field like the rest of
+        // this struct. What drives `progress` - the schema's open
+        // question - is the render loop's business, not this copy's.
+        motion: concat_text::Motion {
+            mode: match style.motion.mode {
+                concat_project::model::MotionMode::None => concat_text::MotionMode::None,
+                concat_project::model::MotionMode::Pop => concat_text::MotionMode::Pop,
+                concat_project::model::MotionMode::WordReveal => {
+                    concat_text::MotionMode::WordReveal
+                }
+                concat_project::model::MotionMode::Typewriter => {
+                    concat_text::MotionMode::Typewriter
+                }
+            },
+            duration: style.motion.duration,
+            scale_from: style.motion.scale_from,
+        },
         font_family: style.font_family.clone(),
         font_size: style.font_size,
         font_weight: style.font_weight,
