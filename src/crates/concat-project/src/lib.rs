@@ -25,6 +25,7 @@ pub mod captionmap;
 pub mod commands;
 pub mod doc;
 pub mod duck;
+pub mod platform_export;
 pub mod editor;
 pub mod filler;
 pub mod model;

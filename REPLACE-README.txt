@@ -1,32 +1,38 @@
-KConcat cumulative replacement bundle
+kconcat batch 05-09 overlay
+===========================
 
-Extract this ZIP at the repository root, replacing the matching files. It
-contains the scrollable-panel fix requested, plus the earlier caption undo and
-beat-grid changes from this work pass.
+Copy these files ON TOP of the same paths in C:\dev\kconcat
+(keep your beat.rs, caption/scroll local edits if those files are NOT listed here).
 
-Scrollable panel changes:
-- PaneScroll now accepts an optional min-content-height and uses it to size its
-  content and calculate overflow. Existing users default to 0px.
-- Keyframes now scroll vertically (wheel and finger drag); its header/tool
-  strip remain fixed. Dopesheet height accounts for every key row; curve view
-  keeps a minimum usable canvas.
-- Meters now scroll vertically (wheel and finger drag); its header stays put.
-- The UI-1 investigation note records what changed and what remains to check.
+Files in this zip (replace each):
+  src/crates/concat-project/src/platform_export.rs   (NEW)
+  src/crates/concat-project/src/lib.rs
+  src/crates/concat/src/panes/captions.rs
+  src/crates/concat/src/panes/export.rs
+  src/crates/concat/src/panes/import_captions.rs
+  src/crates/concat/src/studio.rs
+  src/crates/concat/src/lib.rs
+  src/crates/concat/ui/dialogs/captions.slint
+  src/crates/concat/ui/dialogs/export.slint
+  src/crates/concat/ui/app.slint
 
-Also included:
-- Caption Enter-to-split now records one undo for an edit+split event; regression
-  test included.
-- Dependency-free beat-grid estimation and snapping helper, with synthetic
-  pulse, tolerance, and silence tests.
-- Roadmap and next-steps synchronization.
+Do NOT copy over:
+  src/crates/concat-timing/src/beat.rs
+  src/crates/concat-timing/src/lib.rs
+  src/crates/concat/ui/workspace/*.slint
+  TEMP-kconcat-remaining-plan-checklist.md
 
-I could not compile/run the Slint UI or Rust tests here because Cargo/Rust is
-unavailable. This is the implementation to test as a whole on your Windows
-checkout; it is not a claim that UI runtime behavior was verified. From `src/`:
-  cargo fmt --check -p concat-timing -p concat
-  cargo test -p concat-timing
-  cargo test -p concat --lib panes::captions
-  cargo check -p concat
+From C:\dev\kconcat\src in the real build prompt:
 
-Back up files before replacing. If the filtered concat test finds no tests,
-run `cargo test -p concat`.
+  cargo test --locked -p concat-project
+  cargo check --locked -p concat
+  cargo dev
+
+What this batch adds (not closed as user-facing until you run it):
+  05 Look picker on Captions (Default + 8 looks); karaoke fill only if no look chosen
+  06 no extra edit path
+  07 Link / Unlink on clip menu, Ctrl+L
+  08 Export platform: YouTube TikTok Reels Shorts (bitrate hint; no sequence rewrite)
+  09 Audio clip menu: Duck under speech
+
+03/04 real-media quality is still yours.

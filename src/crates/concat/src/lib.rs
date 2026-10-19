@@ -1459,6 +1459,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_export_name_edited(on_window!(|state, name: SharedString| {
         state.handle(Msg::Export(ExportMsg::NameEdited(name.to_string())));
     }));
+    app.on_export_platform_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Export(ExportMsg::PlatformChanged(index)));
+    }));
     app.on_export_resolution_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Export(ExportMsg::ResolutionChanged(index)));
     }));
@@ -1699,6 +1702,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_captions_size_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Captions(CaptionsMsg::SizeChanged(index)));
+    }));
+    app.on_captions_look_preset_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::LookPresetChanged(index)));
     }));
     app.on_captions_new_blank_captions(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::NewBlankCaptions));

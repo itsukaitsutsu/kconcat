@@ -1,6 +1,6 @@
 # TEMP — kconcat remaining-plan checklist
 
-**Draft:** v0.11 — 19 October 2026, Asia/Bangkok  
+**Draft:** v0.12 — 19 October 2026, Asia/Bangkok  
 **Purpose:** an editable temporary checklist for finishing the 22 grouped milestones, with a parked AI-integrated-editing idea afterward.  
 **Location:** separate from the source checkout. This file does not change the official roadmap, modify code, create a Git commit, or expire automatically. Promote, revise, or delete it when you choose.
 
@@ -38,9 +38,12 @@ The unchecked 22-item overview tracks full acceptance and hid real partial progr
 - [x] **Milestone-03 source input received:** `D:\autotrim\mentahan inheal - people pleaser.MP4`. This is the user-designated local path; actual existence/duration/content are not verified from this workspace.
 - [x] **Milestone-03 pilot runner prepared:** an interactive, local-only 30-second cache + three-mode measurement batch, with explicit existing-model-folder selection and original-media preservation.
 - [x] **Pilot helper checks here:** 7 standard-library CLI tests and 14 synthetic PowerShell/helper checks passed; CRLF patch compatibility passed. This is not a claim of Windows/ASR execution on the video.
-- [ ] **Milestone 03 — in progress:** owner runs the pilot, then completes the required real corpus/reference/baseline/holdout evidence. No real-video accuracy or GUI/export acceptance is implied by the already passing build/test groups.
+- [x] **Milestone-03 native Clippy retry passed:** `RESUME-REAL-BASELINE.cmd` in folder `people-pleaser-20261019-123808-347fa0`; `cache-example-clippy` **EXIT 0** in **172.300 s** (`-j 1`, warnings still errors). The earlier 0xc0000005 crash did not recur on this retry.
+- [x] **Milestone-03 source probe passed:** duration **315.84 s**; window proposed **0.000–30.000**; original MP4 not modified.
+- [x] **Milestone-03 model inventory:** three multilingual models listed; default selection **large-v3-turbo** (1.51 GiB) and language Indonesian; no download.
+- [ ] **Milestone 03 — in progress:** owner cancelled at `Type Y` before extraction/inference. Re-run and type **Y** to create the 30 s audio/cache and three measurements. No real-video accuracy or GUI/export acceptance yet.
 
-**Current next action:** the real stderr is now received and decoded. It shows `ffmpeg-sys-the-third`’s native build helper crashing with **0xc0000005 / STATUS_ACCESS_VIOLATION**, not a Clippy lint or the earlier missing-stdlib message. The underlying faulting library/cause is not established. Use `kconcat-step03-retry.zip` to update the runner, then run `RESUME-REAL-BASELINE.cmd` **once** in the configured prompt. It checks prior passing format/test evidence plus unchanged source, then retries Clippy with the previously passing lib+example target selection and one build job. No Rust-source edits, reinstall, clean or silent lint bypass are performed in resume mode. Actual retry success is not assumed.
+**Current next action:** Clippy/native crash is cleared on this retry. Run `RESUME-REAL-BASELINE.cmd` again (or `RUN-REAL-BASELINE.cmd` if resume refuses a cancelled log). Accept defaults: model **3** / large-v3-turbo, start **0**, window 0–30 s, then type **Y** (not Enter, not N). Do not launch a second copy. Inference on large-v3-turbo can take several minutes. Send `SHAREABLE-SUMMARY.json` from the **new** output folder when it finishes. Do not treat the cancelled run as a failed native build.
 
 The original broader milestone 01 remains partially open: global cleanup/current GUI project-open/save/other platform checks have not been claimed passed. Its build/test entry checkpoint is passed, so those maintenance tasks do not block the real-media work. **02 is complete as an infrastructure work package**; real-corpus execution is 03 and timing/recognition-quality acceptance is 04. This is not a claim that the official T1/T2/T3 real-media acceptance criteria or the whole application are complete.
 
@@ -223,7 +226,7 @@ An unchecked milestone can contain substantial completed code. A checked milesto
 
 - [ ] **01 — Build/check health.** BUILD/TEST ENTRY CHECKPOINT PASSED; broader cleanup/current GUI/platform checks remain. Not a blocker for step 02; see completed checkpoints above.
 - [x] **02 — Timing-comparison infrastructure.** COMPLETE — implemented and Windows-native verified: all eight check groups passed; **41 targeted tests passed, 0 failed**. First real-video cache/baseline is tracked in 03; accuracy acceptance remains 04.
-- [ ] **03 — Real corpus and baseline.** IN PROGRESS — helper applied; format/tests passed. Native FFmpeg build-helper access violation identified; runner-only controlled retry prepared. Underlying cause/retry result and all real model/media/corpus acceptance remain pending.
+- [ ] **03 — Real corpus and baseline.** IN PROGRESS — native Clippy retry **EXIT 0** (172 s); source probed 315.84 s; cancelled before extraction at `Type Y`. Real cache/measurements still pending.
 - [ ] **04 — Timing and Indonesian ASR acceptance.** Close the real-audio quality gate.
 - [ ] **05 — Caption appearance and panel access.** Finish existing caption foundations and their controls/rendering.
 - [ ] **06 — Transcript-editing controls.** Connect and validate editing mechanisms.
@@ -318,8 +321,9 @@ English/Japanese work may move forward after step 04 if needed, without delaying
 - [x] Owner helper formatting and cache-example-test commands completed: the script advanced past both to Clippy. Exact test counts are not established by the short pasted console output.
 - [x] Received/decoded the actual stderr (UTF-16, 5,989 lines). The native FFmpeg build helper exited `0xc0000005, STATUS_ACCESS_VIOLATION`; Cargo returned 101. Loaded Clang reports 21.1.0. This identifies a native crash, **not** its faulting DLL/root cause and not a proven RAM shortage.
 - [x] Prepared a runner-only diagnostic/resume repair: readable UTF-8 logs, actual-error excerpts in the main log, prior-log + source-hash guard, previous lib+example target selection, and one Cargo build job. **23 helper checks passed here**; native Windows resolution is still unverified.
-- [ ] Run the controlled retry once using `RESUME-REAL-BASELINE.cmd`; preserve existing source/caches and lint enforcement. If it fails again, inspect the new error context/build-environment evidence instead of looping or reinstalling blindly.
-- [ ] Once the actual error is fixed, continue model inventory/selection, audio probing/window selection, and real cache/measurement generation. These were not reached in the first attempt.
+- [x] Run the controlled retry once using `RESUME-REAL-BASELINE.cmd`; Clippy **EXIT 0** in 172.300 s; no reinstall/clean/lint bypass. Access-violation did not recur on this run.
+- [x] Model inventory, source probe (315.84 s), and proposed 0–30 s window reached. Owner cancelled at confirmation (`STOP: Cancelled before media extraction/inference`).
+- [ ] Re-run and type **Y** so extraction/inference and three measurements actually run. Cancelled attempt must not be reused as a successful cache.
 - [ ] Read the resulting `SHAREABLE-SUMMARY.json` and cache/run evidence before checking successful real capture. No real media has been processed here. This default first run is a 30-second pilot, not the full corpus.
 - [ ] Choose the exact 30-second reference slice and record its source start/end.
 - [ ] Listen and correct its transcript; ensure reference text and hypothesis cover the **same audio range**.

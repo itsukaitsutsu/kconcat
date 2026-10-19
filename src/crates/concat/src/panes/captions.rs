@@ -24,6 +24,7 @@ use std::sync::Arc;
 use concat_project::Command;
 use concat_project::captionmap::{CaptionLayoutPreset, Cue, WordSource};
 use concat_project::model::TextStyle;
+use concat_project::platform_export::apply_generated_karaoke;
 use concat_speech::transcribe::Segment;
 use slint::{SharedString, VecModel};
 
@@ -39,6 +40,17 @@ use crate::ui::{CaptionDraftData, CaptionsSheetData};
 const CAPTION_OFFSETS: [f64; 3] = [0.35, 0.0, -0.35];
 /// A caption's cap height by the sheet's row, as a fraction of the frame.
 const CAPTION_SIZES: [f64; 3] = [0.04, 0.05, 0.065];
+/// The eight caption looks (C2). Index 0 on the sheet is "Default".
+pub const CAPTION_LOOK_IDS: [&str; 8] = [
+    "kconcat.pop-bold",
+    "kconcat.boxed",
+    "kconcat.karaoke",
+    "kconcat.minimal",
+    "kconcat.hard-shadow",
+    "kconcat.upper-tight",
+    "kconcat.low-third-cap",
+    "kconcat.clean-bilingual",
+];
 /// A rough speaking rate, for a script's timing and the speech sheet's
 /// estimate.
 pub const CHARS_PER_SECOND: f32 = 14.0;
@@ -80,6 +92,8 @@ pub enum CaptionsMsg {
     KeepWavChanged(bool),
     PlacementChanged(i32),
     SizeChanged(i32),
+    /// Row of the eight caption looks, plus 0 = title-style default.
+    LookPresetChanged(i32),
     NewBlankCaptions,
     OpenSubtitleFile,
     SubtitleFilePicked(PathBuf),
@@ -172,6 +186,8 @@ pub struct CaptionsPane {
     pub placement: usize,
     /// 0 small, 1 medium, 2 large.
     pub size: usize,
+    /// 0 = default title style; 1..=8 = `CAPTION_LOOK_IDS`.
+    pub look_preset: usize,
     pub running: bool,
     pub progress: f32,
     /// Elapsed time and ETA string shown while transcribing (`capMeta`).
@@ -221,6 +237,7 @@ impl Default for CaptionsPane {
             keep_wav: false,
             placement: 0,
             size: 1,
+            look_preset: 0,
             running: false,
             progress: 0.0,
             progress_meta: String::new(),
@@ -350,6 +367,9 @@ impl CaptionsPane {
                 self.placement = (index.max(0) as usize).min(2);
             }
             CaptionsMsg::SizeChanged(index) => self.size = (index.max(0) as usize).min(2),
+            CaptionsMsg::LookPresetChanged(index) => {
+                self.look_preset = (index.max(0) as usize).min(CAPTION_LOOK_IDS.len());
+            }
             CaptionsMsg::NewBlankCaptions => {
                 self.start_blank_captions(studio);
             }
@@ -970,6 +990,7 @@ impl CaptionsPane {
             keep_wav: self.keep_wav,
             placement: 0,
             size: 1,
+            look_preset: self.look_preset,
             seg_preset: self.seg_preset,
             sources_model: Rc::clone(&self.sources_model),
             download_models_model: Rc::clone(&self.download_models_model),
@@ -987,6 +1008,21 @@ impl CaptionsPane {
             CAPTION_OFFSETS[self.placement.min(2)],
             CAPTION_SIZES[self.size.min(2)],
         )
+    }
+
+    /// Title prefs, or a tagged caption preset when the sheet picked one.
+    /// The bool is "the look already decided karaoke on/off".
+    fn caption_style_base(&self, studio: &Studio) -> (Option<TextStyle>, bool) {
+        if self.look_preset == 0 {
+            return (studio.prefs.title_style.clone(), false);
+        }
+        let Some(id) = CAPTION_LOOK_IDS.get(self.look_preset - 1) else {
+            return (studio.prefs.title_style.clone(), false);
+        };
+        match studio.text_presets.iter().find(|held| held.id == *id) {
+            Some(found) => (Some(found.style.clone()), true),
+            None => (studio.prefs.title_style.clone(), false),
+        }
     }
 
     /// The script as titles, one after another from the playhead.
@@ -1008,7 +1044,7 @@ impl CaptionsPane {
         };
         let target_track = has_existing.then(|| "__top__".to_owned());
         let mut at = f64::from(studio.playhead);
-        let base = studio.prefs.title_style.clone();
+        let (base, look_decided) = self.caption_style_base(studio);
         let mut commands: Vec<Command> = Vec::new();
         if has_existing {
             commands.push(Command::AddTrack { bottom: false });
@@ -1024,6 +1060,7 @@ impl CaptionsPane {
                 None,
                 None,
                 target_track.clone(),
+                look_decided,
             );
             at += seconds;
             commands.push(command);
@@ -1142,7 +1179,7 @@ impl CaptionsPane {
         };
         // Always place the caption batch onto the dedicated top track (`__top__`).
         let target_track = Some("__top__".to_owned());
-        let base = studio.prefs.title_style.clone();
+        let (base, look_decided) = self.caption_style_base(studio);
         let caption_of = (!clip_id.is_empty()).then_some(clip_id.as_str());
         let valid_drafts: Vec<&CaptionDraft> = self
             .drafts
@@ -1170,6 +1207,7 @@ impl CaptionsPane {
                     caption_of,
                     Some(words),
                     target_track.clone(),
+                    look_decided,
                 )
             })
             .collect();
@@ -1352,6 +1390,7 @@ impl CaptionsPane {
             keep_wav: self.keep_wav,
             placement: self.placement as i32,
             size: self.size as i32,
+            look_preset: self.look_preset as i32,
             running: self.running,
             progress: self.progress,
             progress_meta: self.progress_meta.as_str().into(),
@@ -1611,7 +1650,17 @@ pub(crate) fn caption_clip(
     caption_of: Option<&str>,
     words: Option<Vec<concat_project::captionmap::Word>>,
 ) -> Command {
-    caption_clip_on_track(text, start, duration, look, base, caption_of, words, None)
+    caption_clip_on_track(
+        text,
+        start,
+        duration,
+        look,
+        base,
+        caption_of,
+        words,
+        None,
+        false,
+    )
 }
 
 /// Same as `caption_clip`, optionally targeting an explicit `track_id` (such
@@ -1625,6 +1674,7 @@ pub(crate) fn caption_clip_on_track(
     caption_of: Option<&str>,
     words: Option<Vec<concat_project::captionmap::Word>>,
     track_id: Option<String>,
+    look_preset_decided: bool,
 ) -> Command {
     let (offset_y, font_size) = look;
     let mut style = match base {
@@ -1643,9 +1693,12 @@ pub(crate) fn caption_clip_on_track(
             ..TextStyle::default()
         },
     };
-    if words.is_some() && style.highlight_color.is_empty() {
-        style.highlight_color = concat_project::model::DEFAULT_HIGHLIGHT.to_owned();
-    }
+    apply_generated_karaoke(
+        &mut style.highlight_color,
+        words.is_some(),
+        look_preset_decided,
+        concat_project::model::DEFAULT_HIGHLIGHT,
+    );
     Command::AddTextClip {
         track_id,
         above: true,

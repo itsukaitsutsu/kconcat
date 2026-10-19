@@ -58,7 +58,7 @@ use crate::host::{
     image_of, media_art, on_ui_in_project, spawn, spawn_art, spawn_in_project, spawn_strip,
     strip_window, window_art, window_span, window_start,
 };
-use crate::i18n::{self, t, tf};
+use crate::i18n::{self, t, t_or, tf};
 use crate::panes::settings::installed;
 use crate::platform;
 use crate::prefs::Preferences;
@@ -9860,6 +9860,49 @@ impl Studio {
             ));
             rows.push(rule());
         }
+        if self.selection.len() >= 2 {
+            rows.push(action(
+                "link",
+                t_or("studio.link", "Link"),
+                Glyph::Merge,
+                "Ctrl+L",
+                !locked,
+            ));
+        }
+        if clip.link_group.is_some() {
+            rows.push(action(
+                "unlink",
+                t_or("studio.unlink", "Unlink"),
+                Glyph::Waveform,
+                "",
+                !locked,
+            ));
+        }
+        if clip.kind == model::ClipKind::Audio {
+            rows.push(action(
+                "duck",
+                t_or("studio.duckMusic", "Duck under speech"),
+                Glyph::Waveform,
+                "",
+                !locked,
+            ));
+        }
+        if clip.is_caption() {
+            rows.push(action(
+                "nudge-captions-minus",
+                t_or("studio.nudgeCaptionsEarly", "Nudge captions −10 ms"),
+                Glyph::None,
+                "",
+                !locked,
+            ));
+            rows.push(action(
+                "nudge-captions-plus",
+                t_or("studio.nudgeCaptionsLate", "Nudge captions +10 ms"),
+                Glyph::None,
+                "",
+                !locked,
+            ));
+        }
         // The clip's sound, written out as it plays, as a file of its own
         // in the bin. For anything with sound in it; a clip whose track is
         // muted still renders, since the file is the clip's and not the
@@ -10442,6 +10485,13 @@ impl Studio {
             }
             "select-all" => self.select_all(),
             "select-lane" => self.select_current_lane(),
+            "link" => {
+                if self.selection.len() >= 2 {
+                    self.apply(Command::LinkClips {
+                        clip_ids: self.selection.clone(),
+                    });
+                }
+            }
             // The phone's way out of the clip tools: nothing selected, the
             // way a press on an empty lane leaves it.
             "deselect" => {
@@ -10577,6 +10627,52 @@ impl Studio {
             }
             "export-audio" => self.export_clip_audio(id),
             "detach" => self.detach_audio(&clip),
+            "link" => {
+                let ids = if self.selection.len() >= 2 {
+                    self.selection.clone()
+                } else {
+                    vec![id.to_owned()]
+                };
+                self.apply(Command::LinkClips { clip_ids: ids });
+            }
+            "unlink" => {
+                self.apply(Command::UnlinkClips {
+                    clip_ids: vec![id.to_owned()],
+                });
+            }
+            "duck" => {
+                let against: Vec<String> = self
+                    .timeline()
+                    .clips
+                    .iter()
+                    .filter(|other| other.words.as_ref().is_some_and(|w| !w.is_empty()))
+                    .map(|other| other.id.clone())
+                    .collect();
+                if against.is_empty() {
+                    self.notify(
+                        &t_or(
+                            "studio.duckNoSpeech",
+                            "No caption words to duck against.",
+                        ),
+                        false,
+                    );
+                } else {
+                    self.apply(Command::DuckMusic {
+                        clip_id: id.to_owned(),
+                        against_clips: against,
+                        against_regions: Vec::new(),
+                        amount_db: concat_project::duck::DEFAULT_AMOUNT_DB,
+                        fade_ms: concat_project::duck::DEFAULT_FADE_MS,
+                    });
+                }
+            }
+            "nudge-captions-minus" | "nudge-captions-plus" => {
+                let delta_ms = if action.ends_with("plus") { 10 } else { -10 };
+                self.apply(Command::NudgeCaptionTrack {
+                    track_id: clip.track_id.clone(),
+                    delta_ms,
+                });
+            }
             "reattach" => {
                 self.apply(Command::ReattachAudio {
                     clip_id: id.to_owned(),

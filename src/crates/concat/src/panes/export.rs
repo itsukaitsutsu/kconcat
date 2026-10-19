@@ -35,6 +35,7 @@ pub enum ExportMsg {
     /// The sheet is dismissed.
     Close,
     NameEdited(String),
+    PlatformChanged(i32),
     ResolutionChanged(i32),
     RateChanged(i32),
     QualityChanged(i32),
@@ -82,6 +83,8 @@ pub struct ExportPane {
     pub open: bool,
     pub name: String,
     pub folder: String,
+    /// 0 YouTube (timeline size), 1 TikTok, 2 Reels, 3 Shorts.
+    pub platform: usize,
     pub resolution: usize,
     pub rate: usize,
     pub quality: usize,
@@ -119,6 +122,7 @@ impl Default for ExportPane {
             open: false,
             name: "Untitled".into(),
             folder: home_folder("Movies"),
+            platform: 0,
             resolution: 2,
             rate: 0,
             quality: 1,
@@ -158,6 +162,11 @@ impl ExportPane {
             }
             ExportMsg::Close => self.open = false,
             ExportMsg::NameEdited(name) => self.name = name,
+            ExportMsg::PlatformChanged(index) => {
+                self.platform = (index.max(0) as usize).min(3);
+                let preset = concat_project::platform_export::PlatformPreset::from_index(self.platform);
+                self.bitrate = preset.bitrate_kbps();
+            }
             ExportMsg::ResolutionChanged(index) => {
                 // Only the timeline's own rung is taken; the sheet greys the
                 // rest, and this is the same rule for a caller that did not.
@@ -702,6 +711,7 @@ impl ExportPane {
                 let whole = studio.duration().max(0.0) as i32;
                 format!("{}:{:02}", whole / 60, whole % 60).into()
             },
+            platform: self.platform as i32,
             contents: if titles > 0 {
                 format!("{clips} clips · {titles} titles")
             } else {

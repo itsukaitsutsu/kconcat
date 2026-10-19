@@ -6,6 +6,7 @@ import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { Button, CopyChip, DialogRow, DialogSection, Field, Progress } from "../primitives/modal.slint";
 import { Select } from "../primitives/select.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Switch } from "../inspector/controls.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 import { Fmt } from "../util.slint";
@@ -36,6 +37,8 @@ export struct ExportData {
     duration: string,
     /// "8 clips · 3 titles"
     contents: string,
+    /// 0 YouTube (timeline size), 1 TikTok, 2 Reels, 3 Shorts
+    platform: int,
     resolution: int,
     /// the resolution ladder as this project would come out at each
     /// rung - "1080 × 1920" on a 9:16 edit - with its names, and which
@@ -342,6 +345,7 @@ component DestinationSection inherits DialogSection {
 component OutputSection inherits DialogSection {
     in property <ExportData> data;
 
+    callback platform-changed(index: int);
     callback resolution-changed(index: int);
     callback rate-changed(index: int);
     callback codec-changed(index: int);
@@ -350,6 +354,15 @@ component OutputSection inherits DialogSection {
     callback hdr-changed(on: bool);
 
     title: I18n.t("export.output");
+
+    DialogRow {
+        label: "Platform";
+        SegmentedControl {
+            options: ["YouTube", "TikTok", "Reels", "Shorts"];
+            current: root.data.platform;
+            changed(index) => { root.platform-changed(index); }
+        }
+    }
 
     DialogRow {
         label: I18n.t("export.resolution");
@@ -733,6 +746,7 @@ export component ExportDialog inherits Rectangle {
     callback closed();
     callback name-edited(name: string);
     callback browse();
+    callback platform-changed(index: int);
     callback resolution-changed(index: int);
     callback rate-changed(index: int);
     callback quality-changed(index: int);
@@ -870,6 +884,7 @@ export component ExportDialog inherits Rectangle {
                         }
                         if !root.running: OutputSection {
                             data: root.data;
+                            platform-changed(index) => { root.platform-changed(index); }
                             resolution-changed(index) => { root.resolution-changed(index); }
                             rate-changed(index) => { root.rate-changed(index); }
                             codec-changed(index) => { root.codec-changed(index); }
@@ -928,6 +943,7 @@ export component ExportDialog inherits Rectangle {
                             OutputSection {
                                 first: true;
                                 data: root.data;
+                                platform-changed(index) => { root.platform-changed(index); }
                                 resolution-changed(index) => { root.resolution-changed(index); }
                                 rate-changed(index) => { root.rate-changed(index); }
                                 codec-changed(index) => { root.codec-changed(index); }
@@ -972,6 +988,7 @@ export component ExportDialog inherits Rectangle {
                             OutputSection {
                                 first: true;
                                 data: root.data;
+                                platform-changed(index) => { root.platform-changed(index); }
                                 resolution-changed(index) => { root.resolution-changed(index); }
                                 rate-changed(index) => { root.rate-changed(index); }
                                 codec-changed(index) => { root.codec-changed(index); }

@@ -224,6 +224,7 @@ export component App inherits Window {
     callback export-closed();
     callback export-name-edited(name: string);
     callback export-browse();
+    callback export-platform-changed(index: int);
     callback export-resolution-changed(index: int);
     callback export-rate-changed(index: int);
     callback export-quality-changed(index: int);
@@ -315,6 +316,7 @@ export component App inherits Window {
     callback captions-keep-wav-changed(on: bool);
     callback captions-placement-changed(index: int);
     callback captions-size-changed(index: int);
+    callback captions-look-preset-changed(index: int);
     callback captions-new-blank-captions();
     callback captions-open-subtitle-file();
     callback captions-draft-text-changed(index: int, text: string);
@@ -556,6 +558,11 @@ export component App inherits Window {
             activated => { Editor.shortcut("paste"); }
         }
         KeyBinding {
+            keys: @keys(Control + L);
+            enabled: !root.on-start;
+            activated => { Editor.shortcut("link"); }
+        }
+        KeyBinding {
             keys: @keys(Control + D);
             enabled: !root.on-start;
             activated => { Editor.shortcut("duplicate"); }
@@ -794,6 +801,7 @@ export component App inherits Window {
         closed => { root.export-closed(); }
         name-edited(name) => { root.export-name-edited(name); }
         browse => { root.export-browse(); }
+        platform-changed(index) => { root.export-platform-changed(index); }
         resolution-changed(index) => { root.export-resolution-changed(index); }
         rate-changed(index) => { root.export-rate-changed(index); }
         quality-changed(index) => { root.export-quality-changed(index); }
@@ -935,6 +943,7 @@ export component App inherits Window {
         keep-wav-changed(on) => { root.captions-keep-wav-changed(on); }
         placement-changed(index) => { root.captions-placement-changed(index); }
         size-changed(index) => { root.captions-size-changed(index); }
+        look-preset-changed(index) => { root.captions-look-preset-changed(index); }
         new-blank-captions => { root.captions-new-blank-captions(); }
         open-subtitle-file => { root.captions-open-subtitle-file(); }
         draft-text-changed(index, text) => { root.captions-draft-text-changed(index, text); }

@@ -182,6 +182,7 @@ impl ImportCaptionsPane {
                                 resolved_link,
                                 Some(words),
                                 Some("__top__".to_owned()),
+                                false,
                             ));
                         }
                         studio.apply(Command::Batch { commands });

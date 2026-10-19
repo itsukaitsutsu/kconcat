@@ -67,6 +67,8 @@ export struct CaptionsSheetData {
     placement: int,
     /// 0 Small, 1 Medium, 2 Large
     size: int,
+    /// 0 Default title style; 1..=8 the eight caption looks
+    look-preset: int,
     running: bool,
     /// 0..1
     progress: float,
@@ -110,6 +112,7 @@ export component CaptionsDialog inherits Modal {
     callback keep-wav-changed(on: bool);
     callback placement-changed(index: int);
     callback size-changed(index: int);
+    callback look-preset-changed(index: int);
     callback new-blank-captions();
     callback open-subtitle-file();
     callback draft-text-changed(index: int, text: string);
@@ -524,6 +527,26 @@ export component CaptionsDialog inherits Modal {
                     options: [I18n.t("common.small"), I18n.t("common.medium"), I18n.t("common.large")];
                     current: root.data.size;
                     changed(index) => { root.size-changed(index); }
+                }
+            }
+
+            DialogRow {
+                label: "Look";
+                Select {
+                    width: 240px;
+                    options: [
+                        "Default",
+                        "Pop bold",
+                        "Boxed",
+                        "Karaoke",
+                        "Minimal",
+                        "Hard shadow",
+                        "Upper tight",
+                        "Low third",
+                        "Clean bilingual",
+                    ];
+                    current: root.data.look-preset;
+                    changed(index) => { root.look-preset-changed(index); }
                 }
             }
 
