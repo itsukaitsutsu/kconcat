@@ -67,3 +67,18 @@ version.
 Nothing here limits the permissions the AGPL already grants you, and nothing
 here is a licence to any patent beyond what AGPL-3.0-or-later section 11
 already provides.
+
+
+---
+
+## Fork clarification: packages, services, and customer drafts
+
+This explanatory section does not amend the plugin exception above or the full [AGPL text](LICENSE), and does not grant new permissions on behalf of other copyright holders. Check the applicable grants for the exact components and release you distribute.
+
+The [customer agreement pack](makethisforagreementuser/agreementREADME.md) consists of unfinished templates for a convenience package and limited services. It is not a proprietary license for Concat, this fork, or modifications forming part of an AGPL-covered work. Any finalized store terms must preserve recipients' applicable AGPL rights, including copying, modification, and redistribution. Payment for distribution or assistance does not purchase an exemption from copyleft.
+
+Before distributing an AGPL binary, provide the complete Corresponding Source matching that binary in a manner compliant with the license, with its link beside download/purchase access and no additional charge for the source required by the license. Include required license, copyright, attribution, and change notices. The plugin exception does not excuse obligations for AGPL-covered portions, including applicable network-source obligations.
+
+Models, codecs, libraries, fonts, and other assets may have separate licenses; consult [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and each component's actual terms. Do not include materials lacking the necessary commercial redistribution permission. Neither the customer drafts nor this clarification grants trademark rights; consult [TRADEMARK.md](TRADEMARK.md).
+
+Assistance limits and warranty disclaimers do not override non-waivable consumer rights or mandatory provider obligations. Complete and legally review the customer documents before using them for transactions.

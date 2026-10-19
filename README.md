@@ -1,3 +1,63 @@
+# kconcat
+
+A development fork of [Concat](https://github.com/jub0t/Concat), with Video Trim Studio integration work. This repository is not an official upstream Concat release. References to Concat identify the upstream software, not an endorsement or a support commitment by its maintainers.
+
+## Documentation and policies
+
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Contributing](CONTRIBUTING.md)
+- [AGPL-3.0 license — full text](LICENSE)
+- [License — additional permissions and package boundaries](LICENSE-EXCEPTIONS.md)
+- [Security](SECURITY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Upstream trademark policy](TRADEMARK.md)
+
+## Getting started
+
+See [installation notes](README-INSTALL.md), [local build instructions](RUN-CONCAT-LOCAL.md), and the [source workspace guide](src/README.md). See [architecture](ARCHITECTURE.md) and the [status and verification checklist](ROADMAP-ALL-STATUS-AND-VERIFICATION.md) for development context.
+
+Development notes and historical test counts are not guarantees about a current binary. Check the exact release/commit, tested systems, dependencies, storage requirements, and known issues before installing. Back up media and projects before processing them.
+
+## Software rights and paid packages
+
+The workspace declares **AGPL-3.0-or-later**, with the existing [plugin exception](LICENSE-EXCEPTIONS.md). The full AGPL text in [LICENSE](LICENSE) remains unchanged. Verify the applicable license, notices, and provenance of each component for the exact release; third-party models, codecs, fonts, libraries, and assets may have separate terms.
+
+A paid installer, build, model bundle, documentation package, or setup service does **not** make AGPL-covered code proprietary. Recipients retain the rights the AGPL grants to use, study, modify, and redistribute that code. Store, account, payment, and support conditions must not restrict those rights. Neither payment nor acceptance of the draft customer agreements is required to exercise rights already granted by the software license.
+
+Before distributing an AGPL binary, make its complete Corresponding Source available in a license-compliant manner, matching that exact release/commit. Display the source link beside download/purchase access, without an additional charge for the source required by the license. Include the full applicable license and required copyright, attribution, change, and third-party notices. A moving `main` branch is not a substitute for identifying the source of a specific build. Meet applicable network-source obligations as well.
+
+Only include models and other third-party materials that may lawfully be commercially redistributed. Modified builds must use their own product identity and icon unless the necessary permission has been obtained; see [TRADEMARK.md](TRADEMARK.md). The repository name alone is not confirmation that release branding has been cleared.
+
+## Customer agreements — drafts, not live checkout terms
+
+The documents in [makethisforagreementuser](makethisforagreementuser/agreementREADME.md) are **unfinished templates**, not an announcement of an operational store or finalized customer contract:
+
+| Draft | Purpose |
+| --- | --- |
+| [Draft pack and launch checklist](makethisforagreementuser/agreementREADME.md) | Required business, release, licensing, and legal checks |
+| [Installation Package and Limited Support Agreement](makethisforagreementuser/01-package-and-limited-support-agreement.md) | Package contents, delivery, and limited assistance |
+| [Terms and Conditions](makethisforagreementuser/02-terms-and-conditions.md) | Orders, payments, cancellations, complaints, and store use |
+| [Privacy Policy](makethisforagreementuser/03-privacy-policy.md) | Actual data processing, recipients, retention, and rights |
+
+The proposed model is a **one-time payment** for the stated package and/or assistance, with no subscription or automatic renewal unless clearly disclosed. The order must specify contents, price/taxes, delivery, tested systems, included models and licenses, source link, support scope/channel/duration, and cancellation/refund process.
+
+Standard assistance is limited to what is expressly purchased. Unless separately agreed in writing, it does not include application bug fixes, new features, ongoing maintenance, project recovery, guaranteed AI output, or unsupported configurations. A public bug report or contribution does not create a paid-service commitment. These limits do not override express promises or non-waivable consumer rights.
+
+**Before using these templates with customers:** complete every placeholder, verify all factual claims, obtain Indonesian legal review, and prepare an aligned Bahasa Indonesia counterpart as advised by counsel. Do not treat the English drafts as automatically replacing Indonesian-language agreements. No provider identity, contact address, refund policy, or service deadline is supplied by this README.
+
+## Privacy and safe reporting
+
+Application, installer, model-download, update, telemetry, crash-reporting, and website/store data flows must be verified before publishing privacy promises. This documentation does not certify that the application is fully offline, sends no data, or never uploads media. The draft Privacy Policy is not evidence of implemented practices.
+
+Do not post private media, customer/order details, payment information, credentials, or unredacted logs in public issues. Use a minimal, sanitized reproducer. Send private files to support only when needed and after agreeing how they will be handled. Security issues belong in the private reporting process described in [SECURITY.md](SECURITY.md), not in public bug reports.
+
+## Historical integration notes
+
+The following notes preserve the original Tranche A handoff for provenance and technical reference. They describe that stage, not current release verification, current licensing clearance for Video Trim Studio, or a promise of future features. Upstream submission requirements apply to upstream submissions; consult [CONTRIBUTING.md](CONTRIBUTING.md) for this fork.
+
+<details>
+<summary>VTS → Concat: original Tranche A handoff</summary>
+
 # VTS → Concat, Tranche A: three pure modules
 
 Ported from `itsukaitsutsu/video-trim-studio` into `jub0t/Concat`, targeting
@@ -283,3 +343,6 @@ In the order the dependencies run:
 
 Item 5 is the one to raise as an issue first, because it needs a decision about
 `DOCUMENT_VERSION`, which `ARCHITECTURE.md` §15 lists as a known deferred defect.
+
+
+</details>

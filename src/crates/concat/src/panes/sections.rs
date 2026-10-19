@@ -1047,6 +1047,7 @@ impl SectionsPane {
                     Some(clip_id),
                     Some(words),
                     target_track.clone(),
+                    false,
                 )
             })
             .collect();
@@ -1089,6 +1090,7 @@ impl SectionsPane {
                     Some(clip_id),
                     Some(words),
                     target_track.clone(),
+                    false,
                 ))
             })
             .collect()

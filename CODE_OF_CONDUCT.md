@@ -56,12 +56,20 @@ Examples of representing our community include using an official e-mail address,
 posting via an official social media account, or acting as an appointed
 representative at an online or offline event.
 
+## Package support and software rights
+
+This code governs participation in this fork's community and any support spaces its maintainers operate. It is not a software license or a customer purchase agreement. Moderation of community access does not revoke rights already granted under the AGPL or waive mandatory consumer rights.
+
+Constructive criticism, good-faith bug reports, security reports, and requests for refunds or privacy rights are not misconduct merely because they are inconvenient. A purchase does not entitle anyone to harassment or assistance outside the agreed scope. Do not publish customer records, payment details, private media, credentials, or unredacted logs.
+
+The [customer agreement pack](makethisforagreementuser/agreementREADME.md) remains a draft. It does not establish live support channels or deadlines.
+
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-[Discord](https://discord.gg/DVuPfpXfqP).
-All complaints will be reviewed and investigated promptly and fairly.
+reported privately to this fork's maintainers through a verified private contact they publish. This repository currently does not specify a dedicated fork conduct-reporting contact. Do not assume the upstream Discord handles incidents for this fork.
+
+Until a private contact is published, use GitHub's reporting/blocking tools for abuse on GitHub; do not post sensitive incident details publicly. Maintainers should publish a working private contact before operating customer support spaces. Reports received will be assessed fairly; no response deadline is promised here.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
