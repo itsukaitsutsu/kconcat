@@ -504,6 +504,7 @@ Added by owner. Each item comes from the Option B Tier D5 list and is not yet in
 
 ### K1. Beat sync (music)
 - **CapCut parity item:** cut or place clips on music beats (Option B D5).
+- **Implementation progress (18 Oct 2026):** the dependency-free analysis layer is now in `concat-timing::beat`: energy-flux tempo estimation (60–180 BPM), beat-grid/phase generation, confidence, and tolerance-based snap helper, with synthetic pulse-train regression tests. This is the engine layer only. Timeline waveform decoding, UI action, and a real-music acceptance check remain; do not mark K1 complete until those are integrated.
 - **Needs:** a beat detector (local, no model needed for a first version).
 - **Test first:** on a music clip with known tempo, the detected beats match a hand count within a tolerance set after a baseline.
 - **Done when:** the user can snap cuts to beats on one timeline.
@@ -669,6 +670,6 @@ Parked. The per-word machinery is what Track 1 is still fixing. Full design: the
 | P4 audio recording, one track per mic | fixed (owner 16 Oct: audio only) | multi-mic placement DONE (18 Oct, verified in concat-project: place_session one-track-per-mic, landing = playhead+offset, one-undo folding, all-or-nothing NaN guard, empty no-op; session recording Session/start_from/input_devices written, not verified — needs cpal) |
 | P6 B-roll / animation | verify (B-roll only) | VERIFIED 18 Oct: multi-clip exists (owner-reported, timeline supports it, running-app check is owner's machine); animation built as C5 motion schema v1 |
 | P7 Denoise | verify only (exists: `concat.denoise`) | VERIFIED 18 Oct: exists — Noise Reduction (afftdn, Strength 0–100%) + Enhance Voice in packages/, no code to add; listening test on owner's room clip is the final word |
-| K1–K5 Track 6 (beat sync, flicker, tracking, AI colour, AI text remover) | added by owner 16 Oct; after P6 | not built |
+| K1–K5 Track 6 (beat sync, flicker, tracking, AI colour, AI text remover) | added by owner 16 Oct; after P6 | K1 analysis engine implemented (concat-timing, 18 Oct); UI/audio integration pending. K2–K5 not started |
 
 **Order (fixed):** T1 → T2 → T3 → T4 (parallel) → T5 → T6 → T7 → C1 validation → E4 → E1 → E2 → V2 (loudness first) → C2 → C3 → C4 → V3 → V4 → P3 → V1 → C5 (after D3) → E3 → P4 → P7 → P6. **T8 runs in parallel after T1. X1 and X2 (§10b) come after Track 1 exit.** **UI-1 (§10c, panel scroll) can run in parallel with Track 1, since it touches no word-timing code.**

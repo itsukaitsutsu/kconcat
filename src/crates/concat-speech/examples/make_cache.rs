@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 
-//! Runs Whisper once over the corpus and writes the two files the metric
-//! runner reads (D5-B, owner-machine half):
+//! Creates a pre-onset-snap cache and its 16 kHz mono audio for T1/T2/T3.
 //!
 //! ```text
 //! cargo run -p concat-speech --example make_cache -- \
-//!     <media-file> 06-corpus/whisper-cache.json <model-id> [language]
+//!     <media-file> <fresh-output-folder>/whisper-cache.json <model-id> [language]
 //! ```
 //!
-//! It writes `06-corpus/audio-16k.f32` beside the cache: the same decode
-//! Whisper heard, as raw little-endian f32 at 16 kHz mono, so a snapped run
-//! and its baseline are measured on identical samples. Whisper runs once;
-//! every later iteration of the snapper is the runner, in seconds.
+//! The evaluation entry point keeps backend tokenization and the requested
+//! VAD refinement, but bypasses onset snapping on every successful backend.
+//! The ordinary editor transcription entry point is unchanged. Provenance
+//! records the actual backend, requested settings and the pre-snap stage.
+//! Existing output files are refused rather than overwriting a baseline.
 //!
-//! NOT VERIFIED IN THE SANDBOX: this example links FFmpeg and whisper.cpp
-//! through `concat-media` and `concat-host`, so it compiles and runs only on
-//! a machine with those installed (roadmap v2 §0 step 6). Read it as the
-//! specification of the cache's provenance; the runner's schema check is the
-//! contract between the two halves.
+//! Native verification requires the owner's FFmpeg/Whisper setup. The pure
+//! runner and mode/provenance tests run without those native libraries.
 
+use std::io::Write;
 use std::path::Path;
 use std::{env, fs, process};
 
@@ -29,16 +27,28 @@ use concat_speech::transcribe::{TranscribeRequest, Transcriber};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.len() < 3 {
-        eprintln!("usage: make_cache <media-file> <whisper-cache.json> [model-id] [language]");
+    if !(3..=4).contains(&args.len()) {
+        eprintln!("usage: make_cache <media-file> <cache.json> <model-id> [language]");
         process::exit(2);
     }
     let media = &args[0];
     let cache_path = Path::new(&args[1]);
-    let model_id = args.get(2).cloned().unwrap_or_else(|| "large-v3-turbo".to_owned());
+    let model_id = args[2].clone();
     let language = args.get(3).cloned().unwrap_or_else(|| "id".to_owned());
+    let output_dir = cache_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let audio_path = output_dir.join("audio-16k.f32");
+    if cache_path.exists() || audio_path.exists() {
+        fail(
+            "output",
+            "cache or audio already exists; choose a fresh output folder so the baseline is not overwritten",
+        );
+    }
 
-    // The decode, exactly as `transcribe` asks for it: 16 kHz mono f32.
+    // Same continuous-clock decoding options as the transcription request:
+    // no normalization, first stream, source start zero, 16 kHz mono f32.
     let mut decoder = AudioDecoder::open(
         Path::new(media),
         &AudioOptions {
@@ -52,18 +62,13 @@ fn main() {
         },
     )
     .unwrap_or_else(|error| fail(media, &error.to_string()));
-    let samples = decoder.collect_f32().unwrap_or_else(|error| fail(media, &error.to_string()));
+    let samples = decoder
+        .collect_f32()
+        .unwrap_or_else(|error| fail(media, &error.to_string()));
     if samples.is_empty() {
         fail(media, "no audio decoded");
     }
     let duration_s = samples.len() as f64 / 16_000.0;
-    let audio_path = cache_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("audio-16k.f32");
-    let raw: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-    fs::write(&audio_path, &raw).unwrap_or_else(|e| fail(&audio_path.display().to_string(), &e.to_string()));
-    eprintln!("wrote {} ({} s of 16 kHz mono)", audio_path.display(), duration_s);
 
     let dirs = AppDirs::locate().unwrap_or_else(|error| fail("app dirs", &error));
     let transcriber = Transcriber::new();
@@ -87,20 +92,38 @@ fn main() {
         keep_wav: false,
         output_dir: None,
     };
-    let segments = transcriber
-        .transcribe(&dirs, &request, |percent| {
+    let result = transcriber
+        .transcribe_for_timing_cache(&dirs, &request, |percent| {
             if percent % 10 == 0 {
                 eprint!("\rwhisper {percent}%  ");
             }
         })
         .unwrap_or_else(|error| fail(media, &error));
     eprintln!();
-
-    // Schema 1, exactly as the runner's `Cache` reads it: absolute seconds on
-    // the file's own clock (source_start is 0, so window-relative is absolute
-    // here), words in order, no marker - the cache is what Whisper said.
+    let segments = &result.segments;
     let body = serde_json::json!({
         "schema": 1,
+        "provenance": {
+            "stage": "post-tokenization-and-requested-vad-before-onset-snap",
+            "onset_snapping": false,
+            "backend": result.backend,
+            "requested_backend": request.engine,
+            "model_id": request.model_id,
+            "language": request.language,
+            "translate": request.translate,
+            "prompt": request.prompt,
+            "device": request.device,
+            "compute_type": request.compute_type,
+            "vad_filter": request.vad_filter,
+            "beam_size": request.beam_size,
+            "word_timestamps": request.word_timestamps,
+            "temperature_fallback": request.temperature_fallback,
+            "normalize_audio": request.normalize_audio,
+            "source_start": request.source_start,
+            "window_s": request.window,
+            "clock": "continuous source window; source_start=0; no speed mapping",
+            "generator_version": env!("CARGO_PKG_VERSION")
+        },
         "audio": {"file": media, "sample_rate": 16_000, "channels": 1,
                    "duration_s": duration_s},
         "segments": segments.iter().map(|segment| serde_json::json!({
@@ -111,20 +134,57 @@ fn main() {
                 "text": word.text, "start": word.start, "end": word.end})).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     });
-    if let Some(dir) = cache_path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    fs::write(cache_path, serde_json::to_string_pretty(&body).unwrap())
+    let json =
+        serde_json::to_vec_pretty(&body).unwrap_or_else(|e| fail("cache JSON", &e.to_string()));
+    let raw: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    fs::create_dir_all(output_dir).unwrap_or_else(|e| fail("output directory", &e.to_string()));
+    // Delay all output writing until transcription succeeds. create_new also
+    // closes the race with another process creating the same output paths.
+    write_new(&audio_path, &raw)
+        .unwrap_or_else(|e| fail(&audio_path.display().to_string(), &e.to_string()));
+    write_new(cache_path, &json)
         .unwrap_or_else(|e| fail(&cache_path.display().to_string(), &e.to_string()));
     eprintln!(
-        "wrote {} ({} segments, {} words)",
+        "wrote {} ({duration_s} s, 16 kHz mono)",
+        audio_path.display()
+    );
+    eprintln!(
+        "wrote {} ({} segments, {} words; backend {}; onset snapping OFF)",
         cache_path.display(),
         segments.len(),
-        segments.iter().map(|s| s.words.len()).sum::<usize>()
+        segments.iter().map(|s| s.words.len()).sum::<usize>(),
+        result.backend
     );
+}
+
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)
 }
 
 fn fail(what: &str, why: &str) -> ! {
     eprintln!("{what}: {why}");
     process::exit(2);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_existing_baseline_output_is_never_overwritten() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("kconcat-baseline-{}-{stamp}.json", process::id()));
+        write_new(&path, b"original").unwrap();
+        let err = write_new(&path, b"replacement").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        fs::remove_file(path).unwrap();
+    }
 }

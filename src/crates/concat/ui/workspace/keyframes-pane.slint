@@ -20,7 +20,7 @@ import { Select } from "../primitives/select.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { InspectorFmt, Param, ParamFormat } from "../inspector/controls.slint";
 import { ClipField, ClipKeyData, Keyframes, SelectedClipData } from "../timeline/model.slint";
-import { Pane, PaneHeader } from "pane.slint";
+import { Pane, PaneHeader, PaneScroll } from "pane.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 
 /// One key on a row: where in the clip, its value as a fraction of the
@@ -408,8 +408,17 @@ export component KeyframesPane inherits Pane {
         }
 
         // ── body ────────────────────────────────────────────────────────
-        if root.any: HorizontalLayout {
+        if root.any: PaneScroll {
             vertical-stretch: 1;
+            finger: true;
+            // Knob rows need their full list height in the dopesheet. Curves
+            // retain a useful minimum drawing area even in a short pane.
+            min-content-height: root.view == 0
+                ? Math.max(240px, root.ruler-h + root.rows.length * root.row-h + 32px)
+                : 280px;
+
+            HorizontalLayout {
+                vertical-stretch: 1;
 
             // The knobs, one a row, the active one marked.
             Rectangle {
@@ -652,6 +661,7 @@ export component KeyframesPane inherits Pane {
                     background: Theme.accent;
                     opacity: 0.8;
                 }
+            }
             }
         }
     }

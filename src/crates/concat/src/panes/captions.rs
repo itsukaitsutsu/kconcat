@@ -546,10 +546,16 @@ impl CaptionsPane {
         }
 
         // The TextInput can emit `accepted` before its last `edited` callback
-        // reaches the model. Commit only a genuinely changed value; an
-        // unsuccessful Enter must not mark untouched ASR captions as edited.
-        if self.drafts[index].text != text {
-            self.edit_draft_text(row, text);
+        // reaches the model. Save the pre-Enter state once so a successful
+        // split is one undo even when this row was already edited earlier.
+        let text_changed = self.drafts[index].text != text;
+        if text_changed {
+            self.push_undo();
+            if let Some(draft) = self.drafts.get_mut(index) {
+                draft.text = text;
+                draft.preserve_words = false;
+                draft.edited = true;
+            }
         }
         let Ok(caret) = usize::try_from(caret) else {
             self.message = "Enter needs a caret inside a word with audio timing.".to_owned();
@@ -561,7 +567,9 @@ impl CaptionsPane {
         match split_draft_at_caret(&draft, caret) {
             Ok((head, tail)) => {
                 // One undo returns to the exact row state visible before Enter.
-                self.push_undo();
+                if !text_changed {
+                    self.push_undo();
+                }
                 self.drafts.remove(index);
                 self.drafts.insert(index, head);
                 self.drafts.insert(index + 1, tail);
@@ -1844,6 +1852,32 @@ mod tests {
         assert_eq!(pane.drafts.len(), 1);
         assert_eq!(pane.drafts[0].text, "Halo dunia");
         assert_eq!((pane.drafts[0].start, pane.drafts[0].end), (0.0, 2.0));
+    }
+
+    #[test]
+    fn enter_with_a_final_text_edit_is_one_undo_even_for_an_already_edited_cue() {
+        let original = CaptionDraft {
+            text: "Halo dunia".to_owned(),
+            start: 0.0,
+            end: 2.0,
+            words: vec![
+                Word { text: "Halo".to_owned(), start: 0.0, end: 0.8 },
+                Word { text: "dunia".to_owned(), start: 1.0, end: 1.8 },
+            ],
+            audio_timed: true,
+            preserve_words: false,
+            edited: true,
+        };
+        let mut pane = CaptionsPane::default();
+        pane.drafts = vec![original.clone()];
+
+        // TextInput may deliver the last edit together with Enter.
+        pane.accept_draft_text(0, "Halo dunia!".to_owned(), 7);
+        assert_eq!(pane.drafts.len(), 2);
+        assert_eq!(pane.drafts[0].text, "Halo");
+        assert_eq!(pane.drafts[1].text, "dunia!");
+        pane.undo_draft();
+        assert_eq!(pane.drafts, vec![original]);
     }
 
     #[test]

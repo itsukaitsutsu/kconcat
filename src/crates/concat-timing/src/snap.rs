@@ -22,6 +22,29 @@
 //! The snapper is pure: samples in, words mutated in place, no file, no
 //! decoder, no engine type in any signature.
 
+/// Which timing pass an evaluation run applies. Production keeps Level 1.5.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    /// Preserve the input exactly, including invalid spans, for the baseline.
+    Unsnapped,
+    /// T2: energy rises only, with the same repair rules and parameters.
+    Level1,
+    /// T3 and the existing production default: energy, ZCR and spectral flux.
+    #[default]
+    Level15,
+}
+
+impl Mode {
+    /// The stable name stored in evaluation provenance.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Unsnapped => "unsnapped",
+            Self::Level1 => "level1",
+            Self::Level15 => "level15",
+        }
+    }
+}
+
 /// The snapper's tuning, one field per row of the manual's parameter table.
 ///
 /// `Default` is the table's "Start" column exactly. A session tuning these
@@ -110,6 +133,30 @@ pub fn snap_words(
     segment: (f64, f64),
     params: &Params,
 ) -> SnapReport {
+    snap_words_with_mode(words, signals, segment, params, Mode::Level15)
+}
+
+/// Applies one explicitly selected evaluation pass to the same cached words.
+///
+/// Unsnapped is an identity operation: no onset search, clamping, air gap or
+/// collision repair. Level 1 disables ZCR/flux only; Level 1.5 is exactly the
+/// existing [`snap_words`] path. The caller always supplies the continuous
+/// buffer's signals, and both enabled modes retain the same clock and bounds.
+pub fn snap_words_with_mode(
+    words: &[Word],
+    signals: &Signals,
+    segment: (f64, f64),
+    params: &Params,
+    mode: Mode,
+) -> SnapReport {
+    if mode == Mode::Unsnapped {
+        return SnapReport {
+            words: words.to_vec(),
+            snapped: 0,
+            reverted: 0,
+            tied: 0,
+        };
+    }
     let mut out: Vec<Word> = Vec::with_capacity(words.len());
     let (mut snapped, mut reverted, mut tied) = (0usize, 0usize, 0usize);
     // The latest a start may sit and still leave room for the minimum
@@ -121,7 +168,7 @@ pub fn snap_words(
         // Steps 1-3: the rise, if there is one. Step 4's clamps apply to the
         // snapped value too - a rise outside the segment is not a licence to
         // leave it.
-        let moved = match snap_start(word.start, signals, params) {
+        let moved = match snap_start(word.start, signals, params, mode) {
             Some(onset) => {
                 let onset = onset.clamp(segment.0, max_start);
                 if (onset - current.start).abs() > 1e-9 {
@@ -194,7 +241,7 @@ fn fit_end(end: f64, start: f64, segment_end: f64, params: &Params) -> f64 {
 /// Step 1-3 for one word: the local floor around its reported start, then
 /// the first energy rise in the search window `[start - back, start + fwd]`.
 /// `None` is "no rise here" - the word keeps Whisper's value.
-fn snap_start(reported: f64, signals: &Signals, params: &Params) -> Option<f64> {
+fn snap_start(reported: f64, signals: &Signals, params: &Params, mode: Mode) -> Option<f64> {
     // A rise needs a predecessor and its debounce tail: three frames short,
     // there is nothing to detect.
     if signals.len() < 3 {
@@ -215,8 +262,15 @@ fn snap_start(reported: f64, signals: &Signals, params: &Params) -> Option<f64> 
     (from..=to)
         .find(|&index| {
             is_rise(frames, index, floor, params.rise_db, params.debounce_frames)
-                || is_zcr_rise(&signals.zcr, index, zcr_floor, params.wideband.zcr_margin)
-                || is_flux_rise(&signals.flux, frames, index, flux_median, &params.wideband)
+                || (mode == Mode::Level15
+                    && (is_zcr_rise(&signals.zcr, index, zcr_floor, params.wideband.zcr_margin)
+                        || is_flux_rise(
+                            &signals.flux,
+                            frames,
+                            index,
+                            flux_median,
+                            &params.wideband,
+                        )))
         })
         .map(frame_time)
 }

@@ -19,7 +19,7 @@ import { Theme } from "../theme/theme.slint";
 import { Fmt } from "../util.slint";
 import { LevelMeter } from "../primitives/level-meter.slint";
 import { Tip } from "../primitives/tooltip.slint";
-import { Pane } from "pane.slint";
+import { Pane, PaneScroll } from "pane.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 
 /// The levels, published by Rust (concat's meters.rs) thirty times a second
@@ -99,12 +99,18 @@ export component MetersPane inherits Pane {
             }
         }
 
-        VerticalLayout {
-            padding-left: 6px;
-            padding-right: 6px;
-            padding-top: 8px;
-            padding-bottom: 8px;
-            spacing: 4px;
+        PaneScroll {
+            vertical-stretch: 1;
+            finger: true;
+            min-content-height: 220px;
+
+            VerticalLayout {
+                vertical-stretch: 1;
+                padding-left: 6px;
+                padding-right: 6px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 4px;
 
             // The clip light, over the pair of bars it speaks for: red once
             // the mix has hit full scale, until clicked. The empty box on
@@ -246,6 +252,7 @@ export component MetersPane inherits Pane {
                         active: peak-touch.has-hover;
                     }
                 }
+            }
             }
         }
     }

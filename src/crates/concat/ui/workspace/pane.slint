@@ -107,10 +107,18 @@ export component PaneScroll inherits Rectangle {
     /// Settings in.
     in property <bool> finger;
 
+    /// Optional known minimum extent for content whose children draw beyond
+    /// their layout's preferred height (for example interactive canvases).
+    /// Set this at the pane that knows its real content size; the default
+    /// keeps existing PaneScroll users unchanged.
+    in property <length> min-content-height: 0px;
+
     // The offset is clamped on read rather than only on write, so a pane that
     // shrinks under the content — or content that gets shorter — cannot leave
-    // the viewport parked past the end.
-    property <length> overflow: Math.max(0px, content.preferred-height - root.height);
+    // the viewport parked past the end. Some canvas-based content underreports
+    // preferred-height, so callers can supply its real minimum extent.
+    property <length> content-height: Math.max(content.preferred-height, root.min-content-height);
+    property <length> overflow: Math.max(0px, root.content-height - root.height);
     in-out property <length> offset;
     out property <length> at: Math.max(-root.overflow, Math.min(0px, root.offset));
     /// Where the column was when the finger landed, and where the finger did.
@@ -146,7 +154,7 @@ export component PaneScroll inherits Rectangle {
 
         content := VerticalLayout {
             y: root.at;
-            height: self.preferred-height;
+            height: root.content-height;
 
             @children
         }

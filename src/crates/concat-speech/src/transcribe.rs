@@ -226,6 +226,18 @@ pub struct Segment {
     pub words: Vec<HeardWord>,
 }
 
+/// The completed transcription and the backend that actually produced it.
+///
+/// The timing-cache entry point uses this to record real provenance instead
+/// of assuming the requested backend was the one that succeeded.
+#[derive(Clone, Debug)]
+pub struct TranscriptionResult {
+    /// Caption segments on the source window's continuous clock.
+    pub segments: Vec<Segment>,
+    /// `faster-whisper`, `whispercpp-cli`, or `whisper-rs` after fallback.
+    pub backend: &'static str,
+}
+
 /// What to transcribe.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -459,6 +471,37 @@ impl Transcriber {
         request: &TranscribeRequest,
         progress: impl FnMut(i32) + Send + 'static,
     ) -> Result<Vec<Segment>, String> {
+        self.transcribe_with_mode(dirs, request, progress, concat_timing::snap::Mode::Level15)
+            .map(|result| result.segments)
+    }
+
+    /// Transcribes for a timing baseline without applying onset snapping.
+    ///
+    /// Backend tokenization and the requested VAD refinement still run, just
+    /// as they do before onset snapping in production. This is therefore a
+    /// pre-onset-snap cache, not a claim of raw Whisper tokens or pre-VAD
+    /// timing. Normal [`Self::transcribe`] keeps its Level 1.5 behavior.
+    pub fn transcribe_for_timing_cache(
+        &self,
+        dirs: &AppDirs,
+        request: &TranscribeRequest,
+        progress: impl FnMut(i32) + Send + 'static,
+    ) -> Result<TranscriptionResult, String> {
+        self.transcribe_with_mode(
+            dirs,
+            request,
+            progress,
+            concat_timing::snap::Mode::Unsnapped,
+        )
+    }
+
+    fn transcribe_with_mode(
+        &self,
+        dirs: &AppDirs,
+        request: &TranscribeRequest,
+        progress: impl FnMut(i32) + Send + 'static,
+        timing_mode: concat_timing::snap::Mode,
+    ) -> Result<TranscriptionResult, String> {
         let job = self.gate.begin("transcription")?;
         let cancel = job.cancel_handle();
 
@@ -503,10 +546,6 @@ impl Transcriber {
             return Err("transcription cancelled".to_owned());
         }
 
-        if samples.is_empty() {
-            return Ok(Vec::new());
-        }
-
         let mut progress = progress;
 
         // 1. If the user selected `faster-whisper` and Python `faster_whisper` is
@@ -514,20 +553,17 @@ impl Transcriber {
         //    timestamp-preserving Silero VAD when `request.vad_filter` is true).
         if request.engine == "faster-whisper"
             && let Some(py) = find_faster_whisper_python(dirs)
-            && let Ok(mut segs) = transcribe_via_faster_whisper(
-                &py,
-                dirs,
-                request,
-                &samples,
-                &cancel,
-                &mut progress,
-            )
+            && let Ok(mut segs) =
+                transcribe_via_faster_whisper(&py, dirs, request, &samples, &cancel, &mut progress)
         {
             if request.vad_filter {
                 refine_segments_with_vad(&samples, &mut segs);
             }
-            snap_word_starts(&samples, &mut segs);
-            return Ok(segs);
+            snap_word_starts(&samples, &mut segs, timing_mode);
+            return Ok(TranscriptionResult {
+                segments: segs,
+                backend: "faster-whisper",
+            });
         }
 
         // 2. If `whisper-cli` (e.g. VTS's Vulkan GPU `tools\whisper-cli.exe`) is
@@ -545,8 +581,11 @@ impl Transcriber {
             if request.vad_filter {
                 refine_segments_with_vad(&samples, &mut segs);
             }
-            snap_word_starts(&samples, &mut segs);
-            return Ok(segs);
+            snap_word_starts(&samples, &mut segs, timing_mode);
+            return Ok(TranscriptionResult {
+                segments: segs,
+                backend: "whispercpp-cli",
+            });
         }
 
         // 3. Fallback: in-process `whisper-rs` with VAD-compacted audio and up to 16 threads.
@@ -693,8 +732,11 @@ impl Transcriber {
         if request.vad_filter {
             refine_segments_with_vad(&samples, &mut segs);
         }
-        snap_word_starts(&samples, &mut segs);
-        Ok(segs)
+        snap_word_starts(&samples, &mut segs, timing_mode);
+        Ok(TranscriptionResult {
+            segments: segs,
+            backend: "whisper-rs",
+        })
     }
 
     /// Asks the running transcription to stop at its next check.
@@ -1141,7 +1183,9 @@ fn refine_segments_with_vad(samples: &[f32], segments: &mut Vec<Segment>) {
         }
         for word in &mut seg.words {
             word.start = word.start.clamp(seg.start, seg.end);
-            word.end = word.end.clamp(word.start + 0.02, seg.end.max(word.start + 0.02));
+            word.end = word
+                .end
+                .clamp(word.start + 0.02, seg.end.max(word.start + 0.02));
         }
         true
     });
@@ -1157,8 +1201,10 @@ fn refine_segments_with_vad(samples: &[f32], segments: &mut Vec<Segment>) {
 /// for. A word with no rise in its search window keeps Whisper's value, and
 /// a snap that would reorder words is reverted, per the roadmap's collision
 /// rule - so this can only ever pull starts onto energy, never invent them.
-fn snap_word_starts(samples: &[f32], segments: &mut [Segment]) {
-    if samples.is_empty() || segments.is_empty() {
+fn snap_word_starts(samples: &[f32], segments: &mut [Segment], mode: concat_timing::snap::Mode) {
+    // The evaluation baseline must not be silently clamped/repaired by a
+    // timing pass either. Return before framing or mapping anything.
+    if mode == concat_timing::snap::Mode::Unsnapped || samples.is_empty() || segments.is_empty() {
         return;
     }
     let signals = concat_timing::Signals::from_samples(samples);
@@ -1172,11 +1218,12 @@ fn snap_word_starts(samples: &[f32], segments: &mut [Segment]) {
             .iter()
             .map(|w| concat_timing::Word::whisper(&w.text, w.start, w.end))
             .collect();
-        let report = concat_timing::snap::snap_words(
+        let report = concat_timing::snap::snap_words_with_mode(
             &words,
             &signals,
             (segment.start, segment.end),
             &params,
+            mode,
         );
         // Same length, same order - the snapper never adds or drops a word.
         for (heard, snapped) in segment.words.iter_mut().zip(report.words) {
@@ -1187,8 +1234,8 @@ fn snap_word_starts(samples: &[f32], segments: &mut [Segment]) {
 }
 
 fn transcribe_via_whisper_cli(
-    cli: & std::path::Path,
-    model_path: & std::path::Path,
+    cli: &std::path::Path,
+    model_path: &std::path::Path,
     request: &TranscribeRequest,
     samples: &[f32],
     cancel: &Arc<AtomicBool>,
@@ -1197,10 +1244,7 @@ fn transcribe_via_whisper_cli(
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-    let work_dir = std::env::temp_dir().join(format!(
-        "concat-wcpp-{}-{stamp}",
-        std::process::id()
-    ));
+    let work_dir = std::env::temp_dir().join(format!("concat-wcpp-{}-{stamp}", std::process::id()));
     std::fs::create_dir_all(&work_dir).map_err(|e| e.to_string())?;
     let wav_path = work_dir.join("input.wav");
     let out_prefix = work_dir.join("out");
@@ -1219,7 +1263,11 @@ fn transcribe_via_whisper_cli(
         .arg(&wav_path)
         .arg("-of")
         .arg(&out_prefix)
-        .arg(if request.word_timestamps { "-ojf" } else { "-oj" })
+        .arg(if request.word_timestamps {
+            "-ojf"
+        } else {
+            "-oj"
+        })
         .arg("-pp")
         .arg("-l")
         .arg(language)
@@ -1335,11 +1383,7 @@ fn transcribe_via_whisper_cli(
                     Some((t_text.as_bytes().to_vec(), t0, t1))
                 })
                 .collect();
-            words = words_from_tokens(
-                token_tuples
-                    .iter()
-                    .map(|(b, s, e)| (b.as_slice(), *s, *e)),
-            );
+            words = words_from_tokens(token_tuples.iter().map(|(b, s, e)| (b.as_slice(), *s, *e)));
         }
         if let Some(seg) = keep_segment(start, end, text, words) {
             out.push(seg);
@@ -1360,10 +1404,7 @@ fn transcribe_via_faster_whisper(
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-    let work_dir = std::env::temp_dir().join(format!(
-        "concat-fw-{}-{stamp}",
-        std::process::id()
-    ));
+    let work_dir = std::env::temp_dir().join(format!("concat-fw-{}-{stamp}", std::process::id()));
     std::fs::create_dir_all(&work_dir).map_err(|e| e.to_string())?;
     let wav_path = work_dir.join("input.wav");
     let json_path = work_dir.join("out.json");
@@ -1428,7 +1469,11 @@ with open(out_json, "w", encoding="utf-8") as f:
         .arg(if translate { "1" } else { "0" })
         .arg(request.beam_size.clamp(1, 10).to_string())
         .arg(if request.word_timestamps { "1" } else { "0" })
-        .arg(if request.temperature_fallback { "1" } else { "0" })
+        .arg(if request.temperature_fallback {
+            "1"
+        } else {
+            "0"
+        })
         .arg(prompt.unwrap_or(""))
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
@@ -1493,6 +1538,52 @@ fn effective_whisper_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timing_cache_boundary_preserves_word_times_without_snapping() {
+        let mut samples = vec![0.001f32; 48_000];
+        samples[16_480..19_680].fill(0.1);
+        let mut segments = vec![Segment {
+            start: 0.5,
+            end: 2.0,
+            text: "kata".to_owned(),
+            words: vec![HeardWord {
+                text: "kata".to_owned(),
+                start: 1.10,
+                end: 1.40,
+            }],
+        }];
+        let before = segments.clone();
+        snap_word_starts(
+            &samples,
+            &mut segments,
+            concat_timing::snap::Mode::Unsnapped,
+        );
+        assert_eq!(segments, before);
+    }
+
+    #[test]
+    fn timing_cache_fix_keeps_the_default_production_snap() {
+        let mut samples = vec![0.001f32; 48_000];
+        samples[16_480..19_680].fill(0.1);
+        let mut segments = vec![Segment {
+            start: 0.5,
+            end: 2.0,
+            text: "kata".to_owned(),
+            words: vec![HeardWord {
+                text: "kata".to_owned(),
+                start: 1.10,
+                end: 1.40,
+            }],
+        }];
+        snap_word_starts(
+            &samples,
+            &mut segments,
+            concat_timing::snap::Mode::default(),
+        );
+        assert!(segments[0].words[0].start < 1.10);
+        assert!(segments[0].words[0].start >= 0.5);
+    }
 
     #[test]
     fn effective_whisper_options_normalizes_language_translate_and_prompt() {
@@ -1654,8 +1745,19 @@ mod tests {
             .collect();
         let words = words_from_tokens(tokens);
         assert_eq!(words.len(), 7, "{words:?}");
-        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(""), text);
-        assert!(words.windows(2).all(|pair| pair[1].start >= pair[0].end - 1e-9));
+        assert_eq!(
+            words
+                .iter()
+                .map(|w| w.text.as_str())
+                .collect::<Vec<_>>()
+                .join(""),
+            text
+        );
+        assert!(
+            words
+                .windows(2)
+                .all(|pair| pair[1].start >= pair[0].end - 1e-9)
+        );
         assert!((words[0].start - 0.0).abs() < 1e-9);
         assert!((words[6].end - 1.4).abs() < 1e-9);
     }

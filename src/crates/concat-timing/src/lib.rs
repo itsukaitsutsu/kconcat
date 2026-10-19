@@ -28,6 +28,7 @@
 //! Nothing here knows about files, FFmpeg, or the project model. A word is a
 //! [`Word`]: text, a span, and where the span came from.
 
+pub mod beat;
 pub mod energy;
 pub mod metrics;
 pub mod signals;

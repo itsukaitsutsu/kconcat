@@ -6,7 +6,7 @@
 //! ```text
 //! cargo run -p concat-timing --example metric_runner -- \
 //!     06-corpus/whisper-cache.json 06-corpus/audio-16k.f32 \
-//!     [--ref 06-corpus/user-video.srt] [--snap] [--save 06-corpus/runs/run.json]
+//!     [--ref reference.srt] [--snap=level1|--snap=level15] [--save run.json]
 //! ```
 //!
 //! The cache is made once, on the machine that has Whisper and FFmpeg, by
@@ -14,18 +14,18 @@
 //! Everything it prints is reproducible from the two files plus `--ref`, so a
 //! run and its baseline can be diffed by eye and by `delta_vs_baseline`.
 //!
-//! With `--snap` the runner applies Level 1 (`snap::snap_words`, the manual's
-//! §2) to every segment on the same frames it measures, prints the Tier 1
-//! table of the *snapped* words, and reports Δ against the un-snapped cache -
-//! the before/after the roadmap's T2 asks for. Save one run each way and the
-//! two JSONs diff cleanly.
+//! No snap flag preserves the cache exactly. `--snap=level1` evaluates T2;
+//! `--snap=level15` evaluates T3 on the same cache (`--snap` remains its alias).
+//! Provenance must declare onset_snapping=false. Old/synthetic caches without
+//! provenance require explicit `--allow-legacy-cache`, and their run is marked
+//! unverified. A cache known to have been snapped is always refused.
 
 use std::path::Path;
 use std::{env, fs, process};
 
 use concat_timing::Signals;
 use concat_timing::metrics::{Tier1, Wer, delta_vs_baseline, normalize, tier1, wer};
-use concat_timing::snap::{self, Params};
+use concat_timing::snap::{self, Mode, Params};
 use concat_timing::{Source, Word};
 
 /// One segment of the cache, as schema 1 stores it.
@@ -50,37 +50,81 @@ struct CacheWord {
 #[derive(serde::Deserialize)]
 struct Cache {
     schema: u32,
+    #[serde(default)]
+    provenance: Option<serde_json::Value>,
     segments: Vec<CacheSegment>,
+}
+
+#[derive(Debug)]
+struct Options {
+    positional: Vec<String>,
+    reference: Option<String>,
+    save: Option<String>,
+    mode: Mode,
+    allow_legacy: bool,
+}
+
+const USAGE: &str = "usage: metric_runner <cache.json> <audio-16k.f32> [--ref <reference.srt>] [--snap|--snap=level1|--snap=level15] [--save <run.json>] [--allow-legacy-cache]";
+
+fn options(args: &[String]) -> Result<Options, String> {
+    let mut out = Options {
+        positional: Vec::new(),
+        reference: None,
+        save: None,
+        mode: Mode::Unsnapped,
+        allow_legacy: false,
+    };
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--ref" | "--save" => {
+                let flag = &args[i];
+                i += 1;
+                let value = args
+                    .get(i)
+                    .filter(|v| !v.starts_with("--"))
+                    .ok_or_else(|| format!("{flag} needs a file path"))?
+                    .clone();
+                if flag == "--ref" {
+                    out.reference = Some(value);
+                } else {
+                    out.save = Some(value);
+                }
+            }
+            "--snap" | "--snap=level15" => out.mode = Mode::Level15,
+            "--snap=level1" => out.mode = Mode::Level1,
+            "--allow-legacy-cache" => out.allow_legacy = true,
+            other if other.starts_with("--") => return Err(format!("unknown option {other}")),
+            other => out.positional.push(other.to_owned()),
+        }
+        i += 1;
+    }
+    if out.positional.len() != 2 {
+        return Err(USAGE.to_owned());
+    }
+    Ok(out)
+}
+
+// A legacy cache is explicitly usable for exploration, never silently
+// promoted to a declared pre-snap baseline. The override cannot accept a
+// cache that declares snapping was already applied.
+fn declared_pre_snap(cache: &Cache, allow_legacy: bool) -> Result<bool, String> {
+    match &cache.provenance {
+        Some(meta) if meta.get("onset_snapping").and_then(|v| v.as_bool()) == Some(false) => Ok(true),
+        Some(_) => Err("cache does not declare onset_snapping=false; regenerate with the updated make_cache before evaluating the first snapping pass".to_owned()),
+        None if allow_legacy => Ok(false),
+        None => Err("cache has no timing provenance; regenerate it with the updated make_cache, or explicitly use --allow-legacy-cache for unverified legacy/synthetic exploration".to_owned()),
+    }
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    let mut positional: Vec<String> = Vec::new();
-    let mut reference: Option<String> = None;
-    let mut save: Option<String> = None;
-    let mut snapping = false;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--ref" => {
-                i += 1;
-                reference = args.get(i).cloned();
-            }
-            "--save" => {
-                i += 1;
-                save = args.get(i).cloned();
-            }
-            "--snap" => snapping = true,
-            other => positional.push(other.to_string()),
-        }
-        i += 1;
-    }
-    if positional.len() != 2 {
-        eprintln!(
-            "usage: metric_runner <whisper-cache.json> <audio-16k.f32> [--ref <file.srt>] [--snap] [--save <out.json>]"
-        );
-        process::exit(2);
-    }
+    let opts = options(&args).unwrap_or_else(|why| fail("arguments", &why));
+    let positional = opts.positional;
+    let reference = opts.reference;
+    let save = opts.save;
+    let mode = opts.mode;
+    let snapping = mode != Mode::Unsnapped;
 
     let cache: Cache = serde_json::from_str(&read(&positional[0]))
         .unwrap_or_else(|e| fail(&positional[0], &e.to_string()));
@@ -90,6 +134,13 @@ fn main() {
             cache.schema
         );
         process::exit(2);
+    }
+    let pre_snap = declared_pre_snap(&cache, opts.allow_legacy)
+        .unwrap_or_else(|why| fail(&positional[0], &why));
+    if !pre_snap {
+        eprintln!(
+            "WARNING: legacy/synthetic cache has unverified timing provenance; this is not accepted proof of an unsnapped baseline."
+        );
     }
     let bytes = fs::read(&positional[1]).unwrap_or_else(|e| fail(&positional[1], &e.to_string()));
     if !bytes.len().is_multiple_of(4) {
@@ -124,7 +175,13 @@ fn main() {
         // Level 1 runs per segment, on the continuous buffer's frames, on the
         // cache's own clock - the same clock rule the crate's tests police.
         let measured: Vec<Word> = if snapping {
-            let report = snap::snap_words(&words, &signals, (segment.start, segment.end), &params);
+            let report = snap::snap_words_with_mode(
+                &words,
+                &signals,
+                (segment.start, segment.end),
+                &params,
+                mode,
+            );
             snapped += report.snapped;
             reverted += report.reverted;
             tied += report.tied;
@@ -186,6 +243,15 @@ fn main() {
         cache.segments.len(),
         words_measured
     );
+    println!("timing mode   {}", mode.name());
+    println!(
+        "cache timing  {}",
+        if pre_snap {
+            "declared pre-onset-snap"
+        } else {
+            "UNVERIFIED legacy/synthetic"
+        }
+    );
     println!("┌─────────────────────────────┬──────────┬──────────────────────┐");
     println!("│ metric                      │ value    │ target               │");
     println!("├─────────────────────────────┼──────────┼──────────────────────┤");
@@ -213,7 +279,10 @@ fn main() {
     }
     println!("└─────────────────────────────┴──────────┴──────────────────────┘");
     if snapping {
-        println!("snap          on · snapped {snapped} · reverted {reverted} · tied {tied}");
+        println!(
+            "snap          {} · snapped {snapped} · reverted {reverted} · tied {tied}",
+            mode.name()
+        );
         if let Some(d) = &delta {
             println!(
                 "Δ vs cache    {} of {} words moved · mean {:+.1} ms · max {:.1} ms",
@@ -229,6 +298,9 @@ fn main() {
         let body = serde_json::json!({
             "kind": "tier1-run",
             "snap": snapping,
+            "timing_mode": mode.name(),
+            "cache_declares_pre_snap": pre_snap,
+            "cache_provenance": cache.provenance,
             "counts": {"snapped": snapped, "reverted": reverted, "tied": tied},
             "delta": delta.as_ref().map(|d| serde_json::json!({"moved": d.moved,
                 "mean_shift_s": d.mean_shift, "max_abs_shift_s": d.max_abs_shift})),
@@ -267,7 +339,8 @@ fn fail(path: &str, why: &str) -> ! {
 /// import uses.
 fn srt_text(srt: &str) -> String {
     let mut out = String::new();
-    for block in srt.split("\n\n") {
+    let normalized = srt.replace("\r\n", "\n");
+    for block in normalized.split("\n\n") {
         let mut lines = block.lines().filter(|l| !l.trim().is_empty());
         let Some(first) = lines.next() else { continue };
         if !first.contains("-->") {
@@ -282,4 +355,85 @@ fn srt_text(srt: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(rest: &[&str]) -> Vec<String> {
+        ["cache.json", "audio.f32"]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn cache(meta: Option<serde_json::Value>) -> Cache {
+        Cache {
+            schema: 1,
+            provenance: meta,
+            segments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn new_cache_declares_pre_snap_and_is_accepted() {
+        let c = cache(Some(
+            serde_json::json!({"onset_snapping": false, "backend": "whisper-rs"}),
+        ));
+        assert!(declared_pre_snap(&c, false).unwrap());
+    }
+
+    #[test]
+    fn already_snapped_cache_is_refused_even_with_a_legacy_override() {
+        let c = cache(Some(serde_json::json!({"onset_snapping": true})));
+        assert!(declared_pre_snap(&c, false).is_err());
+        assert!(declared_pre_snap(&c, true).is_err());
+    }
+
+    #[test]
+    fn missing_provenance_requires_an_explicit_unverified_legacy_override() {
+        let c = cache(None);
+        assert!(declared_pre_snap(&c, false).is_err());
+        assert!(!declared_pre_snap(&c, true).unwrap());
+    }
+
+    #[test]
+    fn malformed_provenance_cannot_silently_become_an_unsnapped_claim() {
+        for meta in [
+            serde_json::json!({}),
+            serde_json::json!({"onset_snapping": "false"}),
+        ] {
+            assert!(declared_pre_snap(&cache(Some(meta)), true).is_err());
+        }
+    }
+
+    #[test]
+    fn cli_selects_comparable_modes_and_preserves_the_snap_alias() {
+        assert_eq!(options(&args(&[])).unwrap().mode, Mode::Unsnapped);
+        assert_eq!(
+            options(&args(&["--snap=level1"])).unwrap().mode,
+            Mode::Level1
+        );
+        assert_eq!(
+            options(&args(&["--snap=level15"])).unwrap().mode,
+            Mode::Level15
+        );
+        assert_eq!(options(&args(&["--snap"])).unwrap().mode, Mode::Level15);
+    }
+
+    #[test]
+    fn cli_refuses_missing_paths_and_unknown_switches() {
+        assert!(options(&args(&["--ref"])).is_err());
+        assert!(options(&args(&["--save", "--snap"])).is_err());
+        assert!(options(&args(&["--snap=typo"])).is_err());
+    }
+
+    #[test]
+    fn reference_srt_has_the_same_text_on_windows_and_unix() {
+        let unix = "1\n00:00:00,000 --> 00:00:01,000\nHalo dunia.\n\n2\n00:00:01,000 --> 00:00:02,000\nYa, benar.\n";
+        assert_eq!(srt_text(unix), "Halo dunia. Ya, benar. ");
+        assert_eq!(srt_text(&unix.replace('\n', "\r\n")), srt_text(unix));
+    }
 }

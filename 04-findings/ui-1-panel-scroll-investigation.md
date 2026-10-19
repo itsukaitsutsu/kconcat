@@ -67,7 +67,17 @@ That matches the symptom exactly. Children that report no preferred height (plai
 - H4: a brighter thumb colour and a wider hit area. Design call.
 - H5: revert or adjust `f1426c9` only if the test shows the regression.
 
-## 7. Not verified
+## 7. Code change (19 Oct 2026) — runtime acceptance still pending
 
-- Nothing above has been run. H2 is the strongest code-level suspect, but unconfirmed.
+The missing-scroller path is now implemented without reverting the existing `PaneScroll` work:
+
+- `workspace/pane.slint`: `PaneScroll` accepts an optional `min-content-height` and uses it for both content layout height and overflow. Default is `0px`, so existing users keep their previous behavior.
+- `workspace/keyframes-pane.slint`: the keyframe body is wrapped in a finger- and wheel-scrollable `PaneScroll`. The dopesheet gets a content height based on its row count; curves keep a 280px minimum drawing area. Header and tools remain fixed.
+- `workspace/meters-pane.slint`: the meters body is wrapped in `PaneScroll` with a 220px minimum content extent. Header remains fixed; the bars and readouts can be reached in a short panel.
+
+This addresses H1 for Keyframes/Meters and supplies explicit extent for these panes rather than assuming every layout reports its drawn size correctly. It does **not** prove all other `PaneScroll` users have correct preferred-height values. The runtime protocol below is still needed to check wheel/finger gesture routing, scrollbar visibility, and any H2 cases in other panes.
+
+## 8. Not verified
+
+- The Slint UI was not compiled or run in this environment. H2's behavior in the remaining panes is still a code-level hypothesis.
 - The VTS behaviour is the owner's observation; VTS was not checked.
