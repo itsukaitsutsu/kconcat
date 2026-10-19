@@ -13,6 +13,9 @@
 //! The ordinary editor transcription entry point is unchanged. Provenance
 //! records the actual backend, requested settings and the pre-snap stage.
 //! Existing output files are refused rather than overwriting a baseline.
+//! `--models-dir <absolute-folder>` selects existing shared model files for
+//! this run only. `--list-models` prints the supported models/status as JSON
+//! without transcribing or downloading anything.
 //!
 //! Native verification requires the owner's FFmpeg/Whisper setup. The pure
 //! runner and mode/provenance tests run without those native libraries.
@@ -21,16 +24,36 @@ use std::io::Write;
 use std::path::Path;
 use std::{env, fs, process};
 
+#[path = "support/cache_cli.rs"]
+mod cache_cli;
+
 use concat_host::AppDirs;
 use concat_media::{AudioDecoder, AudioOptions, SampleFormat};
 use concat_speech::transcribe::{TranscribeRequest, Transcriber};
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
-    if !(3..=4).contains(&args.len()) {
-        eprintln!("usage: make_cache <media-file> <cache.json> <model-id> [language]");
-        process::exit(2);
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    let options = cache_cli::parse(&raw_args).unwrap_or_else(|why| fail("arguments", &why));
+    let mut dirs = AppDirs::locate().unwrap_or_else(|error| fail("app dirs", &error));
+    if let Some(folder) = options.models_dir {
+        if !folder.is_dir() {
+            fail(
+                "models folder",
+                "the selected folder does not exist or is not a directory",
+            );
+        }
+        dirs.whisper_models = Some(folder);
     }
+    if options.list_models {
+        let status = Transcriber::status(&dirs).unwrap_or_else(|why| fail("model status", &why));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&status)
+                .unwrap_or_else(|why| fail("model status JSON", &why.to_string()))
+        );
+        return;
+    }
+    let args = options.positional;
     let media = &args[0];
     let cache_path = Path::new(&args[1]);
     let model_id = args[2].clone();
@@ -70,7 +93,6 @@ fn main() {
     }
     let duration_s = samples.len() as f64 / 16_000.0;
 
-    let dirs = AppDirs::locate().unwrap_or_else(|error| fail("app dirs", &error));
     let transcriber = Transcriber::new();
     let request = TranscribeRequest {
         path: media.clone(),
@@ -109,6 +131,7 @@ fn main() {
             "backend": result.backend,
             "requested_backend": request.engine,
             "model_id": request.model_id,
+            "models_dir": dirs.whisper_models_dir().to_string_lossy(),
             "language": request.language,
             "translate": request.translate,
             "prompt": request.prompt,
