@@ -1,4 +1,4 @@
-Compiling concat-host v0.2.7 (C:\dev\kconcat\src\crates\concat-host)
+Compiling i-slint-backend-winit v1.18.1
 error[E0599]: no variant or associated item named `Karaoke` found for enum `concat_project::model::MotionMode` in the current scope
    --> crates\concat-host\src\titles.rs:234:54
     |
