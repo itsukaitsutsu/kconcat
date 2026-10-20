@@ -295,6 +295,9 @@ export component Seat inherits Rectangle {
             font-families: Editor.font-families;
             import-font => { Editor.import-font(); }
             text-style-default => { Editor.text-style-default(); }
+            remove-fillers(strong, weak, cut-video) => {
+                Editor.remove-fillers(strong, weak, cut-video);
+            }
         }
 
     // Declared before the views, so anything inside one of them that takes
@@ -438,7 +441,7 @@ export component Seat inherits Rectangle {
             sections => { Editor.sections(); }
             speak => { Editor.speak(); }
             record-voiceover => { Editor.record-voiceover(); }
-            add-track(bottom) => { Editor.add-track(bottom); }
+            add-track(kind, bottom) => { Editor.add-track(kind, bottom); }
             zoom-to-fit(width) => { Editor.zoom-to-fit(width); }
             zoom(factor, anchor) => { Editor.zoom(factor, anchor); }
             lanes-resized(width) => { Editor.lanes-resized(width); }

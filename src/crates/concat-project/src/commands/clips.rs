@@ -26,8 +26,11 @@ pub(super) fn apply(
                 .ok_or(CommandError::MediaGone)?
                 .clone();
             let timeline = project.active_mut();
-            if timeline.track(&track_id).is_none() {
+            let Some(track) = timeline.track(&track_id) else {
                 return Err(CommandError::TrackGone);
+            };
+            if !track.kind.accepts_media(media.kind) {
+                return Err(CommandError::IncompatibleTrack);
             }
             // Magnetic, the lane makes room; otherwise the clip takes the
             // nearest gap it fits, never the top of another clip.
@@ -53,8 +56,13 @@ pub(super) fn apply(
                 .clone();
             let duration = clip_length(&media);
             let timeline = project.active_mut();
-            let track_id = first_free_track(timeline, start, duration)
-                .unwrap_or_else(|| fresh_track(timeline, mint));
+            let kind = match media.kind {
+                MediaKind::Video => ClipKind::Video,
+                MediaKind::Audio => ClipKind::Audio,
+                MediaKind::Image => ClipKind::Image,
+            };
+            let track_id = first_free_track(timeline, start, duration, kind)
+                .unwrap_or_else(|| fresh_track(timeline, mint, kind));
             let id = mint.next("c");
             timeline
                 .clips
@@ -90,25 +98,34 @@ pub(super) fn apply(
             let track_id = match track_id {
                 Some(ref id) if id == "__top__" => timeline
                     .tracks
-                    .last()
-                    .map(|t| t.id.clone())
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
-                Some(id) if timeline.track(&id).is_some() => id,
-                Some(_) => return Err(CommandError::TrackGone),
+                    .iter()
+                    .rev()
+                    .find(|track| track.kind.accepts_clip(ClipKind::Text))
+                    .map(|track| track.id.clone())
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Text)),
+                Some(id) => {
+                    let Some(track) = timeline.track(&id) else {
+                        return Err(CommandError::TrackGone);
+                    };
+                    if !track.kind.accepts_clip(ClipKind::Text) {
+                        return Err(CommandError::IncompatibleTrack);
+                    }
+                    id
+                }
                 // Captions choose the first overlay lane without an ordinary
                 // clip over this span, so an overlapping imported cue remains
                 // on the same subtitle lane rather than being shifted or
                 // forced onto a fresh track.
                 None if is_caption && above => first_caption_track_above(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Text)),
                 None if is_caption => first_caption_track(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
-                // Every lane above the video is taken: a new one at the top
-                // for the words to land on.
-                None if above => first_free_track_above(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
-                None => first_free_track(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Text)),
+                // Every compatible lane above the video is taken: add a typed
+                // overlay lane rather than placing text on a sound lane.
+                None if above => first_free_track_above(timeline, start, duration, ClipKind::Text)
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Text)),
+                None => first_free_track(timeline, start, duration, ClipKind::Text)
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Text)),
             };
             // The lane's stored nudge applies at birth (T6): a regenerated
             // caption run lands already corrected, because the correction
@@ -176,12 +193,19 @@ pub(super) fn apply(
                 .max(MIN_CLIP_DURATION);
             let timeline = project.active_mut();
             let track_id = match track_id {
-                Some(id) if timeline.track(&id).is_some() => id,
-                Some(_) => return Err(CommandError::TrackGone),
-                None if above => first_free_track_above(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
-                None => first_free_track(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                Some(id) => {
+                    let Some(track) = timeline.track(&id) else {
+                        return Err(CommandError::TrackGone);
+                    };
+                    if !track.kind.accepts_clip(ClipKind::Shape) {
+                        return Err(CommandError::IncompatibleTrack);
+                    }
+                    id
+                }
+                None if above => first_free_track_above(timeline, start, duration, ClipKind::Shape)
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Shape)),
+                None => first_free_track(timeline, start, duration, ClipKind::Shape)
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Shape)),
             };
             let start = timeline.nearest_free_start(&track_id, start, duration, &[]);
             let id = mint.next("c");
@@ -212,10 +236,17 @@ pub(super) fn apply(
                 .max(MIN_CLIP_DURATION);
             let timeline = project.active_mut();
             let track_id = match track_id {
-                Some(id) if timeline.track(&id).is_some() => id,
-                Some(_) => return Err(CommandError::TrackGone),
-                None => first_free_track(timeline, start, duration)
-                    .unwrap_or_else(|| fresh_track(timeline, mint)),
+                Some(id) => {
+                    let Some(track) = timeline.track(&id) else {
+                        return Err(CommandError::TrackGone);
+                    };
+                    if !track.kind.accepts_clip(ClipKind::Layer) {
+                        return Err(CommandError::IncompatibleTrack);
+                    }
+                    id
+                }
+                None => first_free_track(timeline, start, duration, ClipKind::Layer)
+                    .unwrap_or_else(|| fresh_track(timeline, mint, ClipKind::Layer)),
             };
             let start = timeline.nearest_free_start(&track_id, start, duration, &[]);
             let id = mint.next("c");
@@ -243,6 +274,17 @@ pub(super) fn apply(
             let Some(moves) = timeline.resolve_moves(&moves) else {
                 return Ok(Outcome::default());
             };
+            for wanted in &moves {
+                let Some(clip) = timeline.clip(&wanted.clip_id) else {
+                    continue;
+                };
+                let Some(track) = timeline.track(&wanted.track_id) else {
+                    return Err(CommandError::TrackGone);
+                };
+                if !track.kind.accepts_clip(clip.kind) {
+                    return Err(CommandError::IncompatibleTrack);
+                }
+            }
             // Phase 2 (linked captions): remember where every moved clip
             // started, so its captions can be shifted by the same amount
             // below. A caption named in `moves` itself is excluded - it was
@@ -1812,11 +1854,18 @@ fn clip_length(media: &MediaItem) -> f64 {
 /// The lowest track with nothing occupying `[start, start + duration)`.
 /// `None` when every lane is taken there: the caller opens a new one
 /// rather than covering a clip.
-fn first_free_track(timeline: &Timeline, start: f64, duration: f64) -> Option<String> {
+fn first_free_track(
+    timeline: &Timeline,
+    start: f64,
+    duration: f64,
+    kind: ClipKind,
+) -> Option<String> {
     timeline
         .tracks
         .iter()
-        .find(|track| timeline.is_free(&track.id, start, duration, &[]))
+        .find(|track| {
+            track.kind.accepts_clip(kind) && timeline.is_free(&track.id, start, duration, &[])
+        })
         .map(|track| track.id.clone())
 }
 
@@ -1827,15 +1876,24 @@ fn first_caption_track(timeline: &Timeline, start: f64, duration: f64) -> Option
     timeline
         .tracks
         .iter()
-        .find(|track| timeline.is_caption_free(&track.id, start, duration, &[]))
+        .find(|track| {
+            track.kind.accepts_clip(ClipKind::Text)
+                && timeline.is_caption_free(&track.id, start, duration, &[])
+        })
         .map(|track| track.id.clone())
 }
 
 /// A new, empty lane at the top, for a clip with nowhere else to go.
-fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint) -> String {
+fn fresh_track(timeline: &mut Timeline, mint: &mut IdMint, kind: ClipKind) -> String {
     let id = mint.next("t");
+    let track_kind = if kind == ClipKind::Audio {
+        TrackKind::Audio
+    } else {
+        TrackKind::Video
+    };
     timeline.tracks.push(Track {
         id: id.clone(),
+        kind: track_kind,
         visible: true,
         muted: false,
         caption_nudge_ms: 0,
@@ -1869,7 +1927,10 @@ fn first_caption_track_above(timeline: &Timeline, start: f64, duration: f64) -> 
         .tracks
         .iter()
         .skip(floor)
-        .find(|track| timeline.is_caption_free(&track.id, start, duration, &[]))
+        .find(|track| {
+            track.kind.accepts_clip(ClipKind::Text)
+                && timeline.is_caption_free(&track.id, start, duration, &[])
+        })
         .map(|track| track.id.clone())
 }
 
@@ -1880,7 +1941,12 @@ fn first_caption_track_above(timeline: &Timeline, start: f64, duration: f64) -> 
 /// Captions and titles go through this so they sit over the video, not
 /// under it. The plain `first_free_track` still walks from the bottom,
 /// which is what a sound or a picture wants.
-fn first_free_track_above(timeline: &Timeline, start: f64, duration: f64) -> Option<String> {
+fn first_free_track_above(
+    timeline: &Timeline,
+    start: f64,
+    duration: f64,
+    kind: ClipKind,
+) -> Option<String> {
     let end = start + duration;
     let occupied = |track_id: &str| {
         timeline.clips.iter().any(|clip| {
@@ -1899,7 +1965,7 @@ fn first_free_track_above(timeline: &Timeline, start: f64, duration: f64) -> Opt
         .tracks
         .iter()
         .skip(floor)
-        .find(|track| !occupied(&track.id))
+        .find(|track| track.kind.accepts_clip(kind) && !occupied(&track.id))
         .map(|track| track.id.clone())
 }
 

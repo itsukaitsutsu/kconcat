@@ -16,7 +16,7 @@ use crate::duck::DuckRegion;
 use crate::model::{
     AppliedFilter, AudioTrack, Clip, ClipKind, ColorRange, ColorSpace, Crop, CustomFont, Cutout,
     CutoutMode, Enhanced, KeyEase, KeyProperty, MediaItem, MediaKind, MediaOrigin, Project,
-    ShapeStyle, SpeedPoint, Stroke, TextStyle, Timeline, Track, Transition, VideoSettings,
+    ShapeStyle, SpeedPoint, Stroke, TextStyle, Timeline, Track, TrackKind, Transition, VideoSettings,
 };
 use crate::reframe::ReframePoint;
 
@@ -877,6 +877,15 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         bottom: bool,
     },
+    /// Adds a typed V/A lane. Old `AddTrack` remains the permissive legacy
+    /// path for imported documents and caption workflows that need mixed lanes.
+    AddTypedTrack {
+        /// Under every other lane rather than on top of them.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bottom: bool,
+        /// Whether this lane carries picture/overlays or sound-only clips.
+        kind: TrackKind,
+    },
     /// Deletes a lane and every clip on it. Errs at the floor of one track.
     RemoveTrack {
         /// The lane to delete.
@@ -1019,6 +1028,9 @@ pub enum CommandError {
     /// A clip-placing command named a track no longer on the timeline.
     #[error("That track no longer exists.")]
     TrackGone,
+    /// A clip was placed or moved onto a typed lane it cannot use.
+    #[error("That clip cannot be placed on this kind of track.")]
+    IncompatibleTrack,
     /// A first-free-track placement found a timeline with no tracks at all.
     #[error("There are no tracks.")]
     NoTracks,
@@ -1446,6 +1458,7 @@ pub fn apply(
         | Command::SetSpeakerColor { .. }
         | Command::RemoveSpeaker { .. }) => speakers::apply(project, mint, command),
         command @ (Command::AddTrack { .. }
+        | Command::AddTypedTrack { .. }
         | Command::RemoveTrack { .. }
         | Command::SetTrackFlag { .. }
         | Command::NudgeCaptionTrack { .. }) => tracks::apply(project, mint, command),

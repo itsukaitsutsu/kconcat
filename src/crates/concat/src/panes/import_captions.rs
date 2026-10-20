@@ -142,7 +142,10 @@ impl ImportCaptionsPane {
                         });
                         let mut commands = Vec::new();
                         if has_existing_text || top_track_busy {
-                            commands.push(Command::AddTrack { bottom: false });
+                            commands.push(Command::AddTypedTrack {
+                                bottom: false,
+                                kind: concat_project::model::TrackKind::Video,
+                            });
                         }
                         for cue in &placed {
                             // SRT/VTT permits simultaneous cues (for example,

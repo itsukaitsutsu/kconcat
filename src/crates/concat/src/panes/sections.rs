@@ -622,7 +622,10 @@ impl SectionsPane {
         if self.use_captions && (!self.external_cues.is_empty() || !has_timeline_captions) {
             let caption_cmds = self.build_caption_commands(studio, &clip_id, false);
             if !caption_cmds.is_empty() {
-                commands.push(Command::AddTrack { bottom: false });
+                commands.push(Command::AddTypedTrack {
+                    bottom: false,
+                    kind: concat_project::model::TrackKind::Video,
+                });
                 commands.extend(caption_cmds);
             }
         }
@@ -1121,7 +1124,10 @@ impl SectionsPane {
             .last()
             .is_none_or(|top| studio.timeline().clips.iter().any(|c| c.track_id == top.id));
         if !replace_existing || top_track_busy {
-            commands.push(Command::AddTrack { bottom: false });
+            commands.push(Command::AddTypedTrack {
+                bottom: false,
+                kind: concat_project::model::TrackKind::Video,
+            });
         }
         commands.extend(caption_cmds);
         studio.apply(Command::Batch { commands });

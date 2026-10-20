@@ -63,7 +63,8 @@ pub(super) fn apply(
                 let track_id = {
                     let end = clip.start + clip.duration;
                     let free = timeline.tracks.iter().find(|track| {
-                        !timeline.clips.iter().any(|other| {
+                        track.kind.accepts_clip(ClipKind::Audio)
+                            && !timeline.clips.iter().any(|other| {
                             other.track_id == track.id
                                 && other.start < end
                                 && clip.start < other.start + other.duration
@@ -75,6 +76,7 @@ pub(super) fn apply(
                             let id = mint.next("t");
                             timeline.tracks.push(Track {
                                 id: id.clone(),
+                                kind: crate::model::TrackKind::Audio,
                                 visible: true,
                                 muted: false,
                                 caption_nudge_ms: 0,

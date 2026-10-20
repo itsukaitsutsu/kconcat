@@ -112,6 +112,7 @@ struct PresetFile {
 struct PresetMotion {
     mode: Option<String>,
     duration: Option<f64>,
+    stagger: Option<f64>,
     #[serde(alias = "scale_from")]
     scale_from: Option<f64>,
 }
@@ -124,13 +125,18 @@ impl PresetMotion {
         let base = CaptionMotion::default();
         CaptionMotion {
             mode: match self.mode.as_deref().map(str::trim) {
+                Some("fade") => MotionMode::Fade,
                 Some("pop") => MotionMode::Pop,
+                Some("bounce") => MotionMode::Bounce,
+                Some("slide-up") => MotionMode::SlideUp,
                 Some("word-reveal") => MotionMode::WordReveal,
                 Some("typewriter") => MotionMode::Typewriter,
+                Some("karaoke") => MotionMode::Karaoke,
                 _ => MotionMode::None,
             },
             duration: self.duration.unwrap_or(base.duration).clamp(0.02, 2.0),
-            scale_from: self.scale_from.unwrap_or(base.scale_from).clamp(1.0, 3.0),
+            stagger: self.stagger.unwrap_or(base.stagger).clamp(0.0, 0.22),
+            scale_from: self.scale_from.unwrap_or(base.scale_from).clamp(0.25, 3.0),
         }
     }
 }
@@ -561,12 +567,13 @@ mod tests {
     #[test]
     fn a_motion_block_in_a_preset_file_lands_on_the_style() {
         let (_, preset) = parse(
-            "id = \"t.pop\"\nname = \"Pop\"\n\n[motion]\nmode = \"pop\"\nduration = 0.25\nscale_from = 1.3\n",
+            "id = \"t.pop\"\nname = \"Pop\"\n\n[motion]\nmode = \"pop\"\nduration = 0.25\nstagger = 0.12\nscale_from = 1.3\n",
             None,
         )
         .expect("parses");
         assert_eq!(preset.style.motion.mode, MotionMode::Pop);
         assert!((preset.style.motion.duration - 0.25).abs() < 1e-9);
+        assert!((preset.style.motion.stagger - 0.12).abs() < 1e-9);
         assert!((preset.style.motion.scale_from - 1.3).abs() < 1e-9);
 
         // The camelCase spelling reads too, the rest of a preset file's

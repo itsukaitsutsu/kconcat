@@ -16,28 +16,10 @@ pub(super) fn apply(
 ) -> Result<Outcome, CommandError> {
     match command {
         Command::AddTrack { bottom } => {
-            let timeline = project.active_mut();
-            let id = mint.next("t");
-            let track = Track {
-                id: id.clone(),
-                visible: true,
-                muted: false,
-                caption_nudge_ms: 0,
-                speaker: None,
-                extra: Default::default(),
-            };
-            // The stack is stored bottom first: the last track is the lane
-            // drawn on top.
-            if bottom {
-                timeline.tracks.insert(0, track);
-            } else {
-                timeline.tracks.push(track);
-            }
-            Ok(Outcome {
-                created_id: Some(id),
-                applied: true,
-            })
+            add_track(project, mint, bottom, TrackKind::LegacyMixed)
         }
+
+        Command::AddTypedTrack { bottom, kind } => add_track(project, mint, bottom, kind),
 
         Command::RemoveTrack { track_id } => {
             let timeline = project.active_mut();
@@ -128,4 +110,33 @@ pub(super) fn apply(
 
         _ => unreachable!("commands::apply routes only this module's commands here"),
     }
+}
+
+fn add_track(
+    project: &mut Project,
+    mint: &mut IdMint,
+    bottom: bool,
+    kind: TrackKind,
+) -> Result<Outcome, CommandError> {
+    let timeline = project.active_mut();
+    let id = mint.next("t");
+    let track = Track {
+        id: id.clone(),
+        kind,
+        visible: true,
+        muted: false,
+        caption_nudge_ms: 0,
+        speaker: None,
+        extra: Default::default(),
+    };
+    // The stack is stored bottom first: the last track is the lane drawn on top.
+    if bottom {
+        timeline.tracks.insert(0, track);
+    } else {
+        timeline.tracks.push(track);
+    }
+    Ok(Outcome {
+        created_id: Some(id),
+        applied: true,
+    })
 }

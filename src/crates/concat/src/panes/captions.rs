@@ -1047,7 +1047,10 @@ impl CaptionsPane {
         let (base, look_decided) = self.caption_style_base(studio);
         let mut commands: Vec<Command> = Vec::new();
         if has_existing {
-            commands.push(Command::AddTrack { bottom: false });
+            commands.push(Command::AddTypedTrack {
+                bottom: false,
+                kind: concat_project::model::TrackKind::Video,
+            });
         }
         let mut count = 0usize;
         for (text, seconds) in lines {
@@ -1232,7 +1235,10 @@ impl CaptionsPane {
             .last()
             .is_none_or(|top| studio.timeline().clips.iter().any(|c| c.track_id == top.id));
         if !replace_existing || top_track_busy {
-            commands.push(Command::AddTrack { bottom: false });
+            commands.push(Command::AddTypedTrack {
+                bottom: false,
+                kind: concat_project::model::TrackKind::Video,
+            });
         }
         commands.extend(caption_commands);
         self.drafts.clear();

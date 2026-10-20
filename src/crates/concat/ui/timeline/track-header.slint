@@ -304,6 +304,14 @@ component Header inherits Rectangle {
                 }
             }
 
+            Text {
+                text: root.track.kind == 1 ? "V" : root.track.kind == 2 ? "A" : "M";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+            }
+
             Rectangle { horizontal-stretch: 1; }
 
             VerticalLayout {

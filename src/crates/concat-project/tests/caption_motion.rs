@@ -58,6 +58,7 @@ fn a_motion_choice_survives_a_project_reload() {
                 motion: CaptionMotion {
                     mode: MotionMode::Pop,
                     duration: 0.25,
+                    stagger: 0.09,
                     scale_from: 1.3,
                 },
                 ..TextStyle::default()
@@ -98,10 +99,10 @@ fn an_old_document_loads_as_no_motion() {
         serde_json::from_str(r#"{ "content": "Halo" }"#).expect("an old style loads");
     assert_eq!(style.motion.mode, MotionMode::None);
     assert!(
-        (style.motion.duration - 0.18).abs() < 1e-9,
+        (style.motion.duration - 0.45).abs() < 1e-9,
         "the schema's default dial"
     );
-    assert!((style.motion.scale_from - 1.15).abs() < 1e-9);
+    assert!((style.motion.scale_from - 0.35).abs() < 1e-9);
 }
 
 #[test]
@@ -114,9 +115,13 @@ fn an_unreadable_motion_object_loads_as_no_motion() {
     // The schema's own wire names all read.
     for (name, expected) in [
         ("none", MotionMode::None),
+        ("fade", MotionMode::Fade),
         ("pop", MotionMode::Pop),
+        ("bounce", MotionMode::Bounce),
+        ("slide-up", MotionMode::SlideUp),
         ("word-reveal", MotionMode::WordReveal),
         ("typewriter", MotionMode::Typewriter),
+        ("karaoke", MotionMode::Karaoke),
     ] {
         let json = format!(r#"{{ "content": "x", "motion": {{ "mode": "{name}" }} }}"#);
         let style: TextStyle = serde_json::from_str(&json).expect("the schema's names read");
@@ -125,13 +130,14 @@ fn an_unreadable_motion_object_loads_as_no_motion() {
 }
 
 #[test]
-fn the_two_dials_clamp_in_the_one_place() {
-    // The schema's rule: duration and scale_from clamp where every
-    // TextStyle number clamps - `tidy` - and nowhere else.
+fn the_three_dials_clamp_in_the_one_place() {
+    // Duration, stagger and scale clamp with the other TextStyle numbers
+    // in `tidy`, and nowhere else.
     let wild = TextStyle {
         motion: CaptionMotion {
             mode: MotionMode::Pop,
             duration: 100.0,
+            stagger: -1.0,
             scale_from: 0.0,
         },
         ..TextStyle::default()
@@ -142,26 +148,25 @@ fn the_two_dials_clamp_in_the_one_place() {
         "a two-second cap: {}",
         tidied.motion.duration
     );
-    assert!(
-        (tidied.motion.scale_from - 1.0).abs() < 1e-9,
-        "a pop never starts smaller than life: {}",
-        tidied.motion.scale_from
-    );
+    assert!((tidied.motion.scale_from - 0.25).abs() < 1e-9);
+    assert_eq!(tidied.motion.stagger, 0.0);
 
     let nan = TextStyle {
         motion: CaptionMotion {
             mode: MotionMode::Typewriter,
             duration: f64::NAN,
+            stagger: f64::NAN,
             scale_from: f64::INFINITY,
         },
         ..TextStyle::default()
     };
     let tidied = nan.tidy();
     assert!(
-        (tidied.motion.duration - 0.18).abs() < 1e-9,
+        (tidied.motion.duration - 0.45).abs() < 1e-9,
         "non-finite falls back to the default"
     );
-    assert!((tidied.motion.scale_from - 1.15).abs() < 1e-9);
+    assert!((tidied.motion.scale_from - 3.0).abs() < 1e-9);
+    assert!((tidied.motion.stagger - 0.09).abs() < 1e-9);
     assert_eq!(
         tidied.motion.mode,
         MotionMode::Typewriter,

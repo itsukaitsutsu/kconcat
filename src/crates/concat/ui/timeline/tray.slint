@@ -150,7 +150,8 @@ component MenuItem inherits Rectangle {
 // bottom could be seen and neither pressed.
 // https://github.com/slint-ui/slint/issues/7322
 component AddMenu inherits Rectangle {
-    callback add-track(bottom: bool);
+    /// Kind ordinal: 1 video/overlay, 2 audio; `bottom` is stack position.
+    callback add-track(kind: int, bottom: bool);
 
     width: 26px;
     height: 26px;
@@ -167,8 +168,8 @@ component AddMenu inherits Rectangle {
     list := PopupWindow {
         x: 0;
         y: root.height + 4px;
-        width: 168px;
-        height: 2 * root.row-h + 8px;
+        width: 196px;
+        height: 4 * root.row-h + 8px;
         close-policy: close-on-click-outside;
 
         Rectangle {
@@ -182,17 +183,31 @@ component AddMenu inherits Rectangle {
                 alignment: start;
 
                 MenuItem {
-                    text: I18n.t("tray.addTrackTop");
+                    text: I18n.t("tray.addVideoTrackTop");
                     clicked => {
                         list.close();
-                        root.add-track(false);
+                        root.add-track(1, false);
                     }
                 }
                 MenuItem {
-                    text: I18n.t("tray.addTrackBottom");
+                    text: I18n.t("tray.addVideoTrackBottom");
                     clicked => {
                         list.close();
-                        root.add-track(true);
+                        root.add-track(1, true);
+                    }
+                }
+                MenuItem {
+                    text: I18n.t("tray.addAudioTrackTop");
+                    clicked => {
+                        list.close();
+                        root.add-track(2, false);
+                    }
+                }
+                MenuItem {
+                    text: I18n.t("tray.addAudioTrackBottom");
+                    clicked => {
+                        list.close();
+                        root.add-track(2, true);
                     }
                 }
             }
@@ -263,7 +278,7 @@ export component TimelineTray inherits Rectangle {
     callback section-select-all-silence();
     callback section-remove-selected();
     /// Add a lane: on top of the stack, or with `bottom` under it.
-    callback add-track(bottom: bool);
+    callback add-track(kind: int, bottom: bool);
     callback fit();
     callback zoom(factor: float);
 
@@ -286,7 +301,7 @@ export component TimelineTray inherits Rectangle {
         spacing: 4px;
 
         AddMenu {
-            add-track(bottom) => { root.add-track(bottom); }
+            add-track(kind, bottom) => { root.add-track(kind, bottom); }
         }
 
         Divider { }

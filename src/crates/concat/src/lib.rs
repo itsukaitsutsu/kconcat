@@ -737,6 +737,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_text_style_default(on_window!(|state| {
         state.use_title_style_for_new();
     }));
+    editor.on_remove_fillers(on_window!(
+        |state, strong: bool, weak: bool, cut_video: bool| {
+            state.remove_selected_filler_words(strong, weak, cut_video);
+        }
+    ));
     editor.on_import_font(|| {
         Shell::with(|shell, _| {
             if shell.studio.borrow().session.is_none() {
@@ -880,8 +885,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_hover_ended(on_lanes!(|state| {
         state.handle(Msg::Timeline(TimelineMsg::HoverEnded));
     }));
-    editor.on_add_track(on_window!(|state, bottom: bool| {
-        state.apply(concat_project::Command::AddTrack { bottom });
+    editor.on_add_track(on_window!(|state, kind: i32, bottom: bool| {
+        let kind = match kind {
+            1 => concat_project::model::TrackKind::Video,
+            2 => concat_project::model::TrackKind::Audio,
+            _ => return,
+        };
+        state.apply(concat_project::Command::AddTypedTrack { bottom, kind });
     }));
     editor.on_delete_selected(on_window!(|state| {
         state.delete_selected();

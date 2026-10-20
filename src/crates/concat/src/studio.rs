@@ -3586,6 +3586,29 @@ impl Studio {
         (self.selection.len() == 1).then(|| self.selection[0].clone())
     }
 
+    /// Run the filler-word command on selected heard captions only. Both
+    /// tiers are opt-in in the inspector, as is cutting picture and sound.
+    pub fn remove_selected_filler_words(&mut self, strong: bool, weak: bool, cut_video: bool) {
+        if !strong && !weak {
+            return;
+        }
+        let clip_ids: Vec<String> = self
+            .selection
+            .iter()
+            .filter(|id| self.clip(id).is_some_and(|clip| clip.is_caption()))
+            .cloned()
+            .collect();
+        if clip_ids.is_empty() {
+            return;
+        }
+        self.apply(Command::RemoveFillerWords {
+            clip_ids,
+            strong,
+            weak,
+            cut_video,
+        });
+    }
+
     /// The look being shown over the picture, by id, while one is.
     pub fn audition_of(&self) -> Option<&str> {
         self.audition.as_deref()
@@ -4234,22 +4257,34 @@ impl Studio {
         }
         self.transition_selected = None;
         let already = self.selection.iter().any(|held| held == id);
+        let linked = self
+            .timeline()
+            .with_link_mates(std::iter::once(id));
+        let linked = if linked.is_empty() {
+            vec![id.to_owned()]
+        } else {
+            linked
+        };
         self.selection = if additive {
-            if already {
+            if linked.iter().any(|member| self.selection.contains(member)) {
                 self.selection
                     .iter()
-                    .filter(|held| held.as_str() != id)
+                    .filter(|held| !linked.contains(held))
                     .cloned()
                     .collect()
             } else {
                 let mut next = self.selection.clone();
-                next.push(id.to_owned());
+                for member in linked {
+                    if !next.contains(&member) {
+                        next.push(member);
+                    }
+                }
                 next
             }
         } else if already {
             self.selection.clone()
         } else {
-            vec![id.to_owned()]
+            linked
         };
         self.sections
             .sync_scroll_to_time(clip.start + clip.duration * 0.5, true);
@@ -4718,6 +4753,27 @@ impl Studio {
                 }
                 ClipField::BackgroundPaddingY => {
                     text.background_padding_y = value.clamp(0.0, 0.5);
+                }
+                ClipField::CaptionMotionMode => {
+                    text.motion.mode = match value.round() as i32 {
+                        1 => model::MotionMode::Fade,
+                        2 => model::MotionMode::Pop,
+                        3 => model::MotionMode::Bounce,
+                        4 => model::MotionMode::SlideUp,
+                        5 => model::MotionMode::Typewriter,
+                        6 => model::MotionMode::Karaoke,
+                        7 => model::MotionMode::WordReveal,
+                        _ => model::MotionMode::None,
+                    };
+                }
+                ClipField::CaptionMotionDuration => {
+                    text.motion.duration = value;
+                }
+                ClipField::CaptionMotionStagger => {
+                    text.motion.stagger = value;
+                }
+                ClipField::CaptionMotionScale => {
+                    text.motion.scale_from = value;
                 }
                 ClipField::ApplyAllCaptions => {}
             }
@@ -7922,6 +7978,11 @@ impl Studio {
                     let height = self.lane_height(lane);
                     let row = TrackData {
                         id: lane.id.as_str().into(),
+                        kind: match lane.kind {
+                            model::TrackKind::LegacyMixed => 0,
+                            model::TrackKind::Video => 1,
+                            model::TrackKind::Audio => 2,
+                        },
                         visible: lane.visible,
                         muted: lane.muted,
                         locked: self.locked(&lane.id),
@@ -9248,7 +9309,20 @@ impl Studio {
             stroke_opacity: f32::from(stroke.alpha()) / 255.0,
             highlight,
             highlight_hex: hex_of(highlight).into(),
-            highlightable: clip.words.is_some(),
+            highlightable: clip.words.as_ref().is_some_and(|words| !words.is_empty()),
+            motion_mode: match text.motion.mode {
+                model::MotionMode::None => 0,
+                model::MotionMode::Fade => 1,
+                model::MotionMode::Pop => 2,
+                model::MotionMode::Bounce => 3,
+                model::MotionMode::SlideUp => 4,
+                model::MotionMode::Typewriter => 5,
+                model::MotionMode::Karaoke => 6,
+                model::MotionMode::WordReveal => 7,
+            },
+            motion_duration: text.motion.duration as f32,
+            motion_stagger: text.motion.stagger as f32,
+            motion_scale_from: text.motion.scale_from as f32,
             highlight_on: !text.highlight_color.is_empty(),
             shadow: text.shadow,
             plate,

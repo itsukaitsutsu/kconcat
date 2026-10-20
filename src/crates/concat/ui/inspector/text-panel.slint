@@ -46,6 +46,8 @@ export component TextPanel inherits VerticalLayout {
     callback import-font();
     /// Keep this title's look for new titles and captions.
     callback set-default();
+    /// Remove explicitly enabled filler tiers from the selected captions.
+    callback remove-fillers(strong: bool, weak: bool, cut-video: bool);
 
     /// Several titles selected together: every knob writes to all of them
     /// and the words, each title's own, are not offered.
@@ -67,6 +69,11 @@ export component TextPanel inherits VerticalLayout {
     /// choice about how the panel is used, not about the title, so it is
     /// not in the document and survives a change of selection.
     property <bool> pad-locked: false;
+    /// The safer default is opt-in: both sets of filler tokens start off.
+    property <bool> strong-fillers: false;
+    property <bool> weak-fillers: false;
+    /// Caption deletion never removes the matching video unless requested.
+    property <bool> cut-video-with-caption: false;
     property <float> line-height;
     property <float> tracking;
     property <float> box-w;
@@ -81,6 +88,10 @@ export component TextPanel inherits VerticalLayout {
     property <float> offset-x;
     property <float> offset-y;
     property <int> weight-index;
+    property <int> motion-mode;
+    property <float> motion-duration;
+    property <float> motion-stagger;
+    property <float> motion-scale-from;
 
     property <[float]> weights: [400, 500, 600, 700];
     /// The label column of the rows whose label is two words.
@@ -105,6 +116,10 @@ export component TextPanel inherits VerticalLayout {
         root.h-mode = root.box-h > 0 ? 0 : 1;
         root.offset-x = root.selected.offset-x;
         root.offset-y = root.selected.offset-y;
+        root.motion-mode = root.selected.motion-mode;
+        root.motion-duration = root.selected.motion-duration;
+        root.motion-stagger = root.selected.motion-stagger;
+        root.motion-scale-from = root.selected.motion-scale-from;
         root.weight-index = root.selected.font-weight >= 700 ? 3
             : root.selected.font-weight >= 600 ? 2
             : root.selected.font-weight >= 500 ? 1 : 0;
@@ -375,7 +390,7 @@ export component TextPanel inherits VerticalLayout {
         // the voice says it. Only a caption has word timings, so only a
         // caption shows the switch. Off clears the caption's colour (the
         // studio reads a transparent one as none); on restores the default.
-        if root.selected.highlightable: SwitchRow {
+        if root.selected.highlightable && root.motion-mode == 0: SwitchRow {
             label: I18n.t("textPanel.highlight");
             checked: root.selected.highlight-on;
             toggled(on) => {
@@ -383,11 +398,24 @@ export component TextPanel inherits VerticalLayout {
                 root.commit();
             }
         }
-        if root.selected.highlightable && root.selected.highlight-on: ColourField {
+        if ((root.selected.highlightable && root.motion-mode == 0 && root.selected.highlight-on)
+            || root.motion-mode == 6): ColourField {
             label: I18n.t("common.color");
             value: root.selected.highlight;
             alpha: false;
             changed(colour) => { root.set-colour(ClipTextField.highlight-color, colour); root.commit(); }
+        }
+        if root.selected.highlightable && root.motion-mode != 0 && root.motion-mode != 6: Text {
+            text: I18n.t("textPanel.motionReplacesHighlight");
+            color: Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+        if root.motion-mode == 6: Text {
+            text: I18n.t("textPanel.karaokeAnimationInfo");
+            color: Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
         }
 
         Param {
@@ -514,6 +542,118 @@ export component TextPanel inherits VerticalLayout {
                 }
             }
         }
+        }
+    }
+
+    // ── text animation ────────────────────────────────────────────────────
+    // TextPanel is only shown for text clips, so every title and caption can
+    // use the same entrance presets; Karaoke falls back to evenly timed words
+    // when this clip has no transcription timings.
+    Section {
+        motion := SectionHeader {
+            title: I18n.t("textPanel.animation");
+            collapsible: true;
+            open: false;
+            summary: root.motion-mode == 1 ? I18n.t("textPanel.motionFade")
+                : root.motion-mode == 2 ? I18n.t("textPanel.motionPop")
+                : root.motion-mode == 3 ? I18n.t("textPanel.motionBounce")
+                : root.motion-mode == 4 ? I18n.t("textPanel.motionSlide")
+                : root.motion-mode == 5 ? I18n.t("textPanel.motionTypewriter")
+                : root.motion-mode == 6 ? I18n.t("textPanel.motionKaraoke")
+                : root.motion-mode == 7 ? I18n.t("textPanel.motionReveal")
+                : I18n.t("textPanel.motionNone");
+        }
+
+        if motion.open: SectionBody {
+            Row {
+                label: I18n.t("textPanel.animation");
+                label-width: root.label-w;
+                Select {
+                    options: [I18n.t("textPanel.motionNone"), I18n.t("textPanel.motionFade"),
+                        I18n.t("textPanel.motionPop"), I18n.t("textPanel.motionBounce"),
+                        I18n.t("textPanel.motionSlide"), I18n.t("textPanel.motionTypewriter"),
+                        I18n.t("textPanel.motionKaraoke"), I18n.t("textPanel.motionReveal")];
+                    current <=> root.motion-mode;
+                    changed(index) => {
+                        root.set(ClipField.caption-motion-mode, index);
+                        root.commit();
+                    }
+                }
+            }
+
+            if root.motion-mode >= 1 && root.motion-mode <= 5: Param {
+                label: I18n.t("textPanel.motionDuration");
+                value <=> root.motion-duration;
+                minimum: 0.02;
+                maximum: 2.0;
+                step: 0.02;
+                default-value: 0.45;
+                fmt: ParamFormat.seconds;
+                unit: "s";
+                changed(v) => { root.set(ClipField.caption-motion-duration, v); root.commit(); }
+            }
+
+            if root.motion-mode == 5: Param {
+                label: I18n.t("textPanel.motionStagger");
+                value <=> root.motion-stagger;
+                minimum: 0;
+                maximum: 0.22;
+                step: 0.01;
+                default-value: 0.09;
+                fmt: ParamFormat.seconds;
+                unit: "s";
+                changed(v) => { root.set(ClipField.caption-motion-stagger, v); root.commit(); }
+            }
+
+            if root.motion-mode == 2: Param {
+                label: I18n.t("textPanel.motionScale");
+                value <=> root.motion-scale-from;
+                minimum: 0.25;
+                maximum: 3;
+                step: 0.05;
+                default-value: 0.35;
+                fmt: ParamFormat.rate;
+                unit: "x";
+                changed(v) => { root.set(ClipField.caption-motion-scale, v); root.commit(); }
+            }
+        }
+    }
+
+    // ── caption cleanup ───────────────────────────────────────────────────
+    // Both filler tiers are opt-in, and the audio/video cut is opt-in too.
+    // The command is one undoable edit on only the selected caption clips.
+    if root.selected.highlightable: Section {
+        cleanup := SectionHeader {
+            title: I18n.t("textPanel.cleanup");
+            collapsible: true;
+            open: false;
+        }
+
+        if cleanup.open: SectionBody {
+            SwitchRow {
+                label: I18n.t("textPanel.strongFillers");
+                checked <=> root.strong-fillers;
+            }
+            SwitchRow {
+                label: I18n.t("textPanel.weakFillers");
+                checked <=> root.weak-fillers;
+            }
+            SwitchRow {
+                label: I18n.t("textPanel.cutVideoWithCaption");
+                checked <=> root.cut-video-with-caption;
+            }
+            Button {
+                label: I18n.t("textPanel.removeFillers");
+                primary: true;
+                block: true;
+                enabled: root.strong-fillers || root.weak-fillers;
+                clicked => {
+                    root.remove-fillers(
+                        root.strong-fillers,
+                        root.weak-fillers,
+                        root.cut-video-with-caption);
+                }
+            }
         }
     }
 

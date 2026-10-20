@@ -158,6 +158,8 @@ export global Editor {
     /// The Text tab's "Use for new titles": the selected title's look
     /// becomes the one new titles and captions start from.
     callback text-style-default();
+    /// Remove selected caption filler words through the project's undoable command.
+    callback remove-fillers(strong: bool, weak: bool, cut-video: bool);
 
     // The effect catalogue's shelves, published once, and the selected
     // clip's two chains with a row per parameter. See PresetStack.
@@ -377,7 +379,7 @@ export global Editor {
     in-out property <bool> recording;
     /// The take's level, `0..1`, for the meter beside the button.
     in-out property <float> record-level;
-    callback add-track(bottom: bool);
+    callback add-track(kind: int, bottom: bool);
     callback zoom-to-fit(width: length);
     callback zoom(factor: float, anchor-seconds: float);
     /// The lanes are this wide on screen now, in logical pixels: what

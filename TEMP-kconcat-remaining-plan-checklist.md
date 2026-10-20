@@ -1,6 +1,6 @@
 # TEMP — kconcat remaining-plan checklist
 
-**Draft:** v0.12 — 19 October 2026, Asia/Bangkok  
+**Draft:** v0.15 — 19 October 2026, Asia/Bangkok
 **Purpose:** an editable temporary checklist for finishing the 22 grouped milestones, with a parked AI-integrated-editing idea afterward.  
 **Location:** separate from the source checkout. This file does not change the official roadmap, modify code, create a Git commit, or expire automatically. Promote, revise, or delete it when you choose.
 
@@ -9,6 +9,7 @@
 - **The assistant will maintain this workspace copy for you as you provide results. You do not need to edit it yourself.** Updates are based on evidence, not automatic access to your PC.
 - If you download a copy, it will not automatically synchronize with later updates here. Download the updated file when you need a current local copy. You can optionally edit a downloaded Markdown copy in a text editor, but that is not required.
 - Tick a milestone in the overview **when that work package’s stated completion criteria pass**, and update its detailed checks at the same time. Keep infrastructure implementation, real-corpus execution, and actual editing/quality acceptance distinct. A passing unit test alone does not close a user-facing feature.
+- **Runtime reality rule:** a plan item is not an applied feature. For every user-facing item, record separately whether code/data foundations exist, whether the UI/handler/render or export path is integrated, and whether it is visible and works in the owner's current `cargo dev` build. A schema, preset definition, or passing unit test is not evidence that the user can access the feature. If the owner reports that a control/effect is absent in `cargo dev`, keep the integration/runtime item open and record that report as evidence; do not imply the feature is available.
 - **Boundary clarification in v0.7:** milestone 02 closes the timing-comparison infrastructure after implementation and Windows-native verification; milestone 03 owns its first real-media cache/baseline and end-to-end provenance check; milestone 04 owns measured recognition/timing-quality acceptance. The earlier list duplicated the real-cache handoff in 02 and 03. It is now tracked once in 03, not waived or claimed passed.
 - Save the command, output, commit, and real-media result for each milestone.
 - Recheck the current local code before implementing anything: some foundations already exist, and your Windows checkout has changes beyond the earlier reviewed snapshot.
@@ -42,6 +43,7 @@ The unchecked 22-item overview tracks full acceptance and hid real partial progr
 - [x] **Milestone-03 source probe passed:** duration **315.84 s**; window proposed **0.000–30.000**; original MP4 not modified.
 - [x] **Milestone-03 model inventory:** three multilingual models listed; default selection **large-v3-turbo** (1.51 GiB) and language Indonesian; no download.
 - [ ] **Milestone 03 — in progress:** owner cancelled at `Type Y` before extraction/inference. Re-run and type **Y** to create the 30 s audio/cache and three measurements. No real-video accuracy or GUI/export acceptance yet.
+- [x] **Milestone-05 runtime report received:** owner says their current local `cargo dev` testing exposes no text-animation controls/effects. This records the report only; it does not complete implementation or runtime verification.
 
 **Current next action:** Clippy/native crash is cleared on this retry. Run `RESUME-REAL-BASELINE.cmd` again (or `RUN-REAL-BASELINE.cmd` if resume refuses a cancelled log). Accept defaults: model **3** / large-v3-turbo, start **0**, window 0–30 s, then type **Y** (not Enter, not N). Do not launch a second copy. Inference on large-v3-turbo can take several minutes. Send `SHAREABLE-SUMMARY.json` from the **new** output folder when it finishes. Do not treat the cancelled run as a failed native build.
 
@@ -179,6 +181,22 @@ The newly attached raw log establishes:
 
 **Evidence limits:** this log proves native compilation and the named tests, not real transcription, a generated real cache, a GUI opening/save cycle, export or measured timing accuracy. Those checks remain in their appropriate milestones. These results were read from the user’s Windows attachment, not executed independently by the assistant.
 
+### New runtime evidence — caption text animation is not exposed in the owner's current app (user report)
+
+The owner reports testing the current local build with `cargo dev` and finding **no text-animation effects or controls in the app**. Record this as a user-reported runtime observation, not an independently reproduced test: the exact local revision, UI path tested, and screenshots/logs were not supplied here.
+
+**Status implication:** milestone 05 remains open. The presence of motion-related schema/data in source is only a foundation; pop/reveal/typewriter are **not credited as implemented or usable** until the UI and rendering/export paths are integrated and the owner can use and verify them in the running app. This report corrects any possible impression that the planned effects are already available.
+
+### Owner concern — prior AI batch request for milestones 04–09 is unverified
+
+The owner reports asking another AI to handle a batch covering milestones 04–09, and now doubts whether the claimed work was actually applied. No patch, exact local diff, commit, test log, or runtime evidence for that batch has been supplied here. **Do not treat another AI's statement that it completed work as proof of implementation.** In this checklist, milestones 04–09 remain open; this records uncertainty, not a finding that every related source change is absent or that the other AI intentionally misled the owner. Verify each item against the actual Windows checkout and its running `cargo dev` app before crediting it.
+
+### Public-source static audit — 04–09 (not the owner's Windows working copy)
+
+The owner selected a public-GitHub-only audit. At public commit `ede7e5906fa43cb79de0d8488999b5af0b45a7ef`, code foundations exist in several areas, but **none of milestones 04–09 passed its full completion gate**. The static findings and source paths are in `MILESTONES-04-09-PUBLIC-SOURCE-AUDIT.md`. In brief: 04 still needs real-media quality evidence; 05 motion isn't exposed/fully rendered; 06 has command foundations but needs UI/runtime validation; 07's tracks remain untyped; 08's platform specifications aren't fully wired to an output mix; 09 has a caption-word route but lacks the audio-analysis UI route and real listening/export verification.
+
+`cargo check` could not run in this sandbox because `cargo` is not installed. Treat the audit as source review, not a passing build. The checked-in public snapshot may differ from the owner's local uncommitted changes.
+
 **Overview correction:** 02’s implemented and native-verified infrastructure is now complete. The first real cache/provenance check is explicitly tracked under 03 rather than duplicated as an extra open gate in 02. No real-media check has been marked passed.
 
 ### Current milestone-03 pilot attempt 1 — diagnostic needed
@@ -220,7 +238,7 @@ The checklist maintained here is separate from the deleted local `kconcat-next-s
 
 ## B. Overview — the 22 milestones
 
-An unchecked milestone can contain substantial completed code. A checked milestone means **its stated work-package gate has passed**, not that every downstream acceptance check has passed. In particular: **02 = infrastructure implemented/native-verified; 03 = real cache/baseline; 04 = measured timing/recognition quality.** The real-media boundary is explicit rather than counted twice.
+An unchecked milestone can contain substantial completed code. A checked milestone means **its stated work-package gate has passed**, not that every downstream acceptance check has passed. In particular: **02 = infrastructure implemented/native-verified; 03 = real cache/baseline; 04 = measured timing/recognition quality.** The real-media boundary is explicit rather than counted twice. The owner reports a prior AI batch request for 04–09, but its application and results have not been verified here; **04–09 stay unchecked** until local code and the relevant runtime/acceptance evidence are inspected. For 05 specifically, the owner reports that text-animation controls/effects are absent in the current `cargo dev` app.
 
 ### Core workflow — 01–14
 
@@ -228,7 +246,7 @@ An unchecked milestone can contain substantial completed code. A checked milesto
 - [x] **02 — Timing-comparison infrastructure.** COMPLETE — implemented and Windows-native verified: all eight check groups passed; **41 targeted tests passed, 0 failed**. First real-video cache/baseline is tracked in 03; accuracy acceptance remains 04.
 - [ ] **03 — Real corpus and baseline.** IN PROGRESS — native Clippy retry **EXIT 0** (172 s); source probed 315.84 s; cancelled before extraction at `Type Y`. Real cache/measurements still pending.
 - [ ] **04 — Timing and Indonesian ASR acceptance.** Close the real-audio quality gate.
-- [ ] **05 — Caption appearance and panel access.** Finish existing caption foundations and their controls/rendering.
+- [ ] **05 — Caption appearance and panel access.** Open: owner reports no text-animation controls/effects in current `cargo dev`; motion UI/render/export integration and runtime acceptance are not credited.
 - [ ] **06 — Transcript-editing controls.** Connect and validate editing mechanisms.
 - [ ] **07 — Typed lanes and linked editing.** Finish import, migration, selection, and Link/Unlink behavior.
 - [ ] **08 — Upload-ready platform exports.** Finish presets and measured final-mix loudness.
@@ -349,19 +367,26 @@ English/Japanese work may move forward after step 04 if needed, without delaying
 
 ### 05 — Finish caption appearance and panel access — C1–C5, T6 UI, UI-1
 
-**Existing foundation:** chunking, preset data, highlight fields, transforms, motion schema, and nudge mechanism. These are not all completed user-facing workflows.
+**Important runtime correction:** the owner reports that their current local `cargo dev` app shows **no text-animation effects or controls**. Therefore pop/reveal/typewriter are planned work, **not currently credited as applied or usable**. In the public source, a motion schema and preset parsing exist and the host copies motion fields to the painter model, but I found no mode-driven animation implementation or user-facing motion control. The current local report is recorded in section A; exact local revision and UI path were not supplied, so do not claim independent runtime reproduction.
+
+**Existing source foundations (not acceptance):** chunking, preset data, highlight fields, transforms, motion schema/preset parsing, host-side field mapping, and nudge mechanism. Their presence does not establish a complete UI → model/command → renderer/export workflow.
 
 **New local-status evidence:** `keyframes-pane.slint`, `meters-pane.slint`, `pane.slint`, and the scrolling-investigation note are modified. Inspect those existing changes before adding another fix. Their contents and runtime scrolling result have not yet been supplied.
 
 - [ ] Validate real Burst chunking before/after timing changes; do not build another layout UI unnecessarily.
-- [ ] Connect the eight caption looks to a usable caption picker; verify preset application to the intended captions/track.
-- [ ] Verify karaoke ON/OFF behavior for every preset, including no later default silently overriding OFF.
+- [ ] Connect the eight **appearance** looks to a usable caption picker; verify preset application to the intended captions/track. Treat these as visual-style presets, not animation presets.
+- [ ] Verify karaoke ON/OFF behavior for every appearance preset, including no later default silently overriding OFF.
 - [ ] Verify uppercase in preview/export while stored transcript text retains its casing.
-- [ ] Drive pop/reveal/typewriter from word timings and connect controls; verify preview/export/reload. Motion data storage alone is not animation.
+- [ ] Implement and expose the planned text-motion choices—**pop, reveal, and typewriter**—in the running caption workflow. These are the initial planned set, not a promise of full CapCut preset parity; any broader preset library needs a separate scope decision.
+- [ ] Connect each selected motion to the existing word/caption timing data and the actual preview renderer. Define and test behavior when usable word timings are absent; do not silently show an effect that cannot be timed correctly.
+- [ ] Connect the same motion behavior to export/render output, then verify preview/export agreement, timing, and text/caption boundaries on a real project.
+- [ ] Verify controls can be turned off/changed, survive save/reload, and behave correctly with undo and re-editing; test the default/no-animation state.
 - [ ] Expose the tested ±10 ms track-nudge mechanism and verify re-transcription behavior.
 - [ ] Resize every panel to minimum usable size; reach all controls; confirm scroll wheel, scrollbar, numeric-control drags and keyframe controls still work. Recheck the shared PaneScroll change and panel-specific cases.
 
-**Complete when:** the intended caption look/motion is usable without hidden workarounds, exported output agrees with preview, and smaller panels remain usable.
+**Runtime acceptance evidence still required:** record the local revision and UI path; demonstrate the animation control in `cargo dev`; apply each supported effect to timed captions; check preview, exported output, save/reload, and undo. Unit tests or stored motion data alone do not pass this gate.
+
+**Complete when:** the intended caption looks and supported motions are accessible in the running app without hidden workarounds, effects are correctly timed, exported output agrees with preview, save/reload and undo work, and smaller panels remain usable.
 
 ### 06 — Finish transcript-editing controls — E1–E4
 
@@ -812,5 +837,8 @@ Next small action:
 | 2026-10-19 | v0.9 | Recorded first pilot attempt: helper applied, formatting/tests completed, Clippy exited 101. Requested the actual diagnostic rather than speculating. No real-media/model run yet. |
 | 2026-10-19 | v0.10 | Read main log and empty stdout; requested the still-missing stderr only. |
 | 2026-10-19 | v0.11 | Decoded the supplied stderr: FFmpeg native build-helper access violation (`0xc0000005`), not a lint or the previous missing-header error. Underlying faulting module/cause remains unproved. Prepared a guarded runner-only resume with lib+example targets, one build job, UTF-8/error-context logging and no source edits/reinstall/clean/lint bypass. 23 helper checks passed here; owner retry and actual real-media results remain pending. |
+| 2026-10-19 | v0.13 | Added the runtime-reality rule: planned/code-foundation work is not credited as applied until the UI/runtime path works in the owner's current app. Recorded the owner's report that `cargo dev` exposes no text-animation controls/effects, clarified milestone 05 status, and expanded its implementation/acceptance checklist for pop/reveal/typewriter. No source code changed. |
+| 2026-10-19 | v0.14 | Synced the B overview with the new milestone-05 runtime evidence; explicitly kept milestones 04–09 unchecked pending actual local diffs and runtime/acceptance checks. Recorded the owner's concern about an earlier AI batch claim as unverified, without asserting deception or inferring which source edits are absent. No source code changed. |
+| 2026-10-19 | v0.15 | Per owner choice, statically audited public commit `ede7e590...` for milestones 04–09. Added `MILESTONES-04-09-PUBLIC-SOURCE-AUDIT.md`, recorded partial code foundations versus missing integration/real-world acceptance, and corrected step 05's description of the host-side motion field mapping. No milestone was marked complete. `cargo` is not installed here, so no Rust build/test claim is made. |
 
 **Immediate next action:** extract `kconcat-step03-retry.zip` into the existing `C:\dev\kconcat-step03` and run `RESUME-REAL-BASELINE.cmd` once in the configured prompt. The updated runner checks previous evidence/unchanged source, then retries the native build with lib+example targets and one job. Send the new shareable summary if successful or main diagnostic log if it stops. **02 remains complete; 03’s real-data/quality acceptance is not claimed until results arrive.**

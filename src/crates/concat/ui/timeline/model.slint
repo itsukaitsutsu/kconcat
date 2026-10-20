@@ -50,6 +50,8 @@ export enum TrackSize { auto, small, medium, large }
 /// the other.
 export struct TrackData {
     id: string,
+    /// Lane kind ordinal: 0 legacy mixed, 1 video/overlay, 2 audio.
+    kind: int,
     visible: bool,
     muted: bool,
     /// What the header's dropdown shows, and what `height` was resolved from.
@@ -182,6 +184,14 @@ export enum ClipField {
     audio-track,
     /// whether styling/positioning a caption clip applies to all captions on its track
     apply-all-captions,
+    /// animated text entrance mode; numeric ordinal mirrors MotionMode
+    caption-motion-mode,
+    /// animation duration in seconds
+    caption-motion-duration,
+    /// delay between successive words
+    caption-motion-stagger,
+    /// starting scale for pop text motion
+    caption-motion-scale,
 }
 
 /// One keyable property's state at the playhead, as the inspector needs it.
@@ -290,7 +300,6 @@ export struct SelectedClipData {
     /// Seconds, and the ceiling on a fade: longer than half the clip and the
     /// two ramps would overlap.
     duration: float,
-
     // the transition on the cut into this clip; empty id means none
     transition-id: string,
     transition-name: string,
@@ -384,6 +393,14 @@ export struct SelectedClipData {
     highlight-hex: string,
     /// whether the title has word timings to light: only a caption does
     highlightable: bool,
+    /// Text entrance preset ordinal; see TextPanel's selector.
+    motion-mode: int,
+    /// Animation duration in seconds.
+    motion-duration: float,
+    /// Delay between successive words.
+    motion-stagger: float,
+    /// Starting scale for pop mode.
+    motion-scale-from: float,
     /// whether the caption lights its spoken word at all
     highlight-on: bool,
     shadow: bool,

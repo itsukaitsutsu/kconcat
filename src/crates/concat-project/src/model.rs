@@ -208,13 +208,59 @@ fn is_zero_ms(value: &i32) -> bool {
     *value == 0
 }
 
-/// A lane. Deliberately untyped: any media goes on any track.
+/// What kind of content a lane accepts. `LegacyMixed` is the migration value
+/// for older projects which had no lane types; it stays permissive so loading
+/// them never silently strands existing clips.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrackKind {
+    /// Picture, still, title, shape, or visual-effect layer.
+    Video,
+    /// Sound-only clips.
+    Audio,
+    /// A legacy lane with no type restriction.
+    #[default]
+    LegacyMixed,
+}
+
+impl TrackKind {
+    /// Whether a clip can be placed on a lane of this type.
+    pub fn accepts_clip(self, kind: ClipKind) -> bool {
+        match self {
+            TrackKind::Video => matches!(
+                kind,
+                ClipKind::Video | ClipKind::Image | ClipKind::Text | ClipKind::Layer | ClipKind::Shape
+            ),
+            TrackKind::Audio => kind == ClipKind::Audio,
+            TrackKind::LegacyMixed => true,
+        }
+    }
+
+    /// Whether media of this kind can be placed on the lane.
+    pub fn accepts_media(self, kind: MediaKind) -> bool {
+        match kind {
+            MediaKind::Video => self.accepts_clip(ClipKind::Video),
+            MediaKind::Audio => self.accepts_clip(ClipKind::Audio),
+            MediaKind::Image => self.accepts_clip(ClipKind::Image),
+        }
+    }
+
+    fn is_legacy_mixed(kind: &Self) -> bool {
+        *kind == Self::LegacyMixed
+    }
+}
+
+/// A lane. Older projects are read as `LegacyMixed`; typed lanes are used
+/// for newly created V/A lanes while preserving mixed-lane compatibility.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Track {
     /// Minted per timeline ("t5", or "T1".."T4" for the first timeline's
     /// starter lanes); never shared between timelines.
     pub id: String,
+    /// Missing in legacy projects, which decode as permissive mixed lanes.
+    #[serde(default, skip_serializing_if = "TrackKind::is_legacy_mixed")]
+    pub kind: TrackKind,
     /// Video clips on this track are left out of the composite when false.
     pub visible: bool,
     /// Audio on this track is silent when true.
@@ -245,6 +291,7 @@ impl Default for Track {
     fn default() -> Self {
         Track {
             id: String::new(),
+            kind: TrackKind::LegacyMixed,
             visible: true,
             muted: false,
             caption_nudge_ms: 0,
@@ -900,43 +947,46 @@ impl TextTransform {
     }
 }
 
-/// How a caption comes in (roadmap C5, schema v1 APPROVED by owner
-/// 16 Oct 2026). The names are written into project files and preset
-/// files, so they are stable for ever: `none`, `pop`, `word-reveal`,
-/// `typewriter`.
+/// How a text clip enters (roadmap C5). The names are written into project
+/// and preset files, so they remain stable across app versions. The legacy
+/// word-reveal mode remains readable for existing projects.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MotionMode {
-    /// The whole cue is on screen from its start; only the highlight
-    /// moves. The default, and what an unrecognised name reads as.
+    /// No entrance effect; the text is visible for the whole clip.
     #[default]
     None,
-    /// Each word appears at its spoken time with a scale-in from
-    /// `scale_from` to 1 over `duration`.
+    /// The text fades up at the clip's start.
+    Fade,
+    /// The text springs in from a smaller scale.
     Pop,
-    /// The cue starts empty; each word appears at its spoken time and
-    /// stays.
+    /// The text drops into place with a short overshoot.
+    Bounce,
+    /// The text rises into place while fading in.
+    SlideUp,
+    /// Legacy entrance: reveal successive timed caption words.
     WordReveal,
-    /// The letters of each word appear one by one across the word's
-    /// spoken time; `duration` is not used.
+    /// Reveal the text one Unicode character at a time.
     Typewriter,
+    /// Highlight successive spoken words using the existing accent color.
+    Karaoke,
 }
 
-/// The schema-v1 motion block, stored on the clip so the choice survives
-/// a project reload, and copied here from a preset's `[motion]` on
-/// apply. Older documents have no motion and read as `mode = "none"`,
-/// so `DOCUMENT_VERSION` does not move. The two dials clamp in
-/// [`TextStyle::tidy`] and nowhere else (the schema's own rule).
+/// The motion block, stored on the clip so the choice survives a project
+/// reload, and copied from a preset's `[motion]` on apply. Older documents
+/// have no motion and read as `mode = "none"`; the document version stays put.
+/// All dials clamp in [`TextStyle::tidy`] and nowhere else.
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CaptionMotion {
     /// Which way in.
     pub mode: MotionMode,
-    /// Seconds per word for pop and word-reveal; typewriter times itself
-    /// off the spoken word. The owner accepted 0.18 as the default, to
-    /// tune after T2 is accepted.
+    /// Seconds for the entrance, or per-character timing for typewriter.
     pub duration: f64,
-    /// Pop only: the starting scale of each word, landing on 1.
+    /// Delay between successive word entrances.
+    pub stagger: f64,
+    /// Pop only: starting scale. Values at or below 1 use the modern pop;
+    /// values above 1 preserve the older shrink-to-1 behavior.
     pub scale_from: f64,
 }
 
@@ -952,9 +1002,9 @@ impl Default for CaptionMotion {
     fn default() -> Self {
         CaptionMotion {
             mode: MotionMode::None,
-            // The schema's approved defaults.
-            duration: 0.18,
-            scale_from: 1.15,
+            duration: 0.45,
+            stagger: 0.09,
+            scale_from: 0.35,
         }
     }
 }
@@ -1209,15 +1259,12 @@ impl TextStyle {
             finite(self.background_padding_x, base.background_padding_x).max(0.0);
         self.background_padding_y =
             finite(self.background_padding_y, base.background_padding_y).max(0.0);
-        // C5's two dials clamp here and only here, the schema's own rule:
-        // duration stays a per-word number a painter can draw (20 ms to
-        // 2 s), scale_from stays a pop from bigger to life-size (1 to 3;
-        // below 1 a word would grow into its pop, which is another
-        // effect nobody approved). The mode is not a number and does not
-        // clamp.
+        // C5's three motion dials clamp here and nowhere else. The mode
+        // itself is not a number and does not clamp.
         self.motion.duration = finite(self.motion.duration, base.motion.duration).clamp(0.02, 2.0);
+        self.motion.stagger = finite(self.motion.stagger, base.motion.stagger).clamp(0.0, 0.22);
         self.motion.scale_from =
-            finite(self.motion.scale_from, base.motion.scale_from).clamp(1.0, 3.0);
+            finite(self.motion.scale_from, base.motion.scale_from).clamp(0.25, 3.0);
         self
     }
 }

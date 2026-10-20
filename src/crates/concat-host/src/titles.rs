@@ -7,9 +7,10 @@
 //! only knows pictures. This is where a title or a shape becomes one. Each
 //! clip's style is painted by `concat-text` onto a frame-sized transparent
 //! PNG in the app's data directory, and the clip rejoins the flattened list
-//! as an image clip pointing at that file, carrying the clip's timing,
-//! transform and opacity. The monitor, playback prefetch and the exporter
-//! then treat it as any other still.
+//! as image clips pointing at those pixels, carrying the clip's timing,
+//! transform and opacity. A timed caption with text motion becomes a short
+//! sequence of still clips so the same behavior works in monitor and export.
+//! The monitor, playback prefetch and the exporter then treat them as stills.
 //!
 //! The file is keyed by everything that changes the pixels - the style, the
 //! frame size, the fonts the project carries - so a title that has not
@@ -26,7 +27,7 @@ use concat_core::frame::Frame;
 use concat_core::shader::RevealMap;
 
 use concat_export::{ClipKind, ExportClip, ExportKey};
-use concat_project::captionmap::{Word, layout_words_of, locate_words};
+use concat_project::captionmap::{Word, layout_words_of, locate_words, word_units};
 use concat_project::model::{
     ClipKind as ModelClipKind, Project, ShapeKind, ShapeStyle, TextAlign, TextStyle,
 };
@@ -198,6 +199,244 @@ impl LivePaintings {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct MotionSlice {
+    start: f64,
+    end: f64,
+    text_end: usize,
+    scale: f64,
+    offset_y: f64,
+    opacity: f64,
+}
+
+#[derive(Clone, Copy)]
+struct MotionEvent {
+    at: f64,
+    text_end: usize,
+    scale: f64,
+    offset_y: f64,
+    opacity: f64,
+}
+
+/// Turn a text entrance into short stills. The samples are time-based, not
+/// tied to the monitor's refresh rate, so preview and export use the same
+/// pixels and timing. Typewriter is Unicode-boundary-safe; legacy word reveal
+/// continues to use stored speech timings.
+fn caption_motion_slices(
+    style: &TextStyle,
+    words: Option<&[Word]>,
+    clip_start: f64,
+    clip_duration: f64,
+) -> Option<Vec<MotionSlice>> {
+    use concat_project::model::MotionMode;
+
+    let mode = style.motion.mode;
+    if matches!(mode, MotionMode::None | MotionMode::Karaoke)
+        || !clip_start.is_finite()
+        || !clip_duration.is_finite()
+        || clip_duration <= 0.0
+        || style.content.is_empty()
+    {
+        return None;
+    }
+    let clip_end = clip_start + clip_duration;
+    if !clip_end.is_finite() {
+        return None;
+    }
+
+    let mut events = Vec::new();
+    match mode {
+        MotionMode::None | MotionMode::Karaoke => return None,
+        MotionMode::Fade | MotionMode::Pop | MotionMode::Bounce | MotionMode::SlideUp => {
+            let span = style.motion.duration.min(clip_duration);
+            let frames = ((span * 30.0).ceil() as usize).clamp(2, 60);
+            for frame in 0..=frames {
+                let p = frame as f64 / frames as f64;
+                let ease_out = 1.0 - (1.0 - p).powi(3);
+                let (scale, offset_y, opacity) = match mode {
+                    MotionMode::Fade => (1.0, 0.0, ease_out),
+                    MotionMode::Pop => {
+                        let from = style.motion.scale_from;
+                        let scale = if from > 1.0 {
+                            from + (1.0 - from) * ease_out
+                        } else if p < 0.68 {
+                            let q = (p / 0.68).clamp(0.0, 1.0);
+                            from + (1.16 - from) * (1.0 - (1.0 - q).powi(3))
+                        } else {
+                            let q = ((p - 0.68) / 0.32).clamp(0.0, 1.0);
+                            1.16 + (1.0 - 1.16) * (1.0 - (1.0 - q).powi(3))
+                        };
+                        (scale, 0.0, (p * 3.0).min(1.0))
+                    }
+                    MotionMode::Bounce => {
+                        let (y, scale) = if p < 0.58 {
+                            let q = (p / 0.58).clamp(0.0, 1.0);
+                            (-0.065 + 0.078 * (1.0 - (1.0 - q).powi(3)), 0.88 + 0.17 * q)
+                        } else if p < 0.8 {
+                            let q = ((p - 0.58) / 0.22).clamp(0.0, 1.0);
+                            (0.013 - 0.021 * q, 1.05 - 0.04 * q)
+                        } else {
+                            let q = ((p - 0.8) / 0.2).clamp(0.0, 1.0);
+                            (-0.008 * (1.0 - q), 1.01 - 0.01 * q)
+                        };
+                        (scale, y, (p * 3.0).min(1.0))
+                    }
+                    MotionMode::SlideUp => (1.0, 0.075 * (1.0 - ease_out), ease_out),
+                    _ => unreachable!(),
+                };
+                events.push(MotionEvent {
+                    at: clip_start + span * p,
+                    text_end: style.content.len(),
+                    scale,
+                    offset_y,
+                    opacity,
+                });
+            }
+        }
+        MotionMode::Typewriter => {
+            let chars: Vec<(usize, usize)> = style
+                .content
+                .char_indices()
+                .map(|(start, ch)| (start, start + ch.len_utf8()))
+                .collect();
+            if chars.is_empty() {
+                return None;
+            }
+            let ranges = text_word_ranges(&style.content);
+            let word_count = ranges.len().max(1);
+            let requested = style.motion.duration
+                + style.motion.stagger * word_count.saturating_sub(1) as f64;
+            let fit = clip_duration.min(requested) / requested;
+            for (index, &(start, end)) in chars.iter().enumerate() {
+                let word_pauses = ranges
+                    .iter()
+                    .filter(|range| range.1 <= start)
+                    .count()
+                    .min(word_count.saturating_sub(1));
+                let at = clip_start
+                    + (style.motion.duration * (index + 1) as f64
+                        / chars.len().max(1) as f64
+                        + style.motion.stagger * word_pauses as f64)
+                        * fit;
+                events.push(MotionEvent {
+                    at,
+                    text_end: end,
+                    scale: 1.0,
+                    offset_y: 0.0,
+                    opacity: 1.0,
+                });
+            }
+            events.push(MotionEvent {
+                at: clip_start + requested * fit,
+                text_end: style.content.len(),
+                scale: 1.0,
+                offset_y: 0.0,
+                opacity: 1.0,
+            });
+        }
+        MotionMode::WordReveal => {
+            let timed = words?;
+            let located = locate_words(&style.content, timed);
+            let mut valid: Vec<(f64, usize, usize)> = timed
+                .iter()
+                .zip(located.iter())
+                .filter_map(|(word, range)| {
+                    let range = range.as_ref()?;
+                    (word.start.is_finite() && word.end.is_finite() && word.end > word.start)
+                        .then_some((word.start.max(clip_start), range.start, range.end))
+                })
+                .filter(|(start, _, _)| *start < clip_end)
+                .collect();
+            valid.sort_by(|a, b| a.0.total_cmp(&b.0));
+            if valid.is_empty() {
+                return None;
+            }
+            for (index, (at, _, word_end)) in valid.iter().copied().enumerate() {
+                let text_end = valid
+                    .get(index + 1)
+                    .map(|next| next.1)
+                    .unwrap_or(style.content.len())
+                    .max(word_end)
+                    .min(style.content.len());
+                events.push(MotionEvent {
+                    at: at.clamp(clip_start, clip_end),
+                    text_end,
+                    scale: 1.0,
+                    offset_y: 0.0,
+                    opacity: 1.0,
+                });
+            }
+        }
+    }
+
+    events.sort_by(|a, b| a.at.total_cmp(&b.at));
+    let mut collapsed: Vec<MotionEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        let event = MotionEvent {
+            at: event.at.clamp(clip_start, clip_end),
+            ..event
+        };
+        if let Some(previous) = collapsed.last_mut()
+            && (previous.at - event.at).abs() < 1e-9
+        {
+            *previous = event;
+        } else {
+            collapsed.push(event);
+        }
+    }
+    let slices: Vec<MotionSlice> = collapsed
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            let start = event.at.max(clip_start);
+            let end = collapsed
+                .get(index + 1)
+                .map_or(clip_end, |next| next.at)
+                .min(clip_end);
+            (end > start + 1e-4 && event.text_end > 0).then_some(MotionSlice {
+                start,
+                end,
+                text_end: event.text_end.min(style.content.len()),
+                scale: event.scale,
+                offset_y: event.offset_y,
+                opacity: event.opacity.clamp(0.0, 1.0),
+            })
+        })
+        .collect();
+    (!slices.is_empty()).then_some(slices)
+}
+
+/// Locate language-aware word units in the stored text for typewriter pauses.
+fn text_word_ranges(content: &str) -> Vec<(usize, usize)> {
+    let words: Vec<Word> = word_units(content)
+        .into_iter()
+        .map(|text| Word { text, start: 0.0, end: 0.0 })
+        .collect();
+    locate_words(content, &words)
+        .into_iter()
+        .flatten()
+        .map(|range| (range.start, range.end))
+        .collect()
+}
+
+/// Give untimed text a simple, language-aware word clock for Karaoke.
+fn synthetic_words(content: &str, start: f64, duration: f64) -> Vec<Word> {
+    let units = word_units(content);
+    if units.is_empty() || !start.is_finite() || !duration.is_finite() || duration <= 0.0 {
+        return Vec::new();
+    }
+    let span = duration / units.len() as f64;
+    units
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| Word {
+            text,
+            start: start + span * index as f64,
+            end: start + span * (index + 1) as f64,
+        })
+        .collect()
+}
+
 impl Titles {
     /// A painter that caches under the app's data directory.
     pub fn new(dirs: &AppDirs) -> Titles {
@@ -361,27 +600,103 @@ impl Titles {
                 offset: art.offset,
                 frame,
             };
-            // A word-timed caption's overlays come straight after it, so the
-            // one that is lit is drawn over the words it lights.
+            // Karaoke overlays sit directly over the base title. Timed captions
+            // use their stored word clock; ordinary titles get an even word clock.
             let overlays = match painting {
-                Painting::Title(style) if !style.highlight_color.is_empty() => {
-                    match clip.words.as_deref() {
-                        Some(words) => self.highlights(
+                Painting::Title(style)
+                    if style.motion.mode == concat_project::model::MotionMode::Karaoke
+                        || (!style.highlight_color.is_empty()
+                            && style.motion.mode == concat_project::model::MotionMode::None) =>
+                {
+                    let synthetic = if style.motion.mode == concat_project::model::MotionMode::Karaoke
+                        && clip.words.as_deref().is_none_or(|words| words.is_empty())
+                    {
+                        synthetic_words(&style.content, clip.start, clip.duration)
+                    } else {
+                        Vec::new()
+                    };
+                    let words = clip
+                        .words
+                        .as_deref()
+                        .filter(|words| !words.is_empty())
+                        .or_else(|| (!synthetic.is_empty()).then_some(synthetic.as_slice()));
+                    if let Some(words) = words {
+                        let karaoke_style = if style.motion.mode == concat_project::model::MotionMode::Karaoke
+                            && style.highlight_color.is_empty()
+                        {
+                            let mut style = style.clone();
+                            style.highlight_color = concat_project::model::DEFAULT_HIGHLIGHT.to_owned();
+                            Some(style)
+                        } else {
+                            None
+                        };
+                        self.highlights(
                             project,
                             &title,
-                            style,
+                            karaoke_style.as_ref().unwrap_or(style),
                             words,
                             width,
                             height,
                             live,
                             window.map(|(f, t, _)| (f, t)),
-                        ),
-                        None => Vec::new(),
+                        )
+                    } else {
+                        Vec::new()
                     }
                 }
                 _ => Vec::new(),
             };
-            out.push(title);
+            let animated = match painting {
+                Painting::Title(style) => {
+                    caption_motion_slices(style, clip.words.as_deref(), clip.start, clip.duration)
+                    .map(|slices| {
+                        slices
+                            .into_iter()
+                            .filter_map(|slice| {
+                                let mut partial = style.clone();
+                                partial.content = style.content.get(..slice.text_end)?.to_owned();
+                                let painting = Painting::Title(&partial);
+                                let painted = if live {
+                                    self.painted_live(project, painting, width, height)
+                                        .map(|(path, art, frame)| (path, art, Some(frame)))
+                                } else {
+                                    self.painted(project, painting, width, height)
+                                        .map(|(path, art)| (path, art, None))
+                                };
+                                let (path, art, frame) = match painted {
+                                    Ok(result) => result,
+                                    Err(error) => {
+                                        log::warn!("animated text {}: {error}", clip.id);
+                                        return None;
+                                    }
+                                };
+                                let mut animated = title.clone();
+                                animated.clip.path = path.to_string_lossy().into_owned();
+                                animated.clip.start = slice.start;
+                                animated.clip.duration = slice.end - slice.start;
+                                animated.clip.scale *= slice.scale;
+                                animated.clip.offset_y += slice.offset_y;
+                                animated.clip.opacity *= slice.opacity;
+                                let from =
+                                    (slice.start - clip.start) / clip.duration.max(f64::MIN_POSITIVE);
+                                let to = (slice.end - clip.start) / clip.duration.max(f64::MIN_POSITIVE);
+                                animated.clip.animation = window_animation(&title.clip.animation, from, to);
+                                animated.clip.reveal_map = Some(Arc::clone(&art.reveal));
+                                animated.block = art.block;
+                                animated.offset = art.offset;
+                                animated.frame = frame;
+                                Some(animated)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                }
+                _ => None,
+            };
+            if let Some(animated) = animated {
+                out.extend(animated);
+            } else {
+                out.push(title);
+            }
             out.extend(overlays);
         }
         out
@@ -815,15 +1130,16 @@ fn title_style(style: &TextStyle) -> TitleStyle {
         motion: concat_text::Motion {
             mode: match style.motion.mode {
                 concat_project::model::MotionMode::None => concat_text::MotionMode::None,
+                concat_project::model::MotionMode::Fade => concat_text::MotionMode::Fade,
                 concat_project::model::MotionMode::Pop => concat_text::MotionMode::Pop,
-                concat_project::model::MotionMode::WordReveal => {
-                    concat_text::MotionMode::WordReveal
-                }
-                concat_project::model::MotionMode::Typewriter => {
-                    concat_text::MotionMode::Typewriter
-                }
+                concat_project::model::MotionMode::Bounce => concat_text::MotionMode::Bounce,
+                concat_project::model::MotionMode::SlideUp => concat_text::MotionMode::SlideUp,
+                concat_project::model::MotionMode::WordReveal => concat_text::MotionMode::WordReveal,
+                concat_project::model::MotionMode::Typewriter => concat_text::MotionMode::Typewriter,
+                concat_project::model::MotionMode::Karaoke => concat_text::MotionMode::Karaoke,
             },
             duration: style.motion.duration,
+            stagger: style.motion.stagger,
             scale_from: style.motion.scale_from,
         },
         font_family: style.font_family.clone(),
@@ -873,6 +1189,95 @@ fn shape_style(style: &ShapeStyle) -> concat_text::ShapeStyle {
 mod tests {
     use super::*;
     use concat_project::{Command, Editor};
+
+    #[test]
+    fn word_reveal_emits_timed_prefixes_without_guessing_word_boundaries() {
+        let style = TextStyle {
+            content: "Halo dunia!".to_owned(),
+            motion: concat_project::model::CaptionMotion {
+                mode: concat_project::model::MotionMode::WordReveal,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let words = vec![
+            Word { text: "Halo".to_owned(), start: 0.2, end: 0.45 },
+            Word { text: "dunia!".to_owned(), start: 0.5, end: 0.9 },
+        ];
+        let slices = caption_motion_slices(&style, Some(&words), 0.0, 1.2).expect("timed captions");
+        assert_eq!(slices.len(), 2);
+        assert_eq!((slices[0].start, slices[0].end), (0.2, 0.5));
+        assert_eq!(&style.content[..slices[0].text_end], "Halo ");
+        assert_eq!(&style.content[..slices[1].text_end], "Halo dunia!");
+    }
+
+    #[test]
+    fn typewriter_reveals_unicode_character_boundaries_without_transcript_words() {
+        let style = TextStyle {
+            content: "Halo 世界".to_owned(),
+            motion: concat_project::model::CaptionMotion {
+                mode: concat_project::model::MotionMode::Typewriter,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let slices = caption_motion_slices(&style, None, 0.0, 1.0).expect("title entrance");
+        let prefixes: Vec<&str> = slices
+            .iter()
+            .map(|slice| &style.content[..slice.text_end])
+            .collect();
+        assert!(prefixes.contains(&"H"));
+        assert!(prefixes.contains(&"Halo 世"));
+        assert_eq!(prefixes.last(), Some(&"Halo 世界"));
+        assert!(slices.iter().all(|slice| slice.end > slice.start));
+    }
+
+    #[test]
+    fn pop_springs_from_the_configured_scale_and_settles_to_one() {
+        let style = TextStyle {
+            content: "Hello".to_owned(),
+            motion: concat_project::model::CaptionMotion {
+                mode: concat_project::model::MotionMode::Pop,
+                duration: 0.45,
+                stagger: 0.09,
+                scale_from: 0.35,
+            },
+            ..Default::default()
+        };
+        let slices = caption_motion_slices(&style, None, 0.0, 0.8).expect("text entrance");
+        assert_eq!(slices.first().map(|slice| slice.scale), Some(0.35));
+        assert_eq!(slices.last().map(|slice| slice.scale), Some(1.0));
+    }
+
+    #[test]
+    fn fade_bounce_and_slide_animate_any_text_clip() {
+        use concat_project::model::MotionMode;
+        for mode in [MotionMode::Fade, MotionMode::Bounce, MotionMode::SlideUp] {
+            let style = TextStyle {
+                content: "Make every word move.".to_owned(),
+                motion: concat_project::model::CaptionMotion {
+                    mode,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let slices = caption_motion_slices(&style, None, 1.0, 2.0)
+                .expect("untimed titles still animate");
+            assert!(slices.len() >= 5, "{mode:?} should have sampled frames");
+            assert_eq!(slices.first().map(|slice| slice.opacity), Some(0.0));
+            assert_eq!(slices.last().map(|slice| slice.opacity), Some(1.0));
+            assert_eq!(slices.first().map(|slice| slice.start), Some(1.0));
+        }
+    }
+
+    #[test]
+    fn karaoke_can_make_an_even_fallback_clock_for_untimed_titles() {
+        let words = synthetic_words("Make every word move.", 0.0, 3.2);
+        assert_eq!(words.len(), 4);
+        assert!((words[0].start - 0.0).abs() < 1e-9);
+        assert!((words[0].end - 0.8).abs() < 1e-9);
+        assert!((words[3].end - 3.2).abs() < 1e-9);
+    }
 
     fn scratch(name: &str) -> AppDirs {
         let dir =

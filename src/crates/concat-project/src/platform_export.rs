@@ -11,8 +11,11 @@
 pub enum PlatformPreset {
     /// Keep the timeline's frame; still mix to the shared loudness target.
     YouTube,
+    /// TikTok's short-form video destination.
     TikTok,
+    /// Instagram Reels' short-form video destination.
     Reels,
+    /// YouTube Shorts' short-form video destination.
     Shorts,
 }
 
@@ -26,10 +29,12 @@ impl PlatformPreset {
         PlatformPreset::Shorts,
     ];
 
+    /// Returns the preset at the sheet's row index, clamped to the last row.
     pub fn from_index(index: usize) -> Self {
         Self::ALL[index.min(Self::ALL.len() - 1)]
     }
 
+    /// Returns the stable lowercase identifier used in settings and exports.
     pub fn id(self) -> &'static str {
         match self {
             Self::YouTube => "youtube",
@@ -48,6 +53,8 @@ impl PlatformPreset {
         }
     }
 
+    /// Returns the destination's suggested frame rate, if it has one.
+    /// `None` means to keep the timeline's frame rate.
     pub fn frame_rate_hint(self) -> Option<(u32, u32)> {
         match self {
             Self::YouTube => None,

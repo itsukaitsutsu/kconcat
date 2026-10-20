@@ -70,6 +70,7 @@ pub(super) fn apply(
                     let id = mint.next("t");
                     timeline.tracks.push(crate::model::Track {
                         id: id.clone(),
+                        kind: crate::model::TrackKind::Video,
                         visible: true,
                         muted: false,
                         caption_nudge_ms: 0,

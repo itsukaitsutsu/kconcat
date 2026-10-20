@@ -62,15 +62,23 @@ pub enum Align {
 /// [`TitleStyle`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MotionMode {
-    /// On screen from the start; only the highlight moves.
+    /// No entrance effect.
     #[default]
     None,
-    /// Each word scales in at its spoken time.
+    /// Text fades up at the clip's start.
+    Fade,
+    /// Text springs in from a smaller scale.
     Pop,
-    /// Each word appears at its spoken time and stays.
+    /// Text drops into place with an overshoot.
+    Bounce,
+    /// Text rises while fading in.
+    SlideUp,
+    /// Legacy timed-word reveal.
     WordReveal,
-    /// Each word's letters appear one by one across its spoken time.
+    /// Reveal one Unicode character at a time.
     Typewriter,
+    /// Word-synced accent highlighting.
+    Karaoke,
 }
 
 /// The way-in's dials, in the painter's terms; the defaults are the
@@ -79,9 +87,11 @@ pub enum MotionMode {
 pub struct Motion {
     /// Which way in.
     pub mode: MotionMode,
-    /// Seconds per word for pop and word-reveal.
+    /// Seconds for the entrance.
     pub duration: f64,
-    /// Pop only: the starting scale of each word.
+    /// Delay between successive word entrances.
+    pub stagger: f64,
+    /// Pop only: the starting scale.
     pub scale_from: f64,
 }
 
@@ -89,8 +99,9 @@ impl Default for Motion {
     fn default() -> Self {
         Motion {
             mode: MotionMode::None,
-            duration: 0.18,
-            scale_from: 1.15,
+            duration: 0.45,
+            stagger: 0.09,
+            scale_from: 0.35,
         }
     }
 }
@@ -1966,12 +1977,14 @@ mod tests {
         use super::{Motion, MotionMode};
         let plain = style("words");
         assert_eq!(plain.motion.mode, MotionMode::None);
-        assert!((plain.motion.duration - 0.18).abs() < 1e-9);
-        assert!((plain.motion.scale_from - 1.15).abs() < 1e-9);
+        assert!((plain.motion.duration - 0.45).abs() < 1e-9);
+        assert!((plain.motion.stagger - 0.09).abs() < 1e-9);
+        assert!((plain.motion.scale_from - 0.35).abs() < 1e-9);
         let popped = TitleStyle {
             motion: Motion {
                 mode: MotionMode::Pop,
                 duration: 0.25,
+                stagger: 0.09,
                 scale_from: 1.3,
             },
             ..style("words")

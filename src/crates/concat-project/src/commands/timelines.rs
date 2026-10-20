@@ -27,11 +27,7 @@ pub(super) fn apply(
             let tracks = (1..=4)
                 .map(|_| Track {
                     id: mint.next("t"),
-                    visible: true,
-                    muted: false,
-                    caption_nudge_ms: 0,
-                    speaker: None,
-                    extra: Default::default(),
+                    ..Track::default()
                 })
                 .collect();
             // Born at the frame of the timeline you were looking at: the

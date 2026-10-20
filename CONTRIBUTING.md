@@ -1,12 +1,26 @@
-# Contributing to kconcat
+# Contributing to Concat
 
-This is a development fork of [Concat](https://github.com/jub0t/Concat). Open fork-specific issues and pull requests in [itsukaitsutsu/kconcat](https://github.com/itsukaitsutsu/kconcat), not in upstream support channels. Discuss changes beyond small fixes before starting substantial work.
+Thanks for being here. Concat is a video editor that runs entirely on the
+user's machine, and it gets better mostly through people using it hard and
+reporting what broke.
 
-## Reports and support boundaries
+## The most valuable thing you can do
 
-Include the exact commit/build, operating system, reproduction steps, expected result, actual result, and relevant sanitized logs. Use minimal synthetic media where possible; do not upload private projects, credentials, personal data, or order/payment details publicly. Report vulnerabilities using [SECURITY.md](SECURITY.md).
+Grab a build from the [Releases](https://github.com/jub0t/Concat/releases) page
+and edit a real video with it. Real footage finds what no reading of the
+source does. A good bug report — what you did, what happened, your
+OS, the media you used — is worth more than most patches.
 
-Community participation is voluntary. Reporting a bug does not guarantee a fix, update, review deadline, or ongoing maintenance. Any paid installation assistance must be defined by a completed order agreement; the [customer agreement pack](makethisforagreementuser/agreementREADME.md) is still a draft. Mandatory legal rights and express service promises remain unaffected.
+Longer-form discussion lives in
+[the contribution discussion](https://github.com/jub0t/Concat/discussions/3)
+and on [Discord](https://discord.gg/DVuPfpXfqP).
+
+## Before you write code
+
+Open an issue or drop into Discord first for anything beyond a small fix. Large
+areas are already in progress or intentionally deferred, and it is genuinely
+no fun to review a big PR that has to be turned down for reasons that were
+invisible from outside.
 
 ## Setting up
 
@@ -61,30 +75,49 @@ around you; the engine avoids cleverness on purpose.
 
 ## Licensing your contribution
 
-The workspace declares **AGPL-3.0-or-later**, with the existing [plugin exception](LICENSE-EXCEPTIONS.md). See the full [LICENSE](LICENSE). Submit only work you have the right to contribute under applicable project terms. Preserve copyright and license notices and document the origin, version, and license of imported code, models, fonts, codecs, and assets. Resolve missing or incompatible permissions before merging or distributing them.
+Concat is **AGPL-3.0-or-later** ([`LICENSE`](LICENSE)), with a plugin exception
+so that Concat API plugins can carry their own licence
+([`LICENSE-EXCEPTIONS.md`](LICENSE-EXCEPTIONS.md)).
 
-The existing [CLA.md](CLA.md) identifies the upstream Concat project and its maintainers as its beneficiary. It is retained as upstream documentation, not silently rewritten as an agreement with this fork. For upstream submissions, follow upstream's current CLA/sign-off requirements. Fork maintainers must clarify any separate contributor agreement before requesting consent; the customer package agreements are not a contributor CLA.
+Contributions are accepted under the CLA in [`CLA.md`](CLA.md). **You keep the
+copyright in your work** — the CLA is a licence, not an assignment. It exists so
+that copyright in Concat stays centralised, which is what makes the AGPL
+enforceable against companies that take the code without honouring it.
 
-Preserve the source file's applicable SPDX identifier and copyright notices. For new files licensed under the workspace's AGPL-3.0-or-later terms, use:
+Sign off your commits to indicate agreement:
+
+```sh
+git commit -s -m "your message"
+```
+
+Typo and documentation fixes do not need a sign-off.
+
+### File headers
+
+Every source file starts with:
 
 ```rust
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: YEAR ACTUAL COPYRIGHT HOLDER
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 ```
 
-Replace the example year and holder accurately. Do not remove existing attribution or claim another author's work as your own.
+Keep your own copyright line if you want one — add it, don't replace what's
+there.
 
-## Release and documentation contributions
+### Third-party code
 
-- Identify the exact build/commit and complete Corresponding Source for every distributed AGPL binary. Provide compliant source access before distributing it, with the source link beside download/purchase access.
-- Keep the full license, change notices, copyright notices, and [third-party notices](THIRD_PARTY_NOTICES.md) with releases. Check commercial redistribution rights for every bundled component.
-- Do not add store, payment, support, or plugin terms that restrict AGPL rights or relabel covered modifications as proprietary software.
-- Record tested systems and known issues honestly. Do not describe historical test results as current validation.
-- For privacy-related changes, document actual network requests, media uploads, model downloads, diagnostics, vendors, retention, and deletion behavior. Do not claim “fully offline” or “no data collected” without verification.
-- Keep legal templates visibly marked as drafts until placeholders are completed and reviewed by Indonesian counsel; prepare aligned Bahasa Indonesia documents where required.
+If your patch brings in code you did not write, say so in the PR: what it is,
+where it came from, and its licence. Anything incompatible with
+AGPL-3.0-or-later cannot be merged, and licence problems are much cheaper to
+catch before a merge than after a release.
 
-## Trademarks and conduct
+## Trademarks
 
-Use your own product identity and icon for modified distributions unless permission has been obtained; see the upstream [trademark policy](TRADEMARK.md). Do not imply upstream endorses or supports this fork.
+The code is free to fork. The Concat name and logo are not covered by the AGPL
+grant — see [`TRADEMARK.md`](TRADEMARK.md). Forks are welcome; please ship them
+under your own name.
 
-The [Code of Conduct](CODE_OF_CONDUCT.md) applies to this fork's community spaces. Community moderation does not remove recipients' software-license rights.
+## Conduct
+
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) applies to the repo, the Discussions
+and Discord.
