@@ -1,1 +1,0 @@
-/LuaRTTI.MarkGen.lua,/mesh/Quad.mesh,/content.json,/lua-meta.json,/js-meta.json,/algorithmConfig.json,/sticker.config,/anim.prefab,/config.json,/xshader/quad.vert,/xshader/noface.xshader,/xshader/quad.frag,/rt/outputTex.rt,/extra.json,/lua/TextSelector.lua,/lua/AnimScript.lua,/lua/Util.lua,/lua/AETools.lua,/main.scene,/material/noface.material
