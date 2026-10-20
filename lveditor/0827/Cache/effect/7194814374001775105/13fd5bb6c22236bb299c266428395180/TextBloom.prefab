@@ -1,0 +1,32 @@
+%YAML 1.1
+--- !Prefab &1
+name: ""
+guid: {a: 15514632198786511925, b: 7091480373924111513}
+entities:
+  - __class: Entity
+    name: TextBloom
+    guid: {a: 3117915339531659649, b: 1085613616789733565}
+    selfvisible: true
+    components:
+      - {localId: 2}
+      - __class: ScriptComponent
+        name: ""
+        guid: {a: 3983387761965200953, b: 4038885013220570039}
+        enabled: true
+        path: TextBloom.lua
+        properties:
+          __class: Map
+        className: TextBloom
+    layer: 0
+standaloneResources:
+  __class: Map
+--- !Transform &2
+name: ""
+guid: {a: 11549685790117200635, b: 1208607318985703096}
+enabled: true
+localPosition: {x: 0, y: 0, z: -10}
+localScale: {x: 1, y: 1, z: 1}
+localOrientation: {w: 1, x: 0, y: 0, z: 0}
+mobility:
+  __class: Mobility
+  value: Dynamic

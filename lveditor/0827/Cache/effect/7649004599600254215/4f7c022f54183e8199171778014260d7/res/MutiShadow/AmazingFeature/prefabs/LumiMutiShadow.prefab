@@ -1,0 +1,153 @@
+%YAML 1.1
+--- !Prefab &1
+name: !<str> ""
+guid: {a: 2685503030401441126, b: 17933242067502602126}
+entities:
+  - __class: Entity
+    name: !<str> LumiMutiShadow
+    guid: {a: 11190236933879900497, b: 15989020966931224237}
+    selfvisible: true
+    components:
+      - {localId: 11}
+      - __class: ScriptComponent
+        name: !<str> ""
+        guid: {a: 15874080334945559345, b: 11319902522955381928}
+        enabled: true
+        path: !<str> effects/LumiMutiShadow/lua/LumiMutiShadow.lua
+        properties:
+          __class: Map
+          InputTex: {localId: 1, path: share://input.texture}
+          OutputTex: {localId: 1, path: rt/outputTex.rt}
+          __scriptfile: !<str> effects/LumiMutiShadow/lua/LumiMutiShadow.lua
+          __scriptname: !<str> lua::LumiMutiShadow
+          alpha_1: 1
+          alpha_5: 1
+          color_1: {r: 1, g: 0.8, b: 0.8, a: 1}
+          color_2: {r: 1, g: 0.6, b: 0.6, a: 1}
+          color_3: {r: 1, g: 0.4, b: 0.4, a: 1}
+          color_4: {r: 1, g: 0.3505989, b: 0.3505989, a: 1}
+          color_5: {r: 0.9922227, g: 0.235979, b: 0.235979, a: 1}
+          color_6: {r: 1, g: 0.1950537, b: 0.1950537, a: 1}
+          color_7: {r: 0.9883341, g: 0.1120697, b: 0.1120697, a: 1}
+          curTime: 3.041055999929085
+          endTime: 6
+          isAssociation: true
+          layerNum: 8
+          oriColor: {r: 1, g: 0.99999, b: 0.99999, a: 1}
+          oriPositionX: 0
+          oriPositionY: 0
+          oriRotation: 0
+          oriScaleX: 1
+          scale_1: 1.100000023841858
+          scale_2: 1.200000047683716
+          scale_3: 1.299999952316284
+          scale_4: 1.399999976158142
+          scale_5: 1.5
+          scale_6: 1.600000023841858
+          scale_7: 1.700000047683716
+          scale_8: 1.799999952316284
+          startTime: 0
+          tintColor: {r: 1, g: 0, b: 0, a: 1}
+        className: !<str> LumiMutiShadow
+    layer: 0
+  - __class: Entity
+    name: !<str> BlitCamera
+    guid: {a: 15946173778267891021, b: 9692844678705765521}
+    selfvisible: true
+    components:
+      - {localId: 12}
+      - __class: Camera
+        name: !<str> ""
+        guid: {a: 11910286100981965100, b: 2809612242821149626}
+        enabled: true
+        layerVisibleMask: {__class: DynamicBitset, numBits: 2, values: [2]}
+        renderOrder: 1
+        type:
+          __class: CameraType
+          value: ORTHO
+        clearColor: {r: 0, g: 0, b: 0, a: 0}
+        clearType:
+          __class: CameraClearType
+          value: COLOR
+        alwaysClear: false
+        viewport: {x: 0, y: 0, w: 1, h: 1}
+        fovy: 60
+        fovType:
+          __class: CameraFovType
+          value: CUSTOM
+        orthoScale: 1
+        fitMode:
+          __class: CameraFitMode
+          value: NONE
+        zNear: 0.1000000014901161
+        zFar: 1000
+        renderTexture: {localId: 1, path: rt/outputTex.rt}
+        isRootCamera: false
+        sortMethod:
+          __class: CameraSortMethod
+          value: SORT_ORDER_AND_RENDERQUEUES
+        rtBackupMode:
+          __class: CameraRTBackupMode
+          value: NEVER
+    layer: 0
+  - __class: Entity
+    name: !<str> BlitPass
+    guid: {a: 16449511320986339680, b: 5421009852721465995}
+    selfvisible: true
+    components:
+      - {localId: 13}
+      - __class: MeshRenderer
+        name: !<str> ""
+        guid: {a: 1462394466547215721, b: 11695012818128889489}
+        enabled: true
+        sharedMaterials:
+          - {localId: 1, path: effects/LumiMutiShadow/material/blit.material}
+        sortingOrder: 0
+        autoSortingOrder: true
+        useFrustumCulling: true
+        receiveShadow: true
+        lightProbeBlendMode:
+          __class: LightProbeBlendMode
+          value: OFF
+        entirePingPong: false
+        mesh: {localId: 1, path: effects/LumiMutiShadow/mesh/Quad.mesh}
+        castShadow: false
+    layer: 1
+standaloneResources:
+  __class: Map
+--- !Transform &11
+name: !<str> ""
+guid: {a: 7729437519709374453, b: 17929635050757971874}
+enabled: true
+localPosition: {x: 0, y: 0, z: 0}
+localScale: {x: 1, y: 1, z: 1}
+localOrientation: {w: 1, x: 0, y: 0, z: 0}
+children:
+  - {localId: 12}
+mobility:
+  __class: Mobility
+  value: Dynamic
+--- !Transform &12
+name: !<str> ""
+guid: {a: 3335341648373037113, b: 6833055879692405122}
+enabled: true
+localPosition: {x: 0, y: 0, z: 0}
+localScale: {x: 1, y: 1, z: 1}
+localOrientation: {w: 1, x: 0, y: 0, z: 0}
+parent: {localId: 11}
+children:
+  - {localId: 13}
+mobility:
+  __class: Mobility
+  value: Dynamic
+--- !Transform &13
+name: !<str> ""
+guid: {a: 10398679602600751799, b: 13620024598642433167}
+enabled: true
+localPosition: {x: 0, y: 0, z: -10}
+localScale: {x: 1, y: 1, z: 1}
+localOrientation: {w: 1, x: 0, y: 0, z: 0}
+parent: {localId: 12}
+mobility:
+  __class: Mobility
+  value: Dynamic

@@ -1,0 +1,251 @@
+[
+    {
+        "ClassName": "TextSticker",
+        "Super": "ScriptComponent",
+        "FilePath": "TextSticker.lua",
+        "FileAbsPath": "/Users/likira/Desktop/Project/\u9700\u6c42/2025.4/\u6587\u5b57\u52a8\u753b/\u5165\u573a\u52a8\u753b-\u661f\u661f\u7c92\u5b50/\u8fdb\u884c\u4e2d/\u661f\u661f\u7c92\u5b50/TextSticker.lua",
+        "Properties": [
+            {
+                "VarName": "duration",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "progress",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "autoPlay",
+                "VarType": "Bool",
+                "Comment": ""
+            }
+        ],
+        "Methods": [
+            {
+                "FuncName": "getRootDir",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "loadAsset",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "setTextBloomState",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "_moduleCall",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "getModule",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "stickerRegistingModules",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "_registerModule",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "registingModule",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "getAEData",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "_call",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "getOriLetters",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onSetProperty",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "beforeTextSystemUpdate",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "afterTextSystemUpdate",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "new",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onStart",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onEnter",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onUpdate",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "seek",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "_reset",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "setDuration",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "clear",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onLeave",
+                "Params": [],
+                "Comment": ""
+            }
+        ],
+        "Comment": "",
+        "ExportFiles": []
+    },
+    {
+        "ClassName": "TextAnim",
+        "Super": "ScriptComponent",
+        "FilePath": "TextAnim.lua",
+        "FileAbsPath": "/Users/likira/Desktop/Project/\u9700\u6c42/2025.4/\u6587\u5b57\u52a8\u753b/\u5165\u573a\u52a8\u753b-\u661f\u661f\u7c92\u5b50/\u8fdb\u884c\u4e2d/\u661f\u661f\u7c92\u5b50/TextAnim.lua",
+        "Properties": [
+            {
+                "VarName": "autoPlay",
+                "VarType": "Bool",
+                "Comment": ""
+            },
+            {
+                "VarName": "duration",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "curTime",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "progress",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "Methods": [
+            {
+                "FuncName": "new",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "textNew",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "setDeepGlowParams",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "textStart",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "textInit",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "textSeek",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "textReset",
+                "Params": [],
+                "Comment": ""
+            }
+        ],
+        "Comment": "",
+        "ExportFiles": []
+    }
+]

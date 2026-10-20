@@ -1,0 +1,1345 @@
+%YAML 1.1
+--- !XShader &1
+name: !<str> Glow
+renderQueue: 3090
+passes:
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 20}
+        - {localId: 21}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_1.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 3}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 4}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_2.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 5}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 6}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_3.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 7}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 8}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_4.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 9}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 10}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_5.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 11}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 12}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_6.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 13}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 14}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_7.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 15}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 16}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_8.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 17}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_0.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 18}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/BlurRT_9.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+  - __class: Pass
+    name: !<str> ""
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 2}
+        - {localId: 19}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_texcoord0:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: !<str> ""
+      depthstencil:
+        __class: DepthStencilState
+        name: !<str> ""
+        depthTestEnable: false
+        depthTestEnableName: !<str> ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: !<str> ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: !<str> ""
+      colorBlend:
+        __class: ColorBlendState
+        name: !<str> ""
+        blendConstants: {x: 0, y: 0, z: 0, w: 0}
+        blendEnableName: !<str> ""
+        blendFactorName: !<str> ""
+        blendOpName: !<str> ""
+        attachments:
+          - __class: ColorBlendAttachmentState
+            name: !<str> ""
+            blendEnable: true
+            srcColorBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstColorBlendFactor:
+              __class: BlendFactor
+              value: ONE_MINUS_SRC_ALPHA
+            srcAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE_MINUS_SRC_ALPHA
+            colorWriteMask: 15
+            ColorBlendOp:
+              __class: BlendOp
+              value: ADD
+            AlphaBlendOp:
+              __class: BlendOp
+              value: ADD
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    enableFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+    clearMoment:
+      __class: PassClearMoment
+      value: CLEAR_BEFORE_RENDERING
+    instanceCount: 0
+    auslSourcePath: !<str> ""
+
+
+--- !Shader &2
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: !<str> xshader/GlowGaussianBlur.vert
+--- !Shader &3
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX1_New.frag
+--- !Shader &4
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY1_New.frag
+--- !Shader &5
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX2_New.frag
+--- !Shader &6
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY2_New.frag
+--- !Shader &7
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX3_New.frag
+--- !Shader &8
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY3_New.frag
+--- !Shader &9
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX4_New.frag
+--- !Shader &10
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY4_New.frag
+--- !Shader &11
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX5_New.frag
+--- !Shader &12
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY5_New.frag
+--- !Shader &13
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX6_New.frag
+--- !Shader &14
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY6_New.frag
+--- !Shader &15
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX7_New.frag
+--- !Shader &16
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY7_New.frag
+--- !Shader &17
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurX8_New.frag
+--- !Shader &18
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/GlowGaussianBlurY8_New.frag
+--- !Shader &19
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/Blend.frag
+--- !Shader &20
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: !<str> xshader/quad.vert
+--- !Shader &21
+name: !<str> ""
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: !<str> xshader/quad.frag
+

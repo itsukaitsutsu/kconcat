@@ -1,0 +1,71 @@
+%YAML 1.1
+--- !Material &1
+name: !<str> noFilter_material
+xshader: {localId: 1, path: xshader/noface.xshader}
+properties:
+  __class: PropertySheet
+  name: !<str> ""
+  floatmap:
+    __class: Map
+    u_AngleX: 0
+    u_AngleY: 90
+    u_gamma: 2.2
+    u_GlowIntensity: 0.8
+    u_radius: 375
+
+    u_Strength1: 6.25
+    u_Strength2: 12.5
+    u_Strength3: 9.375
+    u_Strength4: 7.812
+    u_Strength5: 4
+    u_Strength6: 4
+    u_Strength7: 4
+    u_Strength8: 4
+
+    u_DownSample1: 1
+    u_DownSample2: 1
+    u_DownSample3: 2
+    u_DownSample4: 4
+    u_DownSample5: 15.625
+    u_DownSample6: 31.25
+    u_DownSample7: 62.5
+    u_DownSample8: 125
+  vec4map:
+    __class: Map
+  vec3map:
+    __class: Map
+  vec2map:
+    __class: Map
+  mat4map:
+    __class: Map
+  texmap:
+    __class: Map
+    u_InputTex2: {localId: 1, path: rt/BlurRT_2.rt}
+    u_InputTex3: {localId: 1, path: rt/BlurRT_3.rt}
+    u_InputTex4: {localId: 1, path: rt/BlurRT_4.rt}
+    u_InputTex5: {localId: 1, path: rt/BlurRT_5.rt}
+    u_InputTex6: {localId: 1, path: rt/BlurRT_6.rt}
+    u_InputTex7: {localId: 1, path: rt/BlurRT_7.rt}
+    u_InputTex8: {localId: 1, path: rt/BlurRT_8.rt}
+
+    u_InputTexY: {localId: 1, path: rt/BlurRT_0.rt}
+
+    u_GlowBlurTex1: {localId: 1, path: rt/BlurRT_2.rt}
+    u_GlowBlurTex2: {localId: 1, path: rt/BlurRT_3.rt}
+    u_GlowBlurTex3: {localId: 1, path: rt/BlurRT_4.rt}
+    u_GlowBlurTex4: {localId: 1, path: rt/BlurRT_5.rt}
+    u_GlowBlurTex5: {localId: 1, path: rt/BlurRT_6.rt}
+    u_GlowBlurTex6: {localId: 1, path: rt/BlurRT_7.rt}
+    u_GlowBlurTex7: {localId: 1, path: rt/BlurRT_8.rt}
+    u_GlowBlurTex8: {localId: 1, path: rt/BlurRT_9.rt}
+  intmap:
+    __class: Map
+    u_blendType: 0
+renderQueue: 3090
+enabledMacros:
+  __class: Map
+  AE_AreaLightNum: !<str> 0
+  AE_DirLightNum: !<str> 0
+  AE_PointLightNum: !<str> 0
+  AE_SpotLightNum: !<str> 0
+mshaderPath: !<str> ""

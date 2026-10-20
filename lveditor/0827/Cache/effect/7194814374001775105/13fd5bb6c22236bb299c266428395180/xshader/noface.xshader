@@ -1,0 +1,438 @@
+%YAML 1.1
+--- !XShader &1
+name: noface/xshader
+guid: {a: 11547861380637330124, b: 2833353867046200757}
+renderQueue: 3090
+passes:
+  - __class: Pass
+    name: ""
+    guid: {a: 8739386302319325205, b: 5201906785890303670}
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 11}
+        - {localId: 3}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_Texcoord:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    renderTexture: {localId: 1, path: rt/NewScreenRT2.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: ""
+      guid: {a: 7154884736380779246, b: 7066768277991732926}
+      depthstencil:
+        __class: DepthStencilState
+        name: ""
+        guid: {a: 16306343409438678514, b: 14274925612288990857}
+        depthTestEnable: false
+        depthTestEnableName: ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: ""
+      colorBlend:
+        __class: ColorBlendState
+        name: ""
+        guid: {a: 14432550798525667675, b: 1236583784840956067}
+        blendConstants: {x: 0, y: 0, z: 0, w: 0}
+        blendEnableName: ""
+        blendFactorName: ""
+        blendOpName: ""
+        attachments:
+          - __class: ColorBlendAttachmentState
+            name: ""
+            guid: {a: 2255997013090187715, b: 17006772056084894365}
+            blendEnable: true
+            srcColorBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstColorBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            srcAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstAlphaBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            colorWriteMask: 15
+            ColorBlendOp:
+              __class: BlendOp
+              value: ADD
+            AlphaBlendOp:
+              __class: BlendOp
+              value: ADD
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+  - __class: Pass
+    name: ""
+    guid: {a: 15582499506483267926, b: 12886290829603265949}
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 7}
+        - {localId: 4}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_Texcoord:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+    renderTexture: {localId: 1, path: rt/NewScreenRT_2.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: ""
+      guid: {a: 16448308207486819474, b: 17846618631050549141}
+      depthstencil:
+        __class: DepthStencilState
+        name: ""
+        guid: {a: 6002624762602394290, b: 17346518344595304877}
+        depthTestEnable: false
+        depthTestEnableName: ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: ""
+      colorBlend:
+        __class: ColorBlendState
+        name: ""
+        guid: {a: 9890446034208788900, b: 11620921491643189162}
+        blendConstants: {x: 0, y: 0, z: 0, w: 0}
+        blendEnableName: ""
+        blendFactorName: ""
+        blendOpName: ""
+        attachments:
+          - __class: ColorBlendAttachmentState
+            name: ""
+            guid: {a: 8017822624450392240, b: 317172855017479303}
+            blendEnable: true
+            srcColorBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstColorBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            srcAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstAlphaBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            colorWriteMask: 15
+            ColorBlendOp:
+              __class: BlendOp
+              value: ADD
+            AlphaBlendOp:
+              __class: BlendOp
+              value: ADD
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+  - __class: Pass
+    name: ""
+    guid: {a: 7010335074297181494, b: 8780102326689347734}
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 8}
+        - {localId: 5}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_Texcoord:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+    renderTexture: {localId: 1, path: rt/NewScreenRT_3.rt}
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: ""
+      guid: {a: 6218143325497830830, b: 3017913460575276678}
+      depthstencil:
+        __class: DepthStencilState
+        name: ""
+        guid: {a: 2469009360870815182, b: 10684795887023782289}
+        depthTestEnable: false
+        depthTestEnableName: ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: ""
+      colorBlend:
+        __class: ColorBlendState
+        name: ""
+        guid: {a: 10397309246106635230, b: 6161875060400146617}
+        blendConstants: {x: 0, y: 0, z: 0, w: 0}
+        blendEnableName: ""
+        blendFactorName: ""
+        blendOpName: ""
+        attachments:
+          - __class: ColorBlendAttachmentState
+            name: ""
+            guid: {a: 13998718660613103606, b: 18296152833912817807}
+            blendEnable: true
+            srcColorBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstColorBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            srcAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstAlphaBlendFactor:
+              __class: BlendFactor
+              value: ZERO
+            colorWriteMask: 15
+            ColorBlendOp:
+              __class: BlendOp
+              value: ADD
+            AlphaBlendOp:
+              __class: BlendOp
+              value: ADD
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+
+  - __class: Pass
+    name: ""
+    guid: {a: 1535278229312893603, b: 12770530472805597575}
+    shaders:
+      __class: Map
+      gles2:
+        - {localId: 9}
+        - {localId: 6}
+    angleBinaryPrograms:
+      __class: Map
+    semantics:
+      __class: Map
+      a_position:
+        __class: VertexAttribType
+        value: POSITION
+      a_Texcoord:
+        __class: VertexAttribType
+        value: USER_DEFINE1
+      a_color:
+        __class: VertexAttribType
+        value: COLOR
+      a_bloomPara:
+        __class: VertexAttribType
+        value: COLOR1
+      a_bloomPara2:
+        __class: VertexAttribType
+        value: COLOR2
+    clearColor: {r: 0, g: 0, b: 0, a: 0}
+    clearDepth: 1
+    clearType:
+      __class: CameraClearType
+      value: COLOR
+    renderState:
+      __class: RenderState
+      name: ""
+      guid: {a: 2183362131897726840, b: 17516299311953859739}
+      depthstencil:
+        __class: DepthStencilState
+        name: ""
+        guid: {a: 4415078142074114491, b: 3738572557958984127}
+        depthTestEnable: false
+        depthTestEnableName: ""
+        depthCompareOp:
+          __class: CompareOp
+          value: LESS
+        depthCompareOpName: ""
+        depthWriteEnable: false
+        stencilTestEnable: false
+        stencilTestEnableName: ""
+      colorBlend:
+        __class: ColorBlendState
+        name: ""
+        guid: {a: 3117342939621709663, b: 114267914774226602}
+        blendConstants: {x: 0, y: 0, z: 0, w: 0}
+        blendEnableName: ""
+        blendFactorName: ""
+        blendOpName: ""
+        attachments:
+          - __class: ColorBlendAttachmentState
+            name: ""
+            guid: {a: 6721193519141698521, b: 4214022832392807304}
+            blendEnable: true
+            srcColorBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstColorBlendFactor:
+              __class: BlendFactor
+              value: ONE_MINUS_SRC_ALPHA
+            srcAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE
+            dstAlphaBlendFactor:
+              __class: BlendFactor
+              value: ONE_MINUS_SRC_ALPHA
+            colorWriteMask: 15
+            ColorBlendOp:
+              __class: BlendOp
+              value: ADD
+            AlphaBlendOp:
+              __class: BlendOp
+              value: ADD
+    useFBOTexture: false
+    useCameraRT: false
+    useFBOFetch: false
+    isFullScreenShading: false
+    macrosMap:
+      __class: Map
+    preprocess: false
+    passType:
+      __class: PassType
+      value: NORMAL
+    lightMode:
+      __class: LightMode
+      value: NONE
+
+--- !Shader &2
+name: ""
+guid: {a: 2469199483826877840, b: 3966285102541306258}
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: xshader/quad.vert
+--- !Shader &3
+name: ""
+guid: {a: 13493172465971070109, b: 4585988273550223776}
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: xshader/quad.frag
+--- !Shader &4
+name: ""
+guid: {a: 9676918254940822144, b: 6845668144377263019}
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: xshader/blurX.frag
+--- !Shader &5
+name: ""
+guid: {a: 8667279284786284728, b: 2950479040656296617}
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: xshader/blurY.frag
+--- !Shader &6
+name: ""
+guid: {a: 9749410142039900016, b: 10910369900518727336}
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: xshader/blend.frag
+--- !Shader &7
+name: ""
+guid: {a: 2469199483826877115, b: 3966285102541306116}
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: xshader/blurX.vert
+--- !Shader &8
+name: ""
+guid: {a: 2469199483826877113, b: 3966285102541306114}
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: xshader/blurY.vert
+--- !Shader &9
+name: ""
+guid: {a: 2469199483826877111, b: 3966285102541306112}
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: xshader/blend.vert
+--- !Shader &10
+name: ""
+guid: {a: 13493172465971070109, b: 4585988273550223776}
+type:
+  __class: ShaderType
+  value: FRAGMENT
+sourcePath: xshader/quad1.frag
+--- !Shader &11
+name: ""
+type:
+  __class: ShaderType
+  value: VERTEX
+sourcePath: xshader/quad1.vert

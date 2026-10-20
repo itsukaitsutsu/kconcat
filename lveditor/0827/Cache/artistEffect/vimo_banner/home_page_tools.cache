@@ -1,0 +1,120 @@
+[
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/ai_generate_video?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature%22%3A%22ai_generate_video%22%2C%22feature_context%22%3A%7B%22material_import%22%3Afalse%7D%2C%22enter_from%22%3A%22homepage_tool%22%2C%22extension%22%3A%7B%7D%7D",
+            "description": "Set ideas into motion",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/d2b4ac44e9ed41c989364fa41b4536a7~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/96eb6e431f014f7380be888d742e0c79~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "AI video now powered by Seedance 2.5",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/6abaf7edb98448fcbfd2d5810c71f747~tplv-9w50xwpexm-custom:0.webp",
+            "key": "ai_generate_video",
+            "report_name": "ai video",
+            "title": "AI video"
+        },
+        "name": "【PC首页小工具区】AI VIDEO-非us-8.12",
+        "plan_id": 10775
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/ai_generate_image?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature%22%3A%22ai_generate_image%22%2C%22feature_context%22%3A%7B%22material_import%22%3Afalse%7D%2C%22enter_from%22%3A%22browser%22%2C%22extension%22%3A%7B%7D%7D",
+            "description": "Turn ideas into imagery",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/898ecde15c6e4132a24462fbf291085d~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/f5789ee7bf5c49f4a06aff8eb35df0ac~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "Create in any style with GPT Image 2",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/2642343501824b99905eaf3aae606f9c~tplv-9w50xwpexm-custom:0.webp",
+            "key": "ai_generate_image",
+            "report_name": "ai image",
+            "title": "AI image"
+        },
+        "name": "【PC首页小工具区】AI image-非中积分覆盖国7.29",
+        "plan_id": 9548
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/genai_video_expand?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22feature%22%3A%22genai_video_expand%22%2C%22enter_from%22%3A%22deeplink%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature_context%22%3A%7B%22material_import%22%3Atrue%2C%22material_uri%22%3A%22LOCAL_REFER_RESOURCE%22%7D%7D",
+            "description": "Seamlessly extend any clip",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/a951bf63469c4c99ae621cdc934b8ec7~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/17ea21d39ff24a9fa45484631f8adcb9~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "Drag either end out, describe what's next",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/2c135048c5cd4c6ea3119518ed9ac2ce~tplv-9w50xwpexm-custom:0.webp",
+            "key": "ai_extend",
+            "report_name": "ai extend",
+            "title": "Extend video"
+        },
+        "name": "【PC首页小工具区】AI extend-非中积分覆盖国7.29",
+        "plan_id": 9616
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/genai_smart_edit?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22feature%22%3A%22genai_smart_edit%22%2C%22enter_from%22%3A%22deeplink%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature_context%22%3A%7B%22material_import%22%3Atrue%2C%22material_uri%22%3A%22LOCAL_REFER_RESOURCE%22%7D%7D",
+            "description": "Edit clips by describing it",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/b3f31c027c08492986bfd6f1bc4ffe82~tplv-9w50xwpexm-custom:0.webp",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/5202e89fd0c445b38b55d8414fbda62b~tplv-9w50xwpexm-custom:0.webp",
+            "key": "ai_edit",
+            "report_name": "ai edit",
+            "title": "AI edit"
+        },
+        "name": "【PC首页小工具区】AI edit-非中积分覆盖国7.31",
+        "plan_id": 9664
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/video_quality_enhancement?featureEntry= %7B%22sence%22%3A%22editor%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature%22%3A%22video_quality_enhancement%22%2C%22feature_context%22%3A%7B%22material_import%22%3Atrue%2C%22material_select_by_user%22%3Atrue%2C%22material_select_type%22%3A%22image%22%2C%22material_panel_id%22%3A%22insert%22%7D%2C%22enter_from%22%3A%22browser%22%2C%22extension%22%3A%7B%7D%7D",
+            "description": "Get sharper results instantly",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/141af9ae09b743979f7849b77dc45b20~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/89e14305c5dd4ce4b03ae86136007097~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "Personalized clarity, powered by smart AI",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/676d74690bd54d5686bec111f162b2f8~tplv-9w50xwpexm-custom:0.webp",
+            "key": "video_quality_enhancement",
+            "report_name": "enhance quaility",
+            "title": "Enhance quality"
+        },
+        "name": "【PC首页小工具区】超清画质-全球覆盖7.31",
+        "plan_id": 9631
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/video_inpainting_erase?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature%22%3A%22video_inpainting_erase%22%2C%22feature_context%22%3A%7B%22material_import%22%3Atrue%2C%22material_id%22%3A%227234722741117619461%22%2C%22material_panel_id%22%3A%22insert%22%7D%2C%22enter_from%22%3A%22browser%22%2C%22extension%22%3A%7B%7D%7D",
+            "description": "Remove anything unwanted",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/331881412749477fab3502f5cbe35423~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/87a1a01a1f6449d588e220f975a5d1fd~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "Brush over it, then tell AI what to remove",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/01b2bf56793a46b89a80b3f5bf0f12ad~tplv-9w50xwpexm-custom:0.webp",
+            "key": "video_inpainting_erase",
+            "report_name": "ai remove",
+            "title": "AI remove"
+        },
+        "name": "【PC首页小工具区】AI 消除-非中积分覆盖国7.29",
+        "plan_id": 9549
+    },
+    {
+        "activity_id": "",
+        "frequency_control": null,
+        "material": {
+            "corner_mark": "GPT Image 2.5",
+            "deep_link": "capcut://com.ies.videocut/uganchor/anchor_point/ai_generate_image?featureEntry=%7B%22sence%22%3A%22editor%22%2C%22sence_context%22%3A%7B%22new_draft%22%3Atrue%7D%2C%22feature%22%3A%22ai_generate_image%22%2C%22feature_context%22%3A%7B%22material_import%22%3Afalse%7D%2C%22enter_from%22%3A%22browser%22%2C%22extension%22%3A%7B%7D%7D",
+            "description": "Turn ideas into imagery",
+            "hover_icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/898ecde15c6e4132a24462fbf291085d~tplv-9w50xwpexm-custom:0.webp",
+            "hover_image": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/f5789ee7bf5c49f4a06aff8eb35df0ac~tplv-9w50xwpexm-custom:0.image",
+            "hover_text": "Create in any style with GPT Image 2",
+            "icon": "https://p16-capcut-sg.ibyteimg.com/tos-alisg-i-9w50xwpexm/2642343501824b99905eaf3aae606f9c~tplv-9w50xwpexm-custom:0.webp",
+            "key": "ai_generate_image",
+            "report_name": "ai image",
+            "title": "AI image"
+        },
+        "name": "【PC首页小工具区】AI image-非中积分覆盖国7.29",
+        "plan_id": 10774
+    }
+]

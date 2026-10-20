@@ -1,0 +1,777 @@
+[
+    {
+        "ClassName": "LumiManagerLite",
+        "Super": "ScriptComponent",
+        "FilePath": "lua/LumiFamily/LumiManagerLite.lua",
+        "FileAbsPath": "/Users/yozoray/Documents/\u9700\u6c42/\u63d2\u4ef6/MutiShadow-\u591a\u5c42\u9634\u5f71/MutiShadow/AmazingFeature/lua/LumiFamily/LumiManagerLite.lua",
+        "Properties": [
+            {
+                "VarName": "lumiEffectRoot",
+                "VarType": "Transform",
+                "Comment": ""
+            },
+            {
+                "VarName": "start_render_layer",
+                "VarType": "Int64",
+                "Comment": ""
+            },
+            {
+                "VarName": "start_render_order",
+                "VarType": "Int64",
+                "Comment": ""
+            },
+            {
+                "VarName": "InputTex",
+                "VarType": "Texture",
+                "Comment": ""
+            },
+            {
+                "VarName": "OutputTex",
+                "VarType": "Texture",
+                "Comment": ""
+            },
+            {
+                "VarName": "PingPongTex",
+                "VarType": "Texture",
+                "Comment": ""
+            }
+        ],
+        "Methods": [
+            {
+                "FuncName": "new",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onStart",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onDestroy",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "getCameraCount",
+                "Params": [],
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Button",
+                                "RawValue": "",
+                                "Values": [
+                                    "ReRender"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "FuncName": "ReRender",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "registerLumiObj",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "updateCameraLayerAndOrder",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "updateRtPingpong",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onUpdate",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onEvent",
+                "Params": [],
+                "Comment": ""
+            }
+        ],
+        "Comment": "",
+        "ExportFiles": []
+    },
+    {
+        "ClassName": "LumiMutiShadow",
+        "Super": "ScriptComponent",
+        "FilePath": "effects/LumiMutiShadow/lua/LumiMutiShadow.lua",
+        "FileAbsPath": "/Users/yozoray/Documents/\u9700\u6c42/\u63d2\u4ef6/MutiShadow-\u591a\u5c42\u9634\u5f71/MutiShadow/AmazingFeature/effects/LumiMutiShadow/lua/LumiMutiShadow.lua",
+        "Properties": [
+            {
+                "VarName": "oriRotation",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriPositionX",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriPositionY",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriPivotX",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriPivotY",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriScaleX",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriScaleY",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "unifiedScale",
+                "VarType": "Bool",
+                "Comment": ""
+            },
+            {
+                "VarName": "oriColor",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "oriAlpha",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "isAssociation",
+                "VarType": "Bool",
+                "Comment": ""
+            },
+            {
+                "VarName": "layerNum",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    8.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "rotation_1",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_2",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_3",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_4",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_5",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_6",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_7",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "rotation_8",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_1",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_1",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_2",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_2",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_3",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_3",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_4",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_4",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_5",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_5",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_6",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_6",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_7",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_7",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionX_8",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "positionY_8",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_1",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_2",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_3",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_4",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_5",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_6",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_7",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "scale_8",
+                "VarType": "Double",
+                "Comment": ""
+            },
+            {
+                "VarName": "color_1",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_2",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_3",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_4",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_5",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_6",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_7",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "color_8",
+                "VarType": "Color",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "NoAlpha",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_1",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_2",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_3",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_4",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_5",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_6",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_7",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "alpha_8",
+                "VarType": "Double",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Range",
+                                "RawValue": "",
+                                "Values": [
+                                    0.0,
+                                    1.0
+                                ]
+                            },
+                            {
+                                "AttrType": "Slider",
+                                "RawValue": "",
+                                "Values": []
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "VarName": "InputTex",
+                "VarType": "Texture",
+                "Comment": ""
+            },
+            {
+                "VarName": "OutputTex",
+                "VarType": "Texture",
+                "Comment": ""
+            },
+            {
+                "VarName": "lumiSharedRt",
+                "VarType": "Vector",
+                "Comment": "",
+                "AnnoItems": [
+                    {
+                        "ItemType": "UI",
+                        "Attributes": [
+                            {
+                                "AttrType": "Type",
+                                "RawValue": "",
+                                "Values": [
+                                    "Texture"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "Methods": [
+            {
+                "FuncName": "new",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "setEffectAttr",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onStart",
+                "Params": [],
+                "Comment": ""
+            },
+            {
+                "FuncName": "onUpdate",
+                "Params": [],
+                "Comment": ""
+            }
+        ],
+        "Comment": "",
+        "ExportFiles": []
+    }
+]
