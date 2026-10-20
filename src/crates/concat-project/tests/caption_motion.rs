@@ -165,7 +165,9 @@ fn the_three_dials_clamp_in_the_one_place() {
         (tidied.motion.duration - 0.45).abs() < 1e-9,
         "non-finite falls back to the default"
     );
-    assert!((tidied.motion.scale_from - 3.0).abs() < 1e-9);
+    // A non-finite dial falls back to the default, exactly as `duration`
+    // and `stagger` above do; it does not clamp to the top of the range.
+    assert!((tidied.motion.scale_from - 0.35).abs() < 1e-9);
     assert!((tidied.motion.stagger - 0.09).abs() < 1e-9);
     assert_eq!(
         tidied.motion.mode,
