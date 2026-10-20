@@ -4933,6 +4933,49 @@ impl Studio {
         }
     }
 
+    /// Imports the first locally cached CapCut RadianceGlow animation the
+    /// conservative translator understands, applying it to the selected
+    /// title as a native Kconcat Bloom Pulse effect. Proprietary CapCut
+    /// packages are never executed or copied into the project.
+    pub fn import_capcut_animation(&mut self, paths: Vec<std::path::PathBuf>) {
+        let Some(path) = paths.into_iter().next() else {
+            return;
+        };
+        let Some(clip_id) = self.sole_selection() else {
+            self.notify("Select one text clip before importing a CapCut animation.", true);
+            return;
+        };
+        let Some(clip) = self.clip(&clip_id).cloned() else {
+            return;
+        };
+        if clip.kind != model::ClipKind::Text {
+            self.notify("CapCut animation import applies to a selected text clip.", true);
+            return;
+        }
+        let imported = match crate::capcut::import_first_supported(&path) {
+            Ok(animation) => animation,
+            Err(error) => {
+                self.notify(&error, true);
+                return;
+            }
+        };
+        let name = imported.name;
+        let mut effects = clip.video_effects;
+        effects.push(imported.effect);
+        self.apply(Command::UpdateClip {
+            clip_id,
+            patch: ClipPatch {
+                video_effects: Some(effects),
+                ..ClipPatch::default()
+            },
+        });
+        self.notify(
+            &format!("Imported {name} as Kconcat Bloom Pulse (native approximation)."),
+            false,
+        );
+        self.inspector_jump = (self.inspector_jump.0 + 1, "Effects", "Effects");
+    }
+
     /// Registers the file behind one of the app's installed families on the
     /// project, once, so the painter - which reads a project's fonts and
     /// the system's, and nothing else - finds it. Nothing for a family the

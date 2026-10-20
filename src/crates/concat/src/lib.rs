@@ -31,6 +31,7 @@ mod ui {
     slint::include_modules!();
 }
 
+mod capcut;
 mod chips;
 mod dock;
 mod fonts;
@@ -751,6 +752,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 i18n::t("lib.importFont"),
                 Some((i18n::t("lib.fonts"), &["ttf", "otf", "ttc"])),
                 |studio, _, _, paths| studio.import_fonts(paths),
+            );
+        });
+    });
+    editor.on_import_capcut(|| {
+        Shell::with(|shell, _| {
+            if shell.studio.borrow().session.is_none() {
+                return;
+            }
+            host::pick_files_then(
+                i18n::t("lib.importCapcutDraft"),
+                Some((i18n::t("lib.capcutDraftJson"), &["json"])),
+                |studio, _, _, paths| studio.import_capcut_animation(paths),
             );
         });
     });

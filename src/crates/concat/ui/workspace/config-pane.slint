@@ -191,6 +191,7 @@ export component ConfigPane inherits Rectangle {
     /// The Text tab's font picker and its import button; see Editor.
     in property <[string]> font-families;
     callback import-font();
+    callback import-capcut();
     callback text-style-default();
     callback remove-fillers(strong: bool, weak: bool, cut-video: bool);
 
@@ -674,6 +675,7 @@ export component ConfigPane inherits Rectangle {
                     set-colour(field, value) => { root.clip-set-colour(field, value); }
                     commit => { root.clip-commit(); }
                     import-font => { root.import-font(); }
+                    import-capcut => { root.import-capcut(); }
                     set-default => { root.text-style-default(); }
                     remove-fillers(strong, weak, cut-video) => {
                         root.remove-fillers(strong, weak, cut-video);

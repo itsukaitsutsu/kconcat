@@ -44,6 +44,8 @@ export component TextPanel inherits VerticalLayout {
     callback commit();
     /// The square beside the font picker: bring a font file of your own in.
     callback import-font();
+    /// Import a supported animation from a local CapCut draft/cache.
+    callback import-capcut();
     /// Keep this title's look for new titles and captions.
     callback set-default();
     /// Remove explicitly enabled filler tiers from the selected captions.
@@ -615,6 +617,22 @@ export component TextPanel inherits VerticalLayout {
                 fmt: ParamFormat.rate;
                 unit: "x";
                 changed(v) => { root.set(ClipField.caption-motion-scale, v); root.commit(); }
+            }
+
+            Row {
+                label: "";
+                label-width: root.label-w;
+                Button {
+                    label: I18n.t("textPanel.importCapcut");
+                    ghost: true;
+                    clicked => { root.import-capcut(); }
+                }
+            }
+            Text {
+                text: I18n.t("textPanel.capcutImportHint");
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
             }
         }
     }

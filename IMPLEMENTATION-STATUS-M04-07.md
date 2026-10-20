@@ -10,6 +10,13 @@
 - **07 — lane/link foundations:** added `TrackKind` (Video, Audio, LegacyMixed); old documents with no lane kind load as permissive legacy-mixed lanes and omit that value again on save. Added typed video/audio lane creation in the timeline menu, lane-kind markers, and compatibility checks for clip creation/moves. Caption-specific newly created lanes are video lanes; detached audio is routed to audio-compatible lanes. Clicking a linked clip now selects its link mates; existing Link/Unlink context-menu commands remain in place.
 - **04 — acceptance remains open:** no real media excerpt or corrected reference transcript was available, so timing/ASR quality and media acceptance were not performed.
 
+## CapCut cache import (additional requested scope)
+
+- The Text inspector now has **Import from CapCut draft…**. With one text clip selected, choose a local CapCut `draft_content.json`; Kconcat follows the draft's cached animation paths (or the standard nearby `Cache/effect/<resource-id>/<hash>` layout) and reads, but does not copy, cache files.
+- The first supported `studioAnim.lsanim` `RadianceGlow` exposure curve is translated into Kconcat's native `concat.bloom-pulse` amount keyframes and applied as an undoable effect to the selected title. The current public sample's **Subtle Water** cache is the confirmed supported resource. Its glow color, threshold, masks and CapCut shader behavior are not represented, so this is a native approximation, not a pixel-identical CapCut render.
+- CapCut Lua, shaders, binary prefabs, and image-sequence packages are never executed or loaded. Entries such as Star Cluster / Canceling Out are not yet rendered by this importer; a draft with no compatible curve produces an explicit unsupported-format message. The implementation adds no cached assets to the source ZIP.
+- Parser tests for local cache discovery, curve translation, and unsupported packages were added, but could not be run here.
+
 ## Verification limits
 
 - Passed static checks in this sandbox: `git diff --check` and parsing `src/crates/concat/locales/en.json` with Python's JSON parser.
